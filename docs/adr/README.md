@@ -17,6 +17,7 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0008](0008-policy-and-identity-administration.md) | **Policy/grants/bindings administration: file-first + GitOps** (admin API/UI a thin layer later) | Accepted |
 | [0009](0009-end-user-identity-propagation.md) | **Per-call end-user delegation required**; shared MCP forwards a signed token; own/forked chat for it (+ WebRTC) | Accepted |
 | [0010](0010-chat-client.md) | **Chat client: fork LibreChat** (reuse SSO/admin/RBAC/MCP + existing voice; harden multitenant) | Accepted |
+| [0011](0011-identity-provider-sso.md) | **IdP/SSO: Microsoft Entra direct** (Google off; GitHub deferred behind a broker; no new tool) | Accepted |
 
 ## Format
 
