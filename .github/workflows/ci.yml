@@ -18,7 +18,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  hygiene:
+    # Fail the build if private/PII patterns ever land in this (public-destined)
+    # repo. Generic example data (example.com, alice/bob) is fine; real homelab
+    # identities, secrets, or live tenant/app GUIDs are not. The maintainer
+    # contact in SECURITY.md is the one allowed address.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan for private identities / secrets
+        run: |
+          # Real homelab identities, secrets, or live tenant/app GUIDs must not
+          # land here. Generic example data is fine. Excludes: this workflow file,
+          # SECURITY.md (maintainer contact), the documented PUBLIC Microsoft
+          # consumer-tenant constant, and obvious placeholder GUIDs (1111…, 0000…).
+          patterns='alice79|bob84|health-portal|account-[abc]-session|examplekv|hont\.ro|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+          if git grep -nIE "$patterns" -- . ':!SECURITY.md' ':!.github/workflows/ci.yml' \
+               | grep -vE '9188040d-6c67-4c5b-b112-36a304b66dad' \
+               | grep -viE '\b([0-9a-f])\1{7}-' \
+               | grep -vE '1111-1111-1111|2222-3333-4444'; then
+            echo '::error::private identity / secret pattern found in the repo (see matches above). Genericize before committing.'
+            exit 1
+          fi
+          echo 'hygiene OK — no private identities/secrets found.'
+
   test:
+    needs: hygiene
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
