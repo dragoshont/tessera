@@ -30,7 +30,10 @@ ENV DOTNET_RUNNING_IN_CONTAINER=true \
 WORKDIR /app
 COPY --from=build /app ./
 
-RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin tessera
+# Run as a non-root UID. The aspnet image already reserves UID 1000; reference it
+# numerically (works with or without a passwd entry, and matches the Kubernetes
+# securityContext runAsUser: 1000). The broker writes nothing to disk (audit ->
+# stdout); /tmp is an emptyDir in the pod.
 USER 1000
 
 EXPOSE 8080
