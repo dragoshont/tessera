@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.AspNetCore.Http;
 using Tessera.Core.Configuration;
+using Tessera.Core.Egress;
 using Tessera.Core.Recipes;
 using Tessera.Core.Stores;
 using Yarp.ReverseProxy.Forwarder;

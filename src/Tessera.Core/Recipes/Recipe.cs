@@ -40,6 +40,8 @@ public enum InjectionKind
 /// <param name="UpstreamBaseUrl">The allow-listed upstream base URL for HTTP egress.</param>
 /// <param name="Injection">How the credential is injected for HTTP egress.</param>
 /// <param name="Actions">The action verbs this recipe exposes (drives the MCP tool surface).</param>
+/// <param name="Tools">The callable HTTP operations this recipe exposes (ADR 0014).</param>
+/// <param name="ExtraHeaders">Static non-secret headers every call needs (e.g. an API key header name→value mapping resolved from the bundle's <c>extra</c>).</param>
 /// <param name="Description">A human-readable description.</param>
 public sealed record Recipe(
     string Target,
@@ -48,8 +50,18 @@ public sealed record Recipe(
     string? UpstreamBaseUrl = null,
     InjectionKind Injection = InjectionKind.None,
     IReadOnlyList<string>? Actions = null,
+    IReadOnlyList<RecipeTool>? Tools = null,
+    IReadOnlyDictionary<string, string>? ExtraHeaders = null,
     string? Description = null)
 {
     /// <summary>The action verbs this recipe exposes (never null).</summary>
     public IReadOnlyList<string> ExposedActions => Actions ?? [];
+
+    /// <summary>The callable HTTP operations this recipe exposes (never null).</summary>
+    public IReadOnlyList<RecipeTool> ExposedTools => Tools ?? [];
+
+    /// <summary>Static non-secret headers to send on every call (never null).</summary>
+    public IReadOnlyDictionary<string, string> StaticHeaders => ExtraHeaders ?? EmptyHeaders;
+
+    private static readonly IReadOnlyDictionary<string, string> EmptyHeaders = new Dictionary<string, string>();
 }

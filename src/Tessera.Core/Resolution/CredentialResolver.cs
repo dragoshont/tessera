@@ -57,6 +57,33 @@ public sealed class CredentialResolver
         return new ResolvedCredential(request.Target, status, detail);
     }
 
+    /// <summary>
+    /// Resolves a request to the actual bundle for INTERNAL egress use — the bytes
+    /// are injected into the upstream call and never returned to a caller, logged,
+    /// or audited. Returns <c>null</c> when there is no binding or the bundle is
+    /// empty/unusable.
+    /// </summary>
+    public async Task<CredentialBundle?> ResolveBundleAsync(AccessRequest request, CancellationToken cancellationToken = default)
+    {
+        var binding = BindingFor(request);
+        if (binding is null)
+        {
+            return null;
+        }
+
+        CredentialBundle bundle;
+        try
+        {
+            bundle = await _store.GetBundleAsync(binding.Credential, cancellationToken).ConfigureAwait(false);
+        }
+        catch (StoreException)
+        {
+            return null;
+        }
+
+        return bundle.IsEmpty ? null : bundle;
+    }
+
     /// <summary>Classifies a bundle into a status + secret-free detail.</summary>
     internal static (CredentialStatus Status, string Detail) Assess(CredentialBundle bundle)
     {

@@ -1,4 +1,4 @@
-namespace Tessera.Broker.Egress;
+namespace Tessera.Core.Egress;
 
 /// <summary>
 /// The SSRF allow-list guard for the injection egress (architecture §6). The

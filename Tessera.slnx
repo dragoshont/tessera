@@ -5,6 +5,7 @@
     <Project Path="src/Tessera.Core/Tessera.Core.csproj" />
     <Project Path="src/Tessera.Identity/Tessera.Identity.csproj" />
     <Project Path="src/Tessera.Mcp/Tessera.Mcp.csproj" />
+    <Project Path="src/Tessera.Providers/Tessera.Providers.csproj" />
     <Project Path="src/Tessera.Stores.AzureKeyVault/Tessera.Stores.AzureKeyVault.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -12,6 +13,7 @@
     <Project Path="tests/Tessera.Core.Tests/Tessera.Core.Tests.csproj" />
     <Project Path="tests/Tessera.Identity.Tests/Tessera.Identity.Tests.csproj" />
     <Project Path="tests/Tessera.Mcp.Tests/Tessera.Mcp.Tests.csproj" />
+    <Project Path="tests/Tessera.Providers.Tests/Tessera.Providers.Tests.csproj" />
     <Project Path="tests/Tessera.Stores.AzureKeyVault.Tests/Tessera.Stores.AzureKeyVault.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,3 +1,4 @@
+using Tessera.Core.Egress;
 using Tessera.Core.Recipes;
 using Tessera.Core.Stores;
 using Tessera.Broker.Egress;

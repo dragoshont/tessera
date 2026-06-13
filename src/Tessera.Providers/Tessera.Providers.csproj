@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tessera.Providers — generic HTTP-injectable provider egress (ADR 0014).
+       Performs an upstream call with the injected credential (cookie/bearer),
+       allow-listed + read-first + step-up-gated write. The transport is injectable
+       so the whole surface is unit-tested offline (no live provider call). Provider
+       specifics live in recipes (operator config), never here. -->
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Providers</RootNamespace>
+    <AssemblyName>Tessera.Providers</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Tessera.Core/Tessera.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tessera.Providers.Tests" />
+  </ItemGroup>
+
+</Project>
