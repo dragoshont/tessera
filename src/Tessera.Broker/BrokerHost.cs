@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Tessera.Core.Audit;
 using Tessera.Core.Broker;
 using Tessera.Core.Configuration;
@@ -94,6 +95,12 @@ public static class BrokerHost
 
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls($"http://{config.Server.Host}:{config.Server.Port}");
+
+        // Keep the audit JSONL the signal: quiet ASP.NET's per-request logging
+        // (every /healthz, /readyz probe) so it doesn't drown the broker's own
+        // secret-free decision audit. Lifetime ("now listening") stays visible.
+        builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
 
         var services = builder.Services;
         services.AddSingleton(config);
