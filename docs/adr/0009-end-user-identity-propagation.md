@@ -59,13 +59,12 @@ sequenceDiagram
 ### The chat client
 
 Because pattern 1 needs the chat to **propagate each user's signed identity** to
-the MCP, and LibreChat does not do this natively, the project will deliver a chat
-surface that does. Preference order:
-
-- **Extend/fork an existing chat** (LibreChat or similar) to forward the end-user
-  assertion to MCP servers, **if** that is feasible cleanly; **else**
-- **Build our own minimal chat client** that does proper per-user delegation
-  natively — and carries the **WebRTC voice** consumer as a first-class transport.
+the MCP, the project delivers a chat surface that does. **Decision recorded in
+[ADR 0010](0010-chat-client.md): fork LibreChat.** LibreChat already provides the
+primitive — `OPENID_REUSE_TOKENS` makes the user's token provider-issued, and
+YAML-defined MCP servers forward it via `{{LIBRECHAT_OPENID_*}}` headers (plus
+Azure on-behalf-of). The maintainer's existing `dragoshont/LibreChat` fork already
+carries WebRTC voice and `MCP_USER_GATE`, so we harden that rather than build new.
 
 Per the project's single-iteration scope (see [roadmap](../roadmap.md)), a chat
 surface with correct per-user delegation **and WebRTC voice** is **in scope for the
