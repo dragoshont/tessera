@@ -65,9 +65,34 @@ maintainer wants:
 - **`OPENID_REUSE_TOKENS=true`** + the `api://…/.default` scope + (Azure)
   on-behalf-of, so LibreChat forwards each user's signed Entra token to the Tessera
   MCP as the `subject_token` ([ADR 0009](0009-end-user-identity-propagation.md)).
+- **Token audience model: SHARED AUDIENCE (Flow B) for iteration 1.** A token's
+  `aud` is set by *which resource was requested at token time*, not by who receives
+  it. Two ways to make the forwarded token verifiable by Tessera:
+  - **Flow B (chosen).** One Entra **API app** for the system; `OPENID_SCOPE`
+    points at it; LibreChat forwards the token it already holds; **Tessera validates
+    that shared `aud`** + issuer + signature + extracts the user. Works with
+    LibreChat *unchanged* and is secure here because the chat→Tessera hop is also
+    gated by **NetworkPolicy** (only LibreChat can reach Tessera —
+    [ADR 0005](0005-identity-first-fail-closed.md) C2). This is the iteration-1
+    default.
+  - **Flow A (deferred, strict).** A dedicated Tessera **API app** (`api://<tessera>/…`)
+    and an **On-Behalf-Of** exchange so the forwarded token's `aud == Tessera`.
+    Stronger per-resource isolation, but **LibreChat's `OPENID_REUSE_TOKENS` does
+    not do OBO-to-a-downstream-MCP out of the box** (its OBO knob is for *userinfo*
+    only), so Flow A needs fork work; and OBO is **flaky for personal Microsoft
+    accounts** (the very accounts we support for zero-onboarding). Recorded as the
+    upgrade path for when users move into the workforce tenant.
+- **Token validation (non-negotiable, both flows).** Tessera validates the
+  **access token** (never the `id_token` — its `aud` is always the login client, the
+  classic ID-token-as-access-token trap): signature via Entra **JWKS**,
+  `iss = https://login.microsoftonline.com/<tenant>/v2.0`, `aud = <expected>`,
+  `exp`, `tid = <tenant>`; then derives the user from `oid` (stable) /
+  `preferred_username`. Until a **real** forwarded token is captured and its `aud`
+  confirmed, Tessera **fails closed** (review gate G2/C3).
 - **Express the Entra setup as Bicep** (Microsoft Graph Bicep extension): the chat
-  OIDC app registration *and* the Tessera **federated identity credential** that
-  replaces the Key Vault client secret ([ADR 0003](0003-credential-store-pluggable.md)).
+  OIDC app registration, the **system API app** (the shared audience), *and* the
+  Tessera **federated identity credential** that replaces the Key Vault client
+  secret ([ADR 0003](0003-credential-store-pluggable.md)).
   See [specs/identity-azure-setup.md](../specs/identity-azure-setup.md) and
   [`deploy/azure/entra/`](../../deploy/azure/entra/).
 - **Security defaults:** require MFA, short token lifetimes, least-privilege API

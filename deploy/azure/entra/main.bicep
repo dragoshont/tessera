@@ -44,14 +44,18 @@ resource chatApp 'Microsoft.Graph/applications@v1.0' = {
       enableAccessTokenIssuance: false
     }
   }
-  // Expose an API + scope so OPENID_REUSE_TOKENS + on-behalf-of produce a token
-  // with an audience Tessera can verify as the subject_token (ADR 0009).
+  // Expose an API + scope so OPENID_REUSE_TOKENS yields an ACCESS token whose
+  // `aud` is THIS app id. In iteration 1 (Flow B / shared audience, ADR 0011) the
+  // chat app IS the shared system audience: OPENID_SCOPE = api://<chatAppId>/.default
+  // and Tessera validates `aud == chatAppId`. (Flow A — a dedicated Tessera API
+  // app + On-Behalf-Of so `aud == api://tessera` — is the deferred strict upgrade;
+  // it needs LibreChat fork work and is flaky for personal MSA. See ADR 0011.)
   api: {
     requestedAccessTokenVersion: 2
     oauth2PermissionScopes: [
       {
         id: guid('tessera-chat', 'access')
-        adminConsentDescription: 'Allow the chat to call downstream APIs on behalf of the signed-in user.'
+        adminConsentDescription: 'Allow the chat to call Tessera on behalf of the signed-in user.'
         adminConsentDisplayName: 'Access on behalf of user'
         userConsentDescription: 'Allow the chat to act on your behalf.'
         userConsentDisplayName: 'Act on your behalf'
@@ -95,6 +99,9 @@ resource tesseraSp 'Microsoft.Graph/servicePrincipals@v1.0' = {
 
 // ── Outputs (feed LibreChat env + the Tessera deployment) ────────────────────
 output chatAppId string = chatApp.appId
+// LibreChat: OPENID_SCOPE — points at the chat app = the shared audience (Flow B).
 output chatScope string = 'api://${chatApp.appId}/.default openid profile email offline_access'
+// Tessera: the `aud` value to validate on the forwarded access token (Flow B).
+output expectedTokenAudience string = chatApp.appId
 output tesseraAppId string = tesseraApp.appId
 output tesseraSpObjectId string = tesseraSp.id

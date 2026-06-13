@@ -35,21 +35,56 @@ flowchart LR
 | ID token / claims | `openid profile email` (+ `offline_access` for refresh) | the `subject_token` payload |
 | MFA | required (Conditional Access if licensed, else security defaults) | full-security default |
 
-LibreChat env (set from the registration outputs):
-
-```bash
-OPENID_REUSE_TOKENS=true
-OPENID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
-OPENID_CLIENT_ID=<app-id>
-OPENID_SCOPE="api://<app-id>/.default openid profile email offline_access"
-# Google intentionally NOT configured (ADR 0011)
-```
+LibreChat env is shown in **§1a** below (the scope points at the shared **system
+API app** so the forwarded token's `aud` is verifiable). Google is intentionally
+not configured ([ADR 0011](../adr/0011-identity-provider-sso.md)).
 
 > **Personal-account caveat.** With `AzureADandPersonalMicrosoftAccount`, `appRoles`
 > aren't honored for consumer (MSA) users at runtime, and the on-behalf-of token
 > story is cleaner for **tenant** users. For the **medical / high-isolation** user,
 > add them as a **member or B2B guest in the workforce tenant** so delegation and
 > roles are unambiguous ([ADR 0004](../adr/0004-tenancy-and-isolation.md)).
+
+## 1a. Token audience & validation (how Tessera trusts the forwarded token)
+
+A token's `aud` claim says *who it was minted for*, set by **which resource/scope
+was requested at token time** — not by who receives it. So "make it
+Tessera-verifiable" = request the token for a resource Tessera knows. Two flows
+([ADR 0011](../adr/0011-identity-provider-sso.md)):
+
+| | **Flow B — shared audience (iteration 1)** | **Flow A — strict Tessera audience (deferred)** |
+|---|---|---|
+| Audience | one **system API app**; `aud = <system-api-app>` | a dedicated **Tessera API app**; `aud = api://<tessera>` |
+| How | LibreChat forwards the token it already holds | LibreChat does an **On-Behalf-Of** exchange to mint a Tessera-scoped token |
+| LibreChat change | **none** (`OPENID_REUSE_TOKENS` as-is) | **fork work** — `OPENID_REUSE_TOKENS` does **not** OBO-to-a-downstream-MCP (its OBO is *userinfo* only) |
+| Personal MSA | ✅ works | ⚠️ OBO flaky for personal Microsoft accounts |
+| Extra safety | the chat→Tessera hop is also **NetworkPolicy-gated** (only LibreChat can reach Tessera) | per-resource audience isolation |
+
+**Decision: Flow B for iteration 1.** Secure for single-tenant household (shared
+audience + NetworkPolicy + verified user), no fork needed. Flow A is the upgrade
+path once users live in the workforce tenant.
+
+### Validation Tessera performs (both flows, non-negotiable)
+
+- **Validate the *access token*, never the `id_token`.** An `id_token`'s `aud` is
+  always the *login client* (LibreChat); using it as the API token is the classic
+  ID-token-as-access-token mistake.
+- **Claims:** signature via Entra **JWKS**; `iss = https://login.microsoftonline.com/<tenant>/v2.0`;
+  `aud = <system-api-app-id>` (Flow B) or `api://<tessera>` (Flow A); `exp`; `tid = <tenant>`.
+- **User identity:** derive from `oid` (stable per user per tenant) and/or
+  `preferred_username` — this is the per-user tenant key into Tessera.
+- **Fail closed until proven.** Until a **real** forwarded token has been captured
+  and its `aud` confirmed against a live sign-in, delegation enforcement stays off
+  and Tessera denies (review gate **G2 / C3**).
+
+```bash
+OPENID_REUSE_TOKENS=true
+OPENID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+OPENID_CLIENT_ID=<chat-app-id>
+# Flow B: scope points at the shared SYSTEM API app so the token's aud is verifiable
+OPENID_SCOPE="api://<system-api-app-id>/.default openid profile email offline_access"
+# Tessera validates: aud == <system-api-app-id>, iss, sig(JWKS), exp, tid
+```
 
 ## 2. Tessera workload identity (no client secret)
 

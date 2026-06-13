@@ -185,7 +185,10 @@ Five invariants carry the design:
 
 1. **Verified identity or denied.** mTLS/SVID for the workload ⊕ signed OIDC for
    the human; tenant is derived from that, never from request content
-   ([ADR 0005](adr/0005-identity-first-fail-closed.md)).
+   ([ADR 0005](adr/0005-identity-first-fail-closed.md)). For the **chat→Tessera
+   hop**, the workload "WHO" is enforced by **NetworkPolicy** (LibreChat connects
+   over streamable-HTTP, not mTLS), and the per-user "FOR WHOM" is the **verified
+   OIDC access token** (below).
 2. **Fail closed.** Default-deny policy; brokering endpoint refuses until the auth
    plane is wired.
 3. **Inject, never hand over.** The caller never receives the secret; no caller
@@ -193,8 +196,30 @@ Five invariants carry the design:
 4. **Secretless transit.** Store access via Managed Identity / Workload Identity
    Federation — no client secret to leak
    ([ADR 0003](adr/0003-credential-store-pluggable.md)).
-5. **Per-tenant isolation.** Envelope key per tenant; dedicated instance for
-   medical ([ADR 0004](adr/0004-tenancy-and-isolation.md)).
+5. **Per-tenant isolation.** Per-user separate stored secret + RBAC (envelope key
+   per tenant is a follow-on); dedicated instance for medical
+   ([ADR 0004](adr/0004-tenancy-and-isolation.md)).
+
+### End-user token: audience & validation (the delegation crux)
+
+The per-user "FOR WHOM" is a signed **Entra OIDC access token** the chat forwards.
+Tessera trusts it only after full validation, and the token must carry an `aud`
+Tessera expects — set by **which resource was requested at token time**:
+
+- **Iteration 1 = shared audience (Flow B):** one Entra **system API app**;
+  `OPENID_SCOPE` points at it; LibreChat forwards the held token; Tessera validates
+  the shared `aud`. No LibreChat change; secure here because the hop is also
+  NetworkPolicy-gated. (**Flow A** — a dedicated Tessera API app + On-Behalf-Of for
+  a strict `aud = Tessera` — is deferred; `OPENID_REUSE_TOKENS` doesn't OBO to a
+  downstream MCP, and OBO is flaky for personal Microsoft accounts.)
+- **Validation (non-negotiable):** the **access token, not the `id_token`**
+  (an `id_token`'s `aud` is always the login client — the classic trap); signature
+  via Entra **JWKS**; `iss`; `aud`; `exp`; `tid`; user from `oid`/`preferred_username`.
+- **Fail closed until verified:** until a real forwarded token's `aud` is confirmed
+  against a live sign-in, delegation is off and Tessera denies.
+
+See [ADR 0011](adr/0011-identity-provider-sso.md) and
+[specs/identity-azure-setup.md](specs/identity-azure-setup.md#1a-token-audience--validation-how-tessera-trusts-the-forwarded-token).
 
 ### Threat model (OWASP NHI Top 10 + MCP authorization spec)
 
