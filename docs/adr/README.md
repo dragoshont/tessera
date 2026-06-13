@@ -20,6 +20,7 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0011](0011-identity-provider-sso.md) | **IdP/SSO: Microsoft Entra direct** (Google off; GitHub deferred behind a broker; no new tool) | Accepted |
 | [0012](0012-chat-login-microsoft-only.md) | **Chat login is Microsoft-only** (Google can't forward a broker-acceptable token — no cross-IdP OBO, splits identities) | Accepted |
 | [0013](0013-per-user-access-tiers.md) | **Per-user access tiers: default-deny for sensitive tools** (chat gate ⊕ broker grants, defense in depth; new users reach nothing sensitive) | Accepted |
+| [0014](0014-http-injectable-provider-egress.md) | **HTTP-injectable provider egress + single session-owner** (one MCP injects creds by identity; read + step-up-gated write; phased cutover, no double-refresh) | Accepted |
 
 ## Format
 
