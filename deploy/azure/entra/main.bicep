@@ -65,6 +65,26 @@ resource chatApp 'Microsoft.Graph/applications@v1.0' = {
       }
     ]
   }
+  // Application-type app role for NON-HUMAN callers (a CLI, an n8n flow, a CI job).
+  // A pure automation has no end-user OIDC token; it authenticates as *itself*
+  // (client-credentials / workload-identity-federation) and requests a token for
+  // THIS app — so the token's `aud` is this shared system app (Flow B) and carries
+  // `roles: ["Tessera.Call"]` + `appid` = the caller's WHO. Tessera validates the
+  // same shared `aud` + sig + iss + exp + tid, sees an app-only token, and
+  // authorizes the `appid` against a grant. See deploy/azure/entra/automation-caller.bicep
+  // and the "non-human caller" section of the README.
+  appRoles: [
+    {
+      id: guid('tessera-chat', 'Tessera.Call')
+      allowedMemberTypes: [
+        'Application'
+      ]
+      displayName: 'Call Tessera (automation)'
+      description: 'A non-human caller (CLI / automation / job) may request brokered access as itself.'
+      value: 'Tessera.Call'
+      isEnabled: true
+    }
+  ]
 }
 
 resource chatSp 'Microsoft.Graph/servicePrincipals@v1.0' = {
@@ -103,5 +123,11 @@ output chatAppId string = chatApp.appId
 output chatScope string = 'api://${chatApp.appId}/.default openid profile email offline_access'
 // Tessera: the `aud` value to validate on the forwarded access token (Flow B).
 output expectedTokenAudience string = chatApp.appId
+// The application-type app role a non-human caller is assigned (see automation-caller.bicep).
+output automationAppRole string = 'Tessera.Call'
+// The id of that app role (feed automation-caller.bicep as systemAppRoleId).
+output automationAppRoleId string = guid('tessera-chat', 'Tessera.Call')
+// The chat/system app's service-principal object id (the resource an app-role is assigned ON).
+output chatSpObjectId string = chatSp.id
 output tesseraAppId string = tesseraApp.appId
 output tesseraSpObjectId string = tesseraSp.id

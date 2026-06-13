@@ -134,6 +134,92 @@ by design).
 
 ---
 
+## Registering a non-human caller (CLI / automation / job)
+
+The chat forwards a **person's** signed OIDC token. A **CLI, an n8n flow, a
+crawler, or a CI job** has no person — it must prove **its own** identity with its
+**own** token. This is the non-human-identity (NHI) caller, and it needs its own
+**audience** so Tessera can verify it.
+
+**Safest by default: workload-identity federation — no client secret.** Instead of
+storing a secret in the job, the job presents an OIDC token its *own* platform
+already mints (GitHub Actions, a Kubernetes ServiceAccount, another Azure workload)
+and exchanges it for a **short-lived** Entra token. There is nothing long-lived to
+leak or rotate — the top NHI risk, removed
+([ADR 0003](docs/adr/0003-credential-store-pluggable.md)).
+
+How the audience works (Flow B / shared audience —
+[ADR 0011](docs/adr/0011-identity-provider-sso.md)): the caller requests a token
+for the **shared system app** (`api://<systemApiAppId>/.default`). That token's
+`aud` is the same value Tessera already validates, and it carries
+`roles: ["Tessera.Call"]` plus `appid` = the caller's identity. Tessera validates
+`aud` + signature (JWKS) + `iss` + `exp` + `tid`, sees an **app-only** token (no
+user), and authorizes the `appid` against a grant.
+
+### The safe recipe (least privilege)
+
+- **One app registration per job** — clean attribution, narrow blast radius.
+- **A federated credential, not a secret** — `az` / Bicep create a
+  `federatedIdentityCredentials` child, never a `passwordCredential`.
+- **Exactly one app role** (`Tessera.Call`) — no Microsoft Graph permissions.
+- **Short-lived tokens** — app tokens last ~1h and aren't silently renewable.
+- **A narrow grant** in Tessera (below) — the caller may do only what it needs.
+
+### Bicep example
+
+[`deploy/azure/entra/automation-caller.bicep`](deploy/azure/entra/automation-caller.bicep)
+registers the caller app **+ its federated credential** (the secretless part) and
+assigns the least-privilege role. Feed it the outputs of
+[`main.bicep`](deploy/azure/entra/main.bicep):
+
+```bash
+az deployment sub create -l westeurope \
+  -f deploy/azure/entra/automation-caller.bicep \
+  -p callerName=tessera-price-crawler \
+     systemApiAppId=<chatAppId output of main.bicep> \
+     systemSpObjectId=<chatSpObjectId output of main.bicep> \
+     systemAppRoleId=<automationAppRoleId output of main.bicep> \
+     federationIssuer=https://token.actions.githubusercontent.com \
+     federationSubject='repo:my-org/my-repo:ref:refs/heads/main'
+```
+
+For a **GitHub Actions** job the subject is `repo:<org>/<repo>:ref:refs/heads/<branch>`
+(or `:environment:<name>`); for a **Kubernetes** job it is
+`system:serviceaccount:<namespace>:<serviceaccount>`. The job then mints a token
+with **zero stored secrets** — e.g. in GitHub Actions via
+[`azure/login`](https://github.com/Azure/login) with OIDC, requesting the
+`api://<systemApiAppId>/.default` scope.
+
+> The **app-role assignment** is a privileged directory write that needs an admin.
+> If the `Microsoft.Graph/appRoleAssignedTo` resource isn't supported in your Graph
+> Bicep version, grant it directly (the verified fallback):
+> ```bash
+> az rest --method POST \
+>   --url "https://graph.microsoft.com/v1.0/servicePrincipals/<callerSpObjectId>/appRoleAssignments" \
+>   --body '{"principalId":"<callerSpObjectId>","resourceId":"<systemSpObjectId>","appRoleId":"<systemAppRoleId>"}'
+> ```
+
+### Authorize it in Tessera
+
+The caller's `appid` is its **WHO**; give it a narrow, human-free grant — no
+`on_behalf_of`, because no person is involved:
+
+```toml
+[[grant]]
+caller  = "<callerAppId>"          # the appid Tessera sees on the token
+target  = "marketplace"
+actions = ["read:listings", "read:prices"]   # least privilege; no writes
+```
+
+### If federation truly isn't available
+
+Fall back to a **client secret** only as a last resort (it *is* a long-lived
+secret): store it in a vault, scope it to the single `Tessera.Call` role, keep its
+lifetime short, and rotate it. Prefer a **certificate credential** over a plain
+secret, and a **federated credential** over both.
+
+---
+
 ## Common questions (in plain terms)
 
 ### What are we building?
