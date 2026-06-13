@@ -70,6 +70,32 @@ proceed in parallel once Core + Identity exist.)
 
 ---
 
+## Iteration-1 build status (2026-06-13)
+
+What actually shipped, and what the pre-implementation
+[adversarial review](../README.md#documentation) deliberately deferred so the first
+iteration is shippable and honest:
+
+| Workstream | Status |
+|---|---|
+| Core (model, fail-closed PDP, resolver, audit, recipes, config) | **built** (`Tessera.Core`, 40 tests) |
+| Identity plane (Entra OIDC access-token validation, fail-closed) | **built** (`Tessera.Identity`, 9 tests) |
+| Store (Azure KV via MI/WIF) | **built** (`Tessera.Stores.AzureKeyVault`) |
+| Chat-facing **MCP server** (the surface LibreChat consumes) | **built** (`Tessera.Mcp`, review C1) |
+| Broker host (Kestrel, endpoints, self-test, **gated** injection egress) | **built** (`Tessera.Broker`) |
+| Per-user delegation (verified forwarded token → tenant) | **built**; *enforcement fail-closed until a real token's `aud` is confirmed* (gate G2) |
+| Injection egress (YARP `IHttpForwarder` + SSRF allow-list) | **built but OFF by default**; no live worker (review H2) |
+| **gRPC harvest workers** ([ADR 0007](adr/0007-worker-transport.md)) | **deferred** — broker reads the warm bundle + injects; no broker⇄worker RPC needed yet (H2) |
+| **Per-tenant envelope keys** ([ADR 0004](adr/0004-tenancy-and-isolation.md)) | **deferred** — per-user *separate* KV secret + RBAC + dedicated-instance tier for medical (H1) |
+| **Native AOT** ([ADR 0001](adr/0001-language-and-runtime.md)) | **deferred** — Azure/MCP SDKs not AOT-clean; framework-dependent image for now |
+| Browser/Android `act()` egress ([ADR 0006](adr/0006-harvest-drivers.md)) | **deferred** — demand-driven driver work |
+
+The deferrals are recorded as the honest scope of a *first* iteration, not silent
+cuts: each is a designed-in seam (the store, the worker transport, the egress) that
+slots in without reshaping the model.
+
+---
+
 ## Genuinely demand-driven (not this iteration's commitment, by nature)
 
 These are **extension points designed-in now**, built when a concrete provider

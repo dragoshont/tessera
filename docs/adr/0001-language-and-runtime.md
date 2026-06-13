@@ -79,3 +79,14 @@ typing makes the per-tenant-key + identity plumbing less auditable than typed DI
 - **Mitigation:** the browser/Android automation that *is* native to other
   ecosystems lives in the separate harvest-worker tier, which can be written in
   whatever language suits that driver (Python/Playwright today).
+
+## Iteration-1 status (2026-06-13)
+
+Built as a 6-project .NET 10 solution (`Tessera.Core` / `.Identity` /
+`.Stores.AzureKeyVault` / `.Mcp` / `.Broker` / `.Cli`), 75 xUnit tests. **Native
+AOT is deferred:** the Azure SDK and the MCP server SDK are not yet AOT/trim-clean,
+so the image is a framework-dependent publish on the `aspnet:10.0` runtime
+(portable + trivially multi-arch via `dotnet tessera.dll`). AOT remains the goal
+for the broker once its dependencies are AOT-ready. Configuration is JSON
+(`tessera.json` + `grants.json`) via `System.Text.Json` — no third-party config
+dependency, AOT-friendly when that lands.

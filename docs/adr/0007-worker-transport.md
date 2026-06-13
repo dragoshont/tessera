@@ -1,9 +1,17 @@
 # ADR 0007 — Worker transport: gRPC + mTLS
 
-- **Status:** Accepted (2026-06-13)
+- **Status:** Accepted (2026-06-13) · **deferred past iteration 1** (review H2)
 - **Deciders:** maintainer (Dragoș)
 - **Relates to:** [ADR 0002](0002-broker-worker-topology.md) (broker + worker
   topology), [ADR 0005](0005-identity-first-fail-closed.md) (verified identity)
+
+> **Iteration-1 status.** No live harvest worker ships in iteration 1. The
+> HTTP-injectable path (cookies / OAuth tokens) is served by the broker reading a
+> warm bundle from the store and injecting it directly — no broker⇄worker RPC is
+> needed. gRPC + mTLS (this ADR) is the transport for the *drive-only* `act()`
+> egress (cert-pinned apps) and the separate-deployment worker topology, both of
+> which are built when a target requires them. The decision below stands; only its
+> scheduling moved.
 
 ## Context
 
