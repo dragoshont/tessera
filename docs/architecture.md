@@ -199,6 +199,15 @@ Five invariants carry the design:
 5. **Per-tenant isolation.** Per-user separate stored secret + RBAC (envelope key
    per tenant is a follow-on); dedicated instance for medical
    ([ADR 0004](adr/0004-tenancy-and-isolation.md)).
+6. **Per-user access tiers — default-deny for sensitive tools.** A sensitive
+   capability (medical portal, cluster control, private data) is **opt-in per
+   identity**, enforced in two independent layers: the **chat tool-gate**
+   (a sensitive MCP server is shown + callable only to its allow-listed owners;
+   ungated = global, so *every* sensitive server must be gated) **and** the
+   **broker grants** (default-deny per `(caller, user, target, action)`). A new or
+   other user reaches **nothing sensitive** by default; the two layers are defense
+   in depth keyed on the same verified identity
+   ([ADR 0013](adr/0013-per-user-access-tiers.md)).
 
 ### End-user token: audience & validation (the delegation crux)
 

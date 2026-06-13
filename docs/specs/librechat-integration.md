@@ -82,6 +82,32 @@ broker).
   user's delegated access to another. Audit that no path lets a non-owner invoke an
   owner-scoped MCP server.
 
+## 3a. Per-user access tiers — gate every sensitive MCP server ([ADR 0013](../adr/0013-per-user-access-tiers.md))
+
+A shared chat mixes owners (who may reach sensitive tools) with other/new users
+(who must reach none). The safe default is **deny**, enforced in two layers:
+
+- **Chat tool-gate (per-user MCP gating).** A gated MCP server is shown + callable
+  only to an allow-list of end-user identities; an **ungated server is global to
+  every signed-in user.** Therefore **every sensitive/personal MCP server MUST be
+  gated** (medical portal, cluster control, private data); only shared-safe tools
+  (e.g. public web search) stay ungated. Enforce it **at call time**, not just by
+  hiding the tool, so a tool that leaks into a list is still refused. (In the
+  reference fork this is `MCP_USER_GATE`: `server=email[,email];…`, an allow-list
+  whose absence = global.)
+- **Broker grants (Tessera).** Independently, Tessera authorizes
+  `(caller, end-user, target, action)` default-deny — so even a gate
+  misconfiguration leaves a non-owner with **no grant** → fail-closed. The gate and
+  the grants are **defense in depth** on the same verified identity.
+
+> **Onboarding an owner is two coordinated edits** — add the identity to the
+> server's gate **and** add the Tessera grant/binding. Never one without the other.
+> A new user with neither reaches nothing sensitive.
+
+Where membership is fixed (a household), also **turn off self-registration** once
+the known users have signed in once — closing the population *before* the per-tool
+gates apply. Sequence it **after** first sign-in so it never locks anyone out.
+
 ## 4. Voice is the same consumer
 
 The realtime (WebRTC) voice turn carries the **same** per-user identity to the
