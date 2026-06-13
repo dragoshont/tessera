@@ -253,14 +253,100 @@ sequenceDiagram
     T-->>MCP: result only — Alice's calendar, never Bob's
 ```
 
-**Honest catch:** this needs the chat to *propagate each user's signed identity* to
-the MCP. LibreChat v0.8.0 doesn't do that natively, so the project will **extend a
-chat — or build our own** — that delegates correctly (and carries **WebRTC voice**).
-Until/unless that lands, the proven fallback is **one MCP per person** (each
-deployment's badge already *means* the person — the dedicated-instance tier, and the
-right default for medical accounts).
+**How we do it:** this needs the chat to *propagate each user's signed identity* to
+the MCP. LibreChat supports exactly this — `OPENID_REUSE_TOKENS` forwards each
+user's provider-issued OIDC token to MCP servers — so we **fork LibreChat** and
+harden it rather than build new ([ADR 0010](docs/adr/0010-chat-client.md)). The
+simpler fallback is **one MCP per person** (each deployment's badge already *means*
+the person — the dedicated-instance tier, and the right default for medical
+accounts).
 [ADR 0009](docs/adr/0009-end-user-identity-propagation.md) ·
 [ADR 0004](docs/adr/0004-tenancy-and-isolation.md).
+
+### Why "Sign in with Microsoft"? (OAuth2 vs OpenID Connect)
+
+For the per-user delegation above to be **secure**, the token the chat forwards
+must be one Tessera can **independently verify** — not just trust. That requires an
+**OpenID Connect (OIDC)** provider, which is *why we chose Microsoft* (and why
+GitHub can't be used directly — see below).
+
+The two are often confused, but they do different jobs:
+
+| | **OAuth 2.0** | **OpenID Connect (OIDC)** |
+|---|---|---|
+| Answers | "*Can this app access X?*" (authorization) | "*Who is this user?*" (identity), on top of OAuth2 |
+| Gives you | an **opaque** access token — a bearer string | a signed **`id_token`** (a **JWT**) anyone can verify |
+| Verifiable? | ❌ no — you must *trust* whoever hands it to you | ✅ yes — signature, issuer, **audience**, expiry are checkable |
+| Good for Tessera's `subject_token`? | ❌ no | ✅ yes |
+
+**Why the OIDC path is more secure** (it closes the *confused-deputy* hole):
+
+- **Verifiable, not trusted.** Tessera checks the token's **signature** against the
+  provider's public keys (JWKS). It doesn't have to take the chat's word that "this
+  is Alice" — it proves it cryptographically.
+- **Audience-bound.** The token is minted **for Tessera**, so a token leaked from
+  somewhere else can't be replayed against it.
+- **Short-lived + revocable** (`exp` / `jti`), so a stolen token expires fast.
+- **Unforgeable by a prompt injection.** A tricked tool can't mint a signed token,
+  so it can't impersonate another user.
+
+Which providers can do this:
+
+| Provider | Type | Usable as the verifiable identity? |
+|---|---|---|
+| **Microsoft Entra** | **OIDC** | ✅ **yes — what we use** |
+| Google | OIDC | ✅ yes (disabled by choice) |
+| GitHub | **OAuth 2.0 only** | ❌ no — issues no `id_token` |
+
+That's the whole reason for the Microsoft choice: it's OIDC (verifiable), it's the
+login we want, and it needs no extra infrastructure.
+([ADR 0011](docs/adr/0011-identity-provider-sso.md))
+
+### What does it cost?
+
+**The security + identity layer is free.** What you pay for is the AI model — which
+you'd pay for anyway — and, optionally, voice.
+
+| Part | Cost |
+|---|---|
+| Tessera, the broker, the chat fork (all self-hosted, open source) | **$0 software** |
+| **Microsoft Entra** sign-in (OIDC, on-behalf-of) | **$0** for a household — free tier; even Entra External ID is free to 50,000 monthly users ([ADR 0011](docs/adr/0011-identity-provider-sso.md)) |
+| Azure Key Vault (the secret store) | a few cents/month — per-operation, negligible at household scale |
+| **The LLM / model** behind the chat | **your model bill** — e.g. a model API, or a **GitHub Copilot / GitHub Models** subscription if you route through GitHub. *This is the chat's cost, not Tessera's.* |
+| **WebRTC voice** (optional) | **only if enabled** — a realtime voice model (e.g. Azure OpenAI realtime) is metered usage |
+
+So: identity = $0, Key Vault = pennies. The real spend is the **model** (a bill you
+already have for any AI chat) plus **voice if you turn it on**.
+
+### Can I add GitHub login later? (architecture + the tool)
+
+Yes — as a deliberate **next step**, not part of iteration 1. The reason it's
+separate: **GitHub user login is OAuth 2.0-only** (no `id_token`, no OIDC discovery,
+no SAML), so it **cannot be a Microsoft Entra identity provider directly**. To make
+a GitHub login produce a token Tessera can verify, you add **one tool — a
+self-hosted OIDC broker** (**Authelia**, lightweight, or **Keycloak**, full-featured)
+that (1) lets users *"Sign in with GitHub"* upstream, and (2) **re-issues one
+uniform signed OIDC token** the chat and Tessera trust.
+
+```mermaid
+flowchart TB
+    subgraph today["Today (Microsoft only — no extra tool)"]
+      MS1["Microsoft"] -->|OIDC id_token| C1["chat"] --> TE1["Tessera ✅"]
+      GH1["GitHub"] -->|OAuth2, opaque| X1["✗ not verifiable"]
+    end
+    subgraph future["Future (add GitHub via a broker)"]
+      GH2["GitHub"] --> BRK["OIDC broker<br/>(Authelia / Keycloak)"]
+      MS2["Microsoft"] --> BRK
+      GG2["Google"] --> BRK
+      BRK -->|one signed OIDC token| C2["chat"] --> TE2["Tessera ✅"]
+    end
+```
+
+**The tool to integrate:** an OIDC broker — **Authelia** (small, simple, great for a
+household) or **Keycloak** (heavier, enterprise-grade). With it in place, Tessera
+trusts **one issuer** (the broker) no matter which button the user clicked, and
+GitHub — or any other social login — works for delegation too.
+([ADR 0011](docs/adr/0011-identity-provider-sso.md))
 
 ---
 
