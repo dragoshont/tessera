@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tessera.Broker — the Kestrel host + composition root. Wires Core + Identity
+       + the Azure KV store + the MCP surface; exposes /healthz /readyz /status and
+       the fail-closed /v1/broker; runs the read-only startup self-test; carries the
+       gated injection egress (YARP IHttpForwarder + SSRF allow-list, OFF by default).
+       Roadmap phase 3 (ADR 0001/0005/0008). -->
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Broker</RootNamespace>
+    <AssemblyName>Tessera.Broker</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Yarp.ReverseProxy" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Tessera.Core/Tessera.Core.csproj" />
+    <ProjectReference Include="../Tessera.Identity/Tessera.Identity.csproj" />
+    <ProjectReference Include="../Tessera.Stores.AzureKeyVault/Tessera.Stores.AzureKeyVault.csproj" />
+    <ProjectReference Include="../Tessera.Mcp/Tessera.Mcp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tessera.Broker.Tests" />
+  </ItemGroup>
+
+</Project>
