@@ -76,12 +76,22 @@ agents + first-class MCP, per-user MCP OAuth, and the maintainer's own WebRTC vo
 
 ### The hardening gaps to close in the fork (the real work)
 
-1. **Tenant boundary.** LibreChat is **multi-user with RBAC/groups, not hard
-   multi-tenant** (no org-isolation boundary natively). To "position as
-   multitenant" we must add a **tenant model** (a tenant claim on the user, scoping
-   conversations/agents/MCP/files per tenant) — or, for high-sensitivity tenants,
-   map them to the [ADR 0004](0004-tenancy-and-isolation.md) **dedicated-instance**
-   tier. This is the single biggest workstream and must be validated.
+1. **Per-user isolation, not org multi-tenancy** *(decided 2026-06-13).* The chat
+   is **single-tenant**: one organization, one deployment. It is **not** multi-org,
+   so we do **not** build a hard org-tenant boundary into LibreChat (this removes
+   what was previously the single biggest workstream). The requirement instead is
+   **complete isolation between end-users** on two axes:
+   - **Memory** — each user's memory/context is private; no cross-user leakage.
+     LibreChat memory is already per-user; the work is to **verify** that and to
+     **lock down cross-user sharing** (agents/prompts/MCP `share`/`public` set off
+     so one user's context can't reach another) for "completely isolated".
+   - **Auth against Tessera** — each user authenticates to Tessera as *themselves*
+     (own signed token → own Tessera tenant → own envelope key → own credential
+     set, per [ADR 0004](0004-tenancy-and-isolation.md) where *Tessera's* tenant =
+     the end-user). No user can reach another's credentials.
+   So: **chat = single org tenant; Tessera = one tenant per user.** The
+   high-sensitivity (medical) end-user can still map to the ADR 0004
+   **dedicated-instance** Tessera tier. No full multi-tenant chat rewrite is needed.
 2. **Per-user → Tessera delegation, verified.** Wire `OPENID_REUSE_TOKENS` +
    `{{LIBRECHAT_OPENID_*}}` so each call to the Tessera MCP carries the user's
    **signed** token; **validate Tessera can verify it** (sig/`aud`/`exp`/`jti`/
@@ -106,11 +116,15 @@ Contribute generically-useful pieces back where it makes sense.
 - **Positive:** maximum reuse (LibreChat + the maintainer's own voice/MCP work);
   the valued experience is preserved; SSO + admin + RBAC already exist; the
   delegation primitive exists; MIT license is fork-friendly.
+- **Positive:** because the chat is **single-tenant** (one org) with **per-user
+  isolation**, we avoid a hard org-multi-tenant rewrite — the work is verifying
+  per-user memory privacy, locking cross-user sharing, and per-user Tessera
+  delegation, all of which build on LibreChat's existing per-user model.
 - **Negative:** we inherit a large Node/React codebase and must maintain a fork and
-  rebase on upstream; **true multi-tenancy is not free** and is real work.
-- **Mitigation:** keep changes as a thin, feature-flagged overlay; use the
-  dedicated-instance tier for tenants needing hard isolation rather than forcing a
-  full multi-tenant rewrite on day one.
+  rebase on upstream.
+- **Mitigation:** keep changes as a thin, feature-flagged overlay; map the
+  high-sensitivity end-user to the dedicated-instance Tessera tier rather than
+  hardening one shared store for everyone.
 
 ## Rejected alternatives
 

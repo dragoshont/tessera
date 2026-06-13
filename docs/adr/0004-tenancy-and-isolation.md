@@ -40,6 +40,14 @@ tenants are isolated:
 tenants may use the shared tier with envelope keys. This is exactly the per-account
 isolation already proven in the maintainer's homelab (separate MCP per spouse).
 
+> **Two senses of "tenant" (clarified 2026-06-13).** The **chat** client is
+> **single-tenant** — one organization, one deployment (see
+> [ADR 0010](0010-chat-client.md)); it is not multi-org. **Tessera's** tenant is the
+> **end-user**: each person is isolated with their own envelope key and credential
+> set, and the medical end-user maps to the dedicated-instance tier above. So
+> "single-tenant chat + completely isolated users" = one org chat surface on top of
+> per-user Tessera tenancy. The two are consistent, not contradictory.
+
 ```mermaid
 flowchart LR
     subgraph shared["Shared broker (default)"]
