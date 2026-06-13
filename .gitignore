@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Test / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local runtime artifacts (NEVER commit real secrets or live audit logs)
+*.log
+grants.toml
+tessera.toml
+!tessera.example.toml
+!grants.example.toml
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

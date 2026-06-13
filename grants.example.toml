@@ -1,0 +1,47 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Tessera — example grants.
+#
+# A GRANT is the whole authorization model: it says a CALLER (a workload),
+# OPTIONALLY acting ON BEHALF OF an end-user, may perform a set of ACTIONS
+# against a TARGET. Anything not granted is denied (fail-closed).
+#
+# Principle: list the *least* a caller needs. Prefer narrow actions over "*".
+# ──────────────────────────────────────────────────────────────────────────────
+
+# The chatbot, acting for a specific human, may READ that human's portal data.
+[[grant]]
+caller = "spiffe://tessera.local/chatbot"
+on_behalf_of = "alice@example.com"       # omit this line for a pure automation
+target = "health-portal"
+actions = ["read:*"]
+
+# A nightly automation (no human) may read marketplace listings — and nothing else.
+[[grant]]
+caller = "spiffe://tessera.local/price-crawler"
+target = "marketplace"
+actions = ["read:listings", "read:prices"]
+
+# An n8n workflow, acting for a human, may create calendar events but not delete.
+[[grant]]
+caller = "spiffe://tessera.local/n8n"
+on_behalf_of = "bob@example.com"
+target = "google-calendar"
+actions = ["read:events", "write:events.create"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TARGET BINDINGS — where each (target, on_behalf_of) credential actually lives
+# in the credential store. A grant says "who may"; a binding says "backed by
+# which stored secret". Anything without a binding resolves to 'absent'.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Bob's patient-portal session bundle (the secret Tessera resolves read-only).
+[[target]]
+name = "health-portal"
+on_behalf_of = "bob@example.com"
+credential = "health-portal-session"
+
+# A pure-automation target (no on_behalf_of) backed by its own stored secret.
+[[target]]
+name = "marketplace"
+credential = "marketplace-crawler-session"
+

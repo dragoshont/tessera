@@ -1,0 +1,39 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Tessera — example configuration.
+#
+# Copy to `tessera.toml` and edit. Validate any time with:  `tessera validate`
+# Every value here is the *safe default*; you can delete anything you don't want
+# to change. See docs/architecture.md for the full picture.
+# ──────────────────────────────────────────────────────────────────────────────
+
+[server]
+# Where the broker listens for caller requests.
+host = "127.0.0.1"
+port = 8080
+
+[identity]
+# How a caller (a workload / non-human identity) proves WHO it is.
+#   "mtls" — SPIFFE X.509-SVID or any client certificate  (recommended)
+#   "oidc" — a signed JWT (e.g. from your IdP)
+#   "dev"  — NO verification. Local development only; refuses to run unless
+#            server.host is loopback. Never use in production.
+mode = "mtls"
+
+# SPIFFE-style trust domain for workload identities (mtls mode).
+trust_domain = "tessera.local"
+
+# For verifying end-user assertions (the "on behalf of" identity), if any.
+# Only issuers in this list are accepted, and the token's audience must match.
+oidc_issuers = []          # e.g. ["https://accounts.google.com"]
+oidc_audience = "tessera"
+
+[policy]
+# The decision when NO grant matches a request. Keep this "deny".
+default = "deny"
+# Path to the grants file (who may act as whom, against what). See grants.example.toml.
+grants = "grants.toml"
+
+[audit]
+# Structured, append-only record of every decision. Strongly recommended.
+enabled = true
+path = "audit.log"
