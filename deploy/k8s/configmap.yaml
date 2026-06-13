@@ -1,0 +1,64 @@
+# Tessera — config + grants, mounted at /config.
+#
+# ── WHAT YOU CHANGE ──────────────────────────────────────────────────────────
+# • identity.oidc on the DEPLOYMENT env (issuer/audience) — see deployment.yaml.
+# • grants/bindings/recipes below — your callers, your people, your providers.
+# Everything here is non-secret. Credential VALUES live in your store (Key Vault),
+# never in this file — bindings only reference the store secret *name*.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tessera-config
+  namespace: default
+  labels:
+    app: tessera
+data:
+  tessera.json: |
+    {
+      "server": { "host": "0.0.0.0", "port": 8080 },
+      "identity": {
+        "mode": "oidc",
+        "trustDomain": "tessera.local",
+        "oidc": { "issuer": "", "audience": "", "tenantId": "" }
+      },
+      "policy": { "default": "deny", "document": "/config/grants.json" },
+      "audit": { "enabled": true, "path": "-" },
+      "egress": { "enabled": false, "allowedHosts": [] }
+    }
+
+  grants.json: |
+    {
+      "grants": [
+        {
+          "caller": "chat://your-chat",
+          "onBehalfOf": "alice@example.com",
+          "target": "health-portal",
+          "actions": ["read:*"]
+        },
+        {
+          "caller": "app-nightly-crawler",
+          "target": "marketplace",
+          "actions": ["read:listings"]
+        }
+      ],
+      "bindings": [
+        {
+          "target": "health-portal",
+          "onBehalfOf": "alice@example.com",
+          "credential": "health-portal-alice-session"
+        },
+        {
+          "target": "marketplace",
+          "credential": "marketplace-crawler-session"
+        }
+      ],
+      "recipes": [
+        {
+          "target": "health-portal",
+          "driver": "browser",
+          "egress": "none",
+          "actions": ["read:results"],
+          "description": "patient portal (read-only)"
+        }
+      ]
+    }

@@ -52,6 +52,10 @@ with a **built-in harvester**. The harvester and the credential store are
 **internal plumbing**: you add a provider [recipe](docs/specs/recipes.md) and grant
 access; you don't think about the rest.
 
+> **Setting it up?** Start with **[Getting started](docs/getting-started.md)** — the
+> manual steps (the human gates) and exactly which YAML to change, with copy-ready
+> manifests in [`deploy/k8s/`](deploy/k8s/).
+
 ---
 
 ## Why it exists
@@ -438,6 +442,8 @@ GitHub — or any other social login — works for delegation too.
 
 ## Documentation
 
+- **[Getting started](docs/getting-started.md)** — operator onboarding: the manual
+  steps + the YAML to change, with example manifests in [`deploy/k8s/`](deploy/k8s/).
 - **[Architecture](docs/architecture.md)** — the complete system: diagrams,
   request lifecycle, deployment topologies, components, threat model, OSS landscape.
 - **[Decision records](docs/adr/README.md)** — *why* the load-bearing choices were

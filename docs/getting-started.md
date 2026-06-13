@@ -1,0 +1,161 @@
+# Getting started
+
+Stand up Tessera and wire your first consumer. This is the **operator onboarding**:
+the manual steps (the parts only a human can do) and exactly **which YAML to change**.
+
+> Tessera is a credential **broker**: a verified caller asks it to act *as a
+> person*, and it injects that person's credential without the caller ever holding
+> it. So setup has three parts — **identity** (who's allowed), **store** (where the
+> secrets live), and the **broker** itself — then you point a consumer at it.
+
+```mermaid
+flowchart LR
+    A["① identity<br/>(OIDC app)"] --> C
+    B["② store<br/>(Key Vault)"] --> C
+    C["③ broker<br/>(deploy/k8s)"] --> D["④ consumer<br/>(chat / CLI / job)"]
+```
+
+---
+
+## 0. Prerequisites
+
+- A Kubernetes cluster with a **default-deny-ingress** NetworkPolicy in the target
+  namespace (a broker should never be openly reachable).
+- A secret **store** — the default is **Azure Key Vault** (others are pluggable).
+- An **OIDC** identity provider for end-user delegation — the default is **Microsoft
+  Entra** (see [ADR 0011](adr/0011-identity-provider-sso.md)). Pure-automation
+  callers don't need a human IdP.
+- `kubectl`, and (for the identity step) the Azure CLI with Bicep.
+
+---
+
+## 1. Identity — create the OIDC app *(manual: one command + one click)*
+
+Delegation needs an OIDC **app registration** whose token your consumers forward and
+Tessera validates. The IaC is in [`deploy/azure/entra/`](../deploy/azure/entra/):
+
+```bash
+az deployment sub create -l westeurope \
+  -f deploy/azure/entra/main.bicep \
+  -p chatDomain=chat.example.com         # your chat's public hostname
+# (add clusterOidcIssuer=... ONLY for a publicly-reachable cluster; omit it for a
+#  private/homelab cluster — the broker then uses its service-principal credential)
+```
+
+Then grant consent (a human gate — it cannot be scripted):
+
+```bash
+az ad app permission admin-consent --id <chatAppId from the output>
+```
+
+Note the outputs — you need **`chatAppId`** (the audience) and **`oidcIssuer`**.
+A confidential web consumer (LibreChat) also needs a **client secret**:
+
+```bash
+az ad app credential reset --id <chatAppId> --display-name oidc --years 2
+# store the returned password in your vault / SOPS — NEVER in git
+```
+
+> Personal Microsoft accounts (e.g. gmail-backed) work with **zero** Azure
+> onboarding via `signInAudience=AzureADandPersonalMicrosoftAccount`; they sign in
+> through `/common`. Tessera's `/common` validator accepts both workforce and
+> personal accounts.
+
+---
+
+## 2. Store — put a credential where the broker can read it
+
+Create the K8s secret the broker uses to authenticate to the vault, then store a
+provider credential **bundle** in the vault under a name your binding references.
+
+**a) How the broker reaches the vault.** Two options:
+
+| Option | How | Trade-off |
+|---|---|---|
+| **Workload Identity / MI** *(preferred)* | annotate the broker ServiceAccount; **delete** the `envFrom` in `deployment.yaml` | no secret to leak |
+| **Service-principal secret** | a K8s secret `tessera-store-credentials` with `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` | simple; a long-lived secret |
+
+**b) A credential bundle** is the JSON your harvester writes and Tessera reads:
+
+```json
+{ "access_token": "…", "refresh_token": "…", "cookies": { "session": "…" } }
+```
+
+Store it in the vault under the name your binding points at (e.g.
+`health-portal-alice-session`). Tessera only ever **reads** it and reports a
+*status* — it never returns or logs the value.
+
+---
+
+## 3. Broker — deploy it *(the YAML you change)*
+
+Copy [`deploy/k8s/`](../deploy/k8s/) and change **four things** in
+[`deployment.yaml`](../deploy/k8s/deployment.yaml):
+
+| # | Field | Set to |
+|---|---|---|
+| 1 | `image` | a real release tag / `sha-<commit>` |
+| 2 | `TESSERA_VAULT_URL` | your Key Vault URL |
+| 3 | `TESSERA_OIDC_AUDIENCE` | your **`chatAppId`** (this turns delegation **on**) |
+| 4 | `envFrom` *or* the ServiceAccount | your store auth (step 2a) |
+
+Then author your rules in [`configmap.yaml`](../deploy/k8s/configmap.yaml) —
+`grants` (who may do what), `bindings` (which stored secret backs each), `recipes`
+(per-provider tools). And set your chat's label in
+[`networkpolicy.yaml`](../deploy/k8s/networkpolicy.yaml).
+
+```bash
+kubectl apply -k deploy/k8s
+```
+
+> **Fail-closed by design.** Leave `TESSERA_OIDC_AUDIENCE` **empty** until you've
+> verified a real token (step 5). The broker comes up, serves health, runs its
+> read-only self-test, and **denies** every delegated call until the audience is
+> set. You can deploy safely before identity is fully proven.
+
+---
+
+## 4. Consumer — point something at the broker
+
+- **Chat (LibreChat):** add Tessera as a **YAML-defined** MCP server that forwards
+  the user's OIDC token. This is mandatory — UI/DB-defined servers can't forward the
+  token. Full steps: [specs/librechat-integration.md](specs/librechat-integration.md).
+- **CLI / automation / job:** register a non-human caller with its **own** audience
+  (prefer workload-identity federation over a secret). Steps + Bicep:
+  the [non-human caller section of the README](../README.md#registering-a-non-human-caller-cli--automation--job).
+
+---
+
+## 5. Verify — fail-closed → enabled *(the second human gate)*
+
+```bash
+kubectl -n default port-forward deploy/tessera 8080:8080 &
+curl -s localhost:8080/status | jq      # store kind, delegation = fail-closed, self-test
+```
+
+1. **Before delegation:** `delegation` reads `fail-closed`; the self-test resolves a
+   credential **status** (never its value).
+2. **Capture a real token:** have one user sign in once, capture the forwarded
+   access token, and confirm its `aud == chatAppId`, `iss`, `exp`.
+3. **Enable:** set `TESSERA_OIDC_AUDIENCE=<chatAppId>`, re-apply, and `/status` now
+   reads `delegation: enabled`. Delegated calls authorize against your grants.
+
+---
+
+## What each file is for
+
+| File | Purpose | You change |
+|---|---|---|
+| [`deploy/k8s/deployment.yaml`](../deploy/k8s/deployment.yaml) | the broker + Service | image, vault URL, OIDC, store auth |
+| [`deploy/k8s/configmap.yaml`](../deploy/k8s/configmap.yaml) | config + grants/bindings/recipes | your rules |
+| [`deploy/k8s/networkpolicy.yaml`](../deploy/k8s/networkpolicy.yaml) | only the chat may reach :8080 | your chat's label |
+| [`deploy/azure/entra/main.bicep`](../deploy/azure/entra/main.bicep) | the OIDC app(s) | `chatDomain` |
+
+## Manual steps, collected (the human gates)
+
+1. **Run the Entra deploy** + **admin-consent** click (step 1).
+2. **Mint + vault** the client secret (step 1) — never in git.
+3. **Seed a credential bundle** in the vault (step 2b).
+4. **Sign in once** to capture + verify a real token, then set the audience (step 5).
+
+Everything else is declarative YAML you apply with `kubectl`.

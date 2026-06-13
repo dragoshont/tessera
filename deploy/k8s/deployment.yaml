@@ -1,0 +1,126 @@
+# Tessera broker — cluster-INTERNAL credential broker (.NET 10).
+#
+# ── WHAT YOU CHANGE (the 4 lines that matter) ────────────────────────────────
+#   1. image            → pin to a release tag or :latest
+#   2. TESSERA_VAULT_URL→ your Key Vault URL
+#   3. TESSERA_OIDC_*   → your Entra issuer + the chat app id (audience)
+#   4. the store secret → how the broker authenticates to your vault (see below)
+#
+# Posture (don't weaken): ClusterIP only (NO Ingress — a credential broker must
+# never be publicly reachable); policy default-deny; egress off. Delegation is
+# FAIL-CLOSED until TESSERA_OIDC_AUDIENCE is set to a real, verified audience.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tessera
+  namespace: default
+  labels:
+    app: tessera
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tessera
+  template:
+    metadata:
+      labels:
+        app: tessera
+    spec:
+      # If your image is private, reference your pull secret here.
+      # imagePullSecrets:
+      #   - name: your-ghcr-pull-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tessera
+          # 1. Pin a real tag (e.g. a release tag or sha-<commit>).
+          image: ghcr.io/dragoshont/tessera:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # 2. Your Key Vault REST endpoint (public hostname; not a secret).
+            - name: TESSERA_VAULT_URL
+              value: "https://<your-vault>.vault.azure.net"
+            # 3. OIDC end-user token validation. Set the AUDIENCE to your Entra
+            #    chat app id to turn delegation ON (fail-closed until then).
+            #    Use /common to accept both workforce + personal Microsoft accounts;
+            #    the broker validates the per-tenant issuer template + signature.
+            - name: TESSERA_OIDC_ISSUER
+              value: "https://login.microsoftonline.com/common/v2.0"
+            - name: TESSERA_OIDC_AUDIENCE
+              value: ""        # <chat-app-id> — EMPTY = delegation fails closed
+            # Optional: restrict to specific tenant id(s), comma-separated. Empty
+            # accepts any tenant whose issuer matches the Entra template.
+            - name: TESSERA_OIDC_ALLOWED_TENANTS
+              value: ""
+            - name: HOME
+              value: "/tmp"
+          envFrom:
+            # 4. How the broker authenticates to Key Vault. DefaultAzureCredential
+            #    resolves, in order: Workload Identity Federation / Managed Identity
+            #    (PREFERRED — no secret), else these env vars (a service-principal
+            #    client secret). For WIF/MI, delete this envFrom and annotate the
+            #    ServiceAccount instead (see docs/getting-started.md).
+            - secretRef:
+                name: tessera-store-credentials   # AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 25m, memory: 96Mi }
+            limits: { cpu: 500m, memory: 320Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: tessera-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tessera
+  namespace: default
+  labels:
+    app: tessera
+spec:
+  type: ClusterIP        # never expose a credential broker via Ingress
+  selector:
+    app: tessera
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

@@ -1,0 +1,28 @@
+# Only your chat (or other verified consumer) may reach the broker's MCP surface.
+#
+# This NetworkPolicy IS the workload-identity enforcement for the chat→Tessera hop
+# (the chat's MCP client presents no SVID): "WHO is calling" is enforced here (only
+# pods with the selected label may connect), and "FOR WHOM" is the verified end-user
+# OIDC token Tessera validates on the request. Pair it with a default-deny-ingress
+# policy in the namespace.
+#
+# CHANGE: podSelector.matchLabels below to your chat deployment's label.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-chat-to-tessera
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: tessera
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: your-chat        # ← your chat deployment's label
+      ports:
+        - port: 8080
+          protocol: TCP
