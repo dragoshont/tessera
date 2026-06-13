@@ -22,6 +22,15 @@ tessera.toml
 !tessera.example.toml
 !grants.example.toml
 
+# .NET
+bin/
+obj/
+*.user
+[Tt]est[Rr]esults/
+.vs/
+project.lock.json
+artifacts/
+
 # OS / editor
 .DS_Store
 .idea/

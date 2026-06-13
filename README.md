@@ -447,7 +447,8 @@ GitHub — or any other social login — works for delegation too.
 - **[Security policy](SECURITY.md)** — invariants and how to report a vulnerability.
 - Archived Python spike: [README](README.python-spike.md) ·
   [architecture](docs/architecture.python-spike.md) ·
-  [adversarial review](docs/adversarial-p2.python-spike.md).
+  [adversarial review](docs/adversarial-p2.python-spike.md) ·
+  [code](spike/).
 
 ---
 
