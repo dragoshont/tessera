@@ -26,7 +26,16 @@ public static class McpServiceCollectionExtensions
                     Version = options.ServerVersion,
                 };
             })
-            .WithHttpTransport()
+            // STATELESS streamable-HTTP: every POST is a self-contained request whose
+            // response is returned inline — no per-session SSE GET stream, no
+            // Mcp-Session-Id to lose. This matches Tessera's model exactly (identity
+            // is carried by the forwarded bearer on each call; the broker holds no
+            // per-session state) and it removes the session-churn we saw with the
+            // chat client: repeated `initialize` + "Failed to open SSE stream: Bad
+            // Request" as it reconnected the stateful SSE channel. Each tool call now
+            // runs in its own request context, so IHttpContextAccessor always sees
+            // that call's Authorization header.
+            .WithHttpTransport(httpOptions => httpOptions.Stateless = true)
             .WithTools<TesseraMcpTools>();
     }
 }
