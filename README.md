@@ -109,8 +109,12 @@ in **[docs/architecture.md](docs/architecture.md)**.
   split the browser / Android harvesters into their own deployments — clients hit
   **one endpoint** either way. ([ADR 0002](docs/adr/0002-broker-worker-topology.md))
 - **Pluggable harvest drivers.** Browser today; **Android emulator** and desktop
-  are first-class future drivers behind the same contract.
-  ([ADR 0006](docs/adr/0006-harvest-drivers.md))
+  are first-class drivers behind the same contract, built when a provider needs
+  them. ([ADR 0006](docs/adr/0006-harvest-drivers.md))
+
+> **Scope note.** There is **one** iteration planned, and it includes the full
+> security hardening, **per-user delegation**, and a **WebRTC-voice** chat surface
+> — none of these are deferred. See the [build plan](docs/roadmap.md).
 
 ---
 
@@ -206,8 +210,57 @@ And a baked-in key is usually all-powerful and can't tell people apart; Tessera
 gives a **narrow, per-task** permission and checks **who** is really asking.
 
 > Bonus: text chat, **WebRTC voice**, CLI, and MCP all become the *same kind* of
-> consumer — none holds a secret, each just shows its badge and asks the box. So
-> adding voice later is "one more thing wired into the front", with no key inside it.
+> consumer — none holds a secret, each just shows its badge and asks the box. Voice
+> is **in scope for the first iteration**, not a someday add-on (it's just one more
+> consumer wired into the front, with no key inside it).
+
+### Where are the "who-may-do-what" rules kept?
+
+In **Tessera only** — never in the chat or the MCP. That centralization *is* the
+point: a consumer carries *no* permission data, only its identity badge. The rules
+live as **declarative files under version control (GitOps)**, so every change is a
+reviewable diff, validated on load, **deny by default**. (An admin UI/API may sit
+on top later, but the file stays the source of truth —
+[ADR 0008](docs/adr/0008-policy-and-identity-administration.md).) Three small things
+live there: *trust* (which badges are genuine), *grants* (`who may do what`), and
+*bindings* (`which stored secret backs it`). Change one rule → every consumer is
+affected, instantly. The opposite of baked-in keys, where the permission *is* the
+key, copied into every tool.
+
+### One MCP serves all users (like LibreChat) — how does Tessera know *which* user?
+
+This is the important one. A shared MCP's badge says only *"I am `calendar-mcp`"* —
+the **same for everyone**. So the **person** must be proven **per interaction**, and
+the MCP must **forward the user's *own signed token*** (not a plaintext "this is
+Alice", which a tricked tool could fake). Tessera then verifies **two** badges:
+
+| | Same for all users? | Source |
+|---|---|---|
+| **WHO** — the workload | ✅ same (one MCP) | the MCP's certificate / SVID |
+| **FOR WHOM** — the person | ❌ different every call | the user's signed token, **forwarded** chat → MCP → Tessera |
+
+```mermaid
+sequenceDiagram
+    participant Alice
+    participant Chat
+    participant MCP as shared MCP (one for all)
+    participant T as Tessera
+    Alice->>Chat: sign in (OIDC) → Alice holds a signed token
+    Alice->>Chat: "add this to my calendar"
+    Chat->>MCP: invoke tool + forward Alice's signed token
+    MCP->>T: mTLS(WHO = mcp badge) + (FOR WHOM = Alice's signed token)
+    T->>T: verify both, then authorize (mcp, Alice, calendar, write:event)
+    T-->>MCP: result only — Alice's calendar, never Bob's
+```
+
+**Honest catch:** this needs the chat to *propagate each user's signed identity* to
+the MCP. LibreChat v0.8.0 doesn't do that natively, so the project will **extend a
+chat — or build our own** — that delegates correctly (and carries **WebRTC voice**).
+Until/unless that lands, the proven fallback is **one MCP per person** (each
+deployment's badge already *means* the person — the dedicated-instance tier, and the
+right default for medical accounts).
+[ADR 0009](docs/adr/0009-end-user-identity-propagation.md) ·
+[ADR 0004](docs/adr/0004-tenancy-and-isolation.md).
 
 ---
 

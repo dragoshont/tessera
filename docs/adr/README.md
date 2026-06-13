@@ -14,6 +14,8 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0005](0005-identity-first-fail-closed.md) | **Verified identity first, fail-closed**; tenant derived only from proven identity | Accepted |
 | [0006](0006-harvest-drivers.md) | **Pluggable harvest drivers**: browser today; Android emulator & desktop as future drivers | Accepted |
 | [0007](0007-worker-transport.md) | **Broker ⇄ worker transport: gRPC + mTLS** (typed contracts, bidi streaming) | Accepted |
+| [0008](0008-policy-and-identity-administration.md) | **Policy/grants/bindings administration: file-first + GitOps** (admin API/UI a thin layer later) | Accepted |
+| [0009](0009-end-user-identity-propagation.md) | **Per-call end-user delegation required**; shared MCP forwards a signed token; own/forked chat for it (+ WebRTC) | Accepted |
 
 ## Format
 
