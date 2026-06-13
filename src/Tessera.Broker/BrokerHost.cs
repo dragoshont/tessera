@@ -115,15 +115,26 @@ public static class BrokerHost
         app.MapMcp("/mcp");
 
         // Startup self-test (read-only) — proves the authorize+resolve spine against
-        // the real store without any upstream call.
+        // the real store without any upstream call. Time-boxed + fail-soft so a slow
+        // or unreachable store can never crashloop the broker.
         var environment = options.Environment;
         var selftestTarget = Get(environment, "TESSERA_SELFTEST_TARGET");
         if (!string.IsNullOrEmpty(selftestTarget))
         {
             var principal = Get(environment, "TESSERA_SELFTEST_PRINCIPAL");
-            status.SelfTest = await SelfTest
-                .RunAsync(broker, selftestTarget, string.IsNullOrEmpty(principal) ? null : principal, config.Identity.TrustDomain, cancellationToken)
-                .ConfigureAwait(false);
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(20));
+                status.SelfTest = await SelfTest
+                    .RunAsync(broker, selftestTarget, string.IsNullOrEmpty(principal) ? null : principal, config.Identity.TrustDomain, cts.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                status.SelfTest = new SelfTestResult(
+                    selftestTarget, principal, "error", "self-test timed out reaching the store", null, null, false);
+            }
         }
 
         status.Ready = true;
