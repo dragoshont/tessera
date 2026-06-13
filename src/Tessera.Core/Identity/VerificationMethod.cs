@@ -17,6 +17,14 @@ public enum VerificationMethod
 
     /// <summary>A signed OIDC / JWT assertion (validated: sig, aud, exp, iss, tid).</summary>
     OidcJwt,
+
+    /// <summary>
+    /// Trusted by the network boundary: the chat→Tessera hop is NetworkPolicy-gated
+    /// (only the chat workload can reach the broker) and a valid end-user OIDC token
+    /// accompanies the call. Used for the shared chat caller, which presents no SVID
+    /// (review C2 / ADR 0005).
+    /// </summary>
+    Network,
 }
 
 /// <summary>Extensions over <see cref="VerificationMethod"/>.</summary>

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tessera.Mcp — THE chat-facing surface (review C1). A streamable-HTTP MCP
+       server (ModelContextProtocol.AspNetCore) that LibreChat consumes. Each tool
+       call reads the forwarded end-user OIDC token, verifies it (Tessera.Identity),
+       and runs the broker pipeline. The chat talks MCP, not /v1/broker — this is
+       what makes the chat work (ADR 0009 / 0010). -->
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Mcp</RootNamespace>
+    <AssemblyName>Tessera.Mcp</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Tessera.Core/Tessera.Core.csproj" />
+    <ProjectReference Include="../Tessera.Identity/Tessera.Identity.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tessera.Mcp.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -137,4 +137,26 @@ public sealed class PolicyTests
 
         Assert.True(pdp.Evaluate(request).Allowed);
     }
+
+    [Fact]
+    public void Grant_authored_with_preferred_username_matches_a_token_keyed_on_oid()
+    {
+        // The token's stable subject is an oid; the operator authored the grant
+        // with the human-readable preferred_username. Both are signed claims.
+        var grant = new Grant(
+            Caller: "chat://librechat",
+            Target: "health-portal",
+            Actions: ["read:*"],
+            OnBehalfOf: "alice@example.com");
+        var pdp = new PolicyDecisionPoint([grant]);
+
+        var caller = new Identity.CallerIdentity("chat://librechat", Identity.VerificationMethod.OidcJwt);
+        var user = new Identity.EndUserAssertion(
+            Subject: "oid-9f8e7d",
+            Issuer: "https://login.microsoftonline.com/tid/v2.0",
+            VerifiedVia: Identity.VerificationMethod.OidcJwt,
+            PreferredUsername: "alice@example.com");
+
+        Assert.True(pdp.Evaluate(new AccessRequest(caller, "health-portal", "read:results", user)).Allowed);
+    }
 }

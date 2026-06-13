@@ -1,3 +1,4 @@
+using Tessera.Core.Identity;
 using Tessera.Core.Model;
 
 namespace Tessera.Core.Policy;
@@ -38,15 +39,32 @@ public sealed record Grant(
             return false;
         }
 
-        // Delegation alignment: grant's on_behalf_of must equal the request's
-        // end-user subject (both null for automation).
-        var requestUser = request.OnBehalfOf?.Subject;
-        if (!string.Equals(OnBehalfOf, requestUser, StringComparison.Ordinal))
+        // Delegation alignment: grant's on_behalf_of must match the request's
+        // end-user (both null for automation). A delegated grant matches the
+        // verified subject (oid) OR the verified preferred_username — both are
+        // signed claims, so operators can author human-readable grants.
+        if (!DelegationMatches(request.OnBehalfOf))
         {
             return false;
         }
 
         return Glob.AnyMatch(Actions, request.Action);
+    }
+
+    private bool DelegationMatches(EndUserAssertion? user)
+    {
+        if (OnBehalfOf is null)
+        {
+            return user is null;
+        }
+
+        if (user is null)
+        {
+            return false;
+        }
+
+        return string.Equals(OnBehalfOf, user.Subject, StringComparison.Ordinal)
+            || string.Equals(OnBehalfOf, user.PreferredUsername, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>True when the request's action requires step-up under this grant.</summary>

@@ -1,3 +1,4 @@
+using Tessera.Core.Identity;
 using Tessera.Core.Model;
 
 namespace Tessera.Core.Resolution;
@@ -22,7 +23,24 @@ public sealed record TargetBinding(
             return false;
         }
 
-        var requestPrincipal = request.OnBehalfOf?.Subject;
-        return string.Equals(Principal, requestPrincipal, StringComparison.Ordinal);
+        return PrincipalMatches(request.OnBehalfOf);
+    }
+
+    private bool PrincipalMatches(EndUserAssertion? user)
+    {
+        if (Principal is null)
+        {
+            return user is null;
+        }
+
+        if (user is null)
+        {
+            return false;
+        }
+
+        // Match the binding's principal against the verified subject (oid) OR the
+        // verified preferred_username — both are signed claims.
+        return string.Equals(Principal, user.Subject, StringComparison.Ordinal)
+            || string.Equals(Principal, user.PreferredUsername, StringComparison.OrdinalIgnoreCase);
     }
 }
