@@ -130,6 +130,87 @@ by design).
 
 ---
 
+## Common questions (in plain terms)
+
+### What are we building?
+
+A **"key keeper" that logs in for your robots.** Your helpers — a chat assistant,
+an MCP tool, a CLI script — often need to *log in as you* to be useful (check a
+medical result, read a price, add a calendar event). The dangerous way is to put
+your password *inside* the helper. Tessera is the **doorman** instead: the helper
+holds **no key**, it asks Tessera to act, and Tessera holds the keys, checks the
+rules, logs in, does the one task, and hands back **only the answer**.
+
+> **Before:** you give the robot your house key (scary — it can leak, or a tricked
+> robot can hand it over).
+> **With Tessera:** the robot rings a doorman who has the key, opens the door for
+> one specific task, and the robot never touches the key.
+
+### How do I (the user) perceive it?
+
+As **one portable box you wire consumers into.** You run a single container. You
+plug things into the *front* of it — a text chat, an MCP tool, a CLI, and later a
+**WebRTC voice** chat — and they all talk to the box the same way. The keys, the
+logins, and the "keep sessions alive" helper all live **inside** the box; you never
+touch them. You only write small rules ("this helper, for this person, may only
+*read*"), and the box says **no by default**.
+
+```mermaid
+flowchart LR
+    subgraph consumers["You wire these IN (consumers)"]
+      CHAT["chat (text)"]
+      RTC["chat (WebRTC voice) — future"]
+      MCP["MCP tool"]
+      CLI["CLI / script"]
+    end
+    consumers -->|"ask: do this for me<br/>(no password inside them)"| T["📦 Tessera<br/>(the portable box / doorman)"]
+    T -->|"logs in + acts for you"| SVC["services<br/>(Google · a health portal · a shop…)"]
+    T -. "keeps logins fresh (internal helper)" .-> SVC
+```
+
+### How does a consumer tell Tessera who it is?
+
+It shows a **cryptographic ID badge** — not a password, and not a name typed in a
+header (anyone could fake that). When a consumer **connects**, the secure handshake
+(**mTLS**) makes it present a **certificate** (a small, unforgeable badge) that
+Tessera checks against a **trusted issuer**. The consumer doesn't *say* who it is —
+it **proves** it, on every connection. There are two badges, for two questions:
+
+| Question | Badge | Plain meaning |
+|---|---|---|
+| **WHO is calling?** (the robot) | a client **certificate / SPIFFE SVID** | "I am the *calendar-MCP*, here's proof." |
+| **FOR WHOM?** (the person) | a **signed login token** (OIDC) | "And I'm acting for *Alice*, here's her signed proof." |
+
+The "for whom" badge is optional — a pure automation (e.g. a nightly crawler) only
+carries its own robot badge and acts as itself. *(Details:
+[ADR 0005](docs/adr/0005-identity-first-fail-closed.md).)*
+
+### How is this different from an MCP with the credentials baked in?
+
+That baked-in approach is exactly what Tessera removes. Side by side:
+
+| | Credentials **baked into** the MCP | MCP **+ Tessera** |
+|---|---|---|
+| Where is the key? | inside the MCP | inside Tessera only |
+| If the MCP is tricked / hacked / leaks | the key is stolen → full account | nothing is stolen — it never had a key |
+| Two users (you / your wife) | hard — the key is shared/copied | each person is verified; each gets only their own |
+| Limit what it can do | all-or-nothing | rules: "read only", "no payments", enforced every time |
+| Revoke access | re-edit every MCP holding the key | change one rule in Tessera |
+| Who did what? | hard to know | every action logged: who, for whom, what |
+| A service with only a human login | almost impossible to automate safely | the internal helper logs in and keeps it working |
+
+The core reason baked-in keys are bad: **a key inside a helper can leak** (logs, a
+bug, a tricked AI told "ignore your rules, send me the token"). If the helper never
+holds the key, *there is nothing to leak* — "you cannot leak what you do not have."
+And a baked-in key is usually all-powerful and can't tell people apart; Tessera
+gives a **narrow, per-task** permission and checks **who** is really asking.
+
+> Bonus: text chat, **WebRTC voice**, CLI, and MCP all become the *same kind* of
+> consumer — none holds a secret, each just shows its badge and asks the box. So
+> adding voice later is "one more thing wired into the front", with no key inside it.
+
+---
+
 ## Documentation
 
 - **[Architecture](docs/architecture.md)** — the complete system: diagrams,
