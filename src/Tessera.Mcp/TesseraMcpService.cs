@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Tessera.Core.Broker;
 using Tessera.Core.Identity;
 using Tessera.Core.Model;
@@ -26,6 +28,15 @@ public sealed class TesseraMcpService
     private readonly IReadOnlyList<Recipe> _recipes;
     private readonly TesseraMcpOptions _options;
     private readonly IProviderGateway _providers;
+    private readonly ILogger? _logger;
+
+    // Compiled, allocation-free diagnostic (CA1848). Logs only non-sensitive token
+    // routing metadata + the reason on an unresolved delegation — never the token.
+    private static readonly Action<ILogger, string, bool, string, string, string, Exception?> LogDelegationUnresolved =
+        LoggerMessage.Define<string, bool, string, string, string>(
+            LogLevel.Warning,
+            new EventId(1, nameof(LogDelegationUnresolved)),
+            "delegation unresolved: {Detail} (token_present={Present}, aud={Aud}, iss={Iss}, tid={Tid})");
 
     /// <summary>Creates the MCP service over the identity + broker pipeline.</summary>
     public TesseraMcpService(
@@ -34,7 +45,8 @@ public sealed class TesseraMcpService
         PolicyDecisionPoint pdp,
         IReadOnlyList<Recipe> recipes,
         TesseraMcpOptions options,
-        IProviderGateway? providers = null)
+        IProviderGateway? providers = null,
+        ILogger<TesseraMcpService>? logger = null)
     {
         _validator = validator;
         _broker = broker;
@@ -42,6 +54,7 @@ public sealed class TesseraMcpService
         _recipes = recipes;
         _options = options;
         _providers = providers ?? DisabledProviderGateway.Instance;
+        _logger = logger;
     }
 
     /// <summary>Lists the provider tools the current identity may call (dry — no upstream call).</summary>
@@ -146,6 +159,22 @@ public sealed class TesseraMcpService
     /// <summary>Validates the forwarded token and builds the (caller, end-user) identity, fail-closed.</summary>
     internal async Task<McpIdentity> ResolveAsync(string? token, CancellationToken cancellationToken)
     {
+        var identity = await ResolveInnerAsync(token, cancellationToken).ConfigureAwait(false);
+
+        // Diagnostic for an unresolved delegation. Emits ONLY non-sensitive token
+        // metadata (aud/iss/tid) plus the reason — never the token or username — so an
+        // operator can tell "no token forwarded" from "wrong audience/issuer/tenant".
+        if (_logger is not null && !identity.Authenticated)
+        {
+            var (aud, iss, tid) = SafeTokenClaims(token);
+            LogDelegationUnresolved(_logger, identity.Detail, !string.IsNullOrWhiteSpace(token), aud, iss, tid, null);
+        }
+
+        return identity;
+    }
+
+    private async Task<McpIdentity> ResolveInnerAsync(string? token, CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(token))
         {
             return new McpIdentity(null, null, "no forwarded end-user token (delegation fails closed)");
@@ -174,5 +203,56 @@ public sealed class TesseraMcpService
         // C2: the shared chat caller is trusted by NetworkPolicy + this verified token.
         var caller = new CallerIdentity(_options.ChatCallerId, VerificationMethod.Network);
         return new McpIdentity(caller, endUser, $"{_options.ChatCallerId} acting for {endUser.PreferredUsername ?? endUser.Subject}");
+    }
+
+    /// <summary>
+    /// Best-effort, UNVALIDATED read of a JWT's <c>aud</c>/<c>iss</c>/<c>tid</c> for
+    /// diagnostics only. Returns non-secret routing metadata; never the token or any
+    /// user claim. Returns dashes/question marks when absent or unparseable.
+    /// </summary>
+    private static (string Aud, string Iss, string Tid) SafeTokenClaims(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return ("-", "-", "-");
+        }
+
+        try
+        {
+            var parts = token.Split('.');
+            if (parts.Length < 2)
+            {
+                return ("?", "?", "?");
+            }
+
+            var payload = parts[1].Replace('-', '+').Replace('_', '/');
+            payload = (payload.Length % 4) switch
+            {
+                2 => payload + "==",
+                3 => payload + "=",
+                _ => payload,
+            };
+
+            var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload));
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            string Read(string key)
+            {
+                if (!root.TryGetProperty(key, out var value))
+                {
+                    return "-";
+                }
+                return value.ValueKind == JsonValueKind.Array
+                    ? string.Join(",", value.EnumerateArray().Select(e => e.GetString()))
+                    : value.GetString() ?? "-";
+            }
+
+            return (Read("aud"), Read("iss"), Read("tid"));
+        }
+        catch
+        {
+            return ("?", "?", "?");
+        }
     }
 }
