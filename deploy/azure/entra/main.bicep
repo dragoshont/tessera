@@ -21,10 +21,10 @@ extension microsoftGraphV1_0
 @description('Public hostname of the chat (LibreChat), e.g. chat.example.com')
 param chatDomain string
 
-@description('OIDC issuer of the Kubernetes cluster (for Tessera workload identity federation).')
-param clusterOidcIssuer string
+@description('OIDC issuer of the Kubernetes cluster for Tessera workload-identity federation. LEAVE EMPTY for a private/homelab cluster Entra cannot reach — Tessera then keeps using its service-principal secret (the deployed, working path) and NO federated credential is created.')
+param clusterOidcIssuer string = ''
 
-@description('Kubernetes namespace:serviceaccount subject for the Tessera broker.')
+@description('Kubernetes namespace:serviceaccount subject for the Tessera broker (only used when clusterOidcIssuer is set).')
 param tesseraServiceAccountSubject string = 'system:serviceaccount:default:tessera'
 
 // ── 1. Chat OIDC app ─────────────────────────────────────────────────────────
@@ -37,7 +37,10 @@ resource chatApp 'Microsoft.Graph/applications@v1.0' = {
   signInAudience: 'AzureADandPersonalMicrosoftAccount'
   web: {
     redirectUris: [
-      'https://${chatDomain}/oauth/callback/openid'
+      // LibreChat's OpenID callback is DOMAIN_SERVER + OPENID_CALLBACK_URL, and
+      // its route is /oauth/openid/callback (api/server/routes/oauth.js). Set
+      // OPENID_CALLBACK_URL=/oauth/openid/callback so this matches exactly.
+      'https://${chatDomain}/oauth/openid/callback'
     ]
     implicitGrantSettings: {
       enableIdTokenIssuance: false
@@ -99,10 +102,13 @@ resource tesseraApp 'Microsoft.Graph/applications@v1.0' = {
   displayName: 'Tessera Broker'
   signInAudience: 'AzureADMyOrg'
 
-  // Federated identity credential — secretless access to Key Vault.
-  // (If this child resource fails under the current Graph Bicep version, create
-  // it with the `az ad app federated-credential create` command in README.md.)
-  resource tesseraFic 'federatedIdentityCredentials@v1.0' = {
+  // Federated identity credential — secretless access to Key Vault. ONLY created
+  // when clusterOidcIssuer is provided. For a private/homelab cluster Entra
+  // cannot reach the cluster OIDC endpoint, so leave clusterOidcIssuer EMPTY and
+  // Tessera keeps using its service-principal secret (the deployed, working
+  // path). (If this child resource fails under the current Graph Bicep version,
+  // create it with the `az ad app federated-credential create` command in README.md.)
+  resource tesseraFic 'federatedIdentityCredentials@v1.0' = if (!empty(clusterOidcIssuer)) {
     name: 'tessera-broker/k8s-tessera'
     issuer: clusterOidcIssuer
     subject: tesseraServiceAccountSubject
@@ -121,6 +127,17 @@ resource tesseraSp 'Microsoft.Graph/servicePrincipals@v1.0' = {
 output chatAppId string = chatApp.appId
 // LibreChat: OPENID_SCOPE — points at the chat app = the shared audience (Flow B).
 output chatScope string = 'api://${chatApp.appId}/.default openid profile email offline_access'
+// LibreChat: the OpenID callback path to set as OPENID_CALLBACK_URL (matches the
+// redirect URI registered above).
+output openidCallbackUrl string = '/oauth/openid/callback'
+// LibreChat OPENID_ISSUER + Tessera TESSERA_OIDC_ISSUER. With
+// signInAudience=AzureADandPersonalMicrosoftAccount, sign-ins use the multi-tenant
+// /common authority; personal Microsoft accounts (e.g. gmail-backed) mint tokens
+// from the consumer tenant 9188040d-6c67-4c5b-b112-36a304b66dad. Tessera validates
+// the token's `aud` (= chatAppId) and signature; it should NOT pin a single `tid`
+// when personal MSAs are allowed (leave TESSERA_OIDC_TENANT_ID empty).
+output oidcIssuer string = 'https://login.microsoftonline.com/common/v2.0'
+output consumerTenantId string = '9188040d-6c67-4c5b-b112-36a304b66dad'
 // Tessera: the `aud` value to validate on the forwarded access token (Flow B).
 output expectedTokenAudience string = chatApp.appId
 // The application-type app role a non-human caller is assigned (see automation-caller.bicep).
