@@ -442,7 +442,7 @@ GitHub — or any other social login — works for delegation too.
   request lifecycle, deployment topologies, components, threat model, OSS landscape.
 - **[Decision records](docs/adr/README.md)** — *why* the load-bearing choices were
   made (stack, topology, store, tenancy, identity, drivers).
-- **Specs** — [recipes](docs/specs/recipes.md) · [harvest drivers](docs/specs/harvest-drivers.md).
+- **Specs** — [recipes](docs/specs/recipes.md) · [harvest drivers](docs/specs/harvest-drivers.md) · [identity & Azure setup](docs/specs/identity-azure-setup.md) · [LibreChat integration](docs/specs/librechat-integration.md).
 - **[Roadmap](docs/roadmap.md)** — the phased plan and the UI question.
 - **[Security policy](SECURITY.md)** — invariants and how to report a vulnerability.
 - Archived Python spike: [README](README.python-spike.md) ·
