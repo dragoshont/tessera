@@ -18,6 +18,7 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0009](0009-end-user-identity-propagation.md) | **Per-call end-user delegation required**; shared MCP forwards a signed token; own/forked chat for it (+ WebRTC) | Accepted |
 | [0010](0010-chat-client.md) | **Chat client: fork LibreChat** (reuse SSO/admin/RBAC/MCP + existing voice; harden multitenant) | Accepted |
 | [0011](0011-identity-provider-sso.md) | **IdP/SSO: Microsoft Entra direct** (Google off; GitHub deferred behind a broker; no new tool) | Accepted |
+| [0012](0012-chat-login-microsoft-only.md) | **Chat login is Microsoft-only** (Google can't forward a broker-acceptable token — no cross-IdP OBO, splits identities) | Accepted |
 
 ## Format
 
