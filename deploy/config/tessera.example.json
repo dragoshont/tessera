@@ -1,0 +1,15 @@
+{
+  "server": { "host": "0.0.0.0", "port": 8080 },
+  "identity": {
+    "mode": "oidc",
+    "trustDomain": "tessera.local",
+    "oidc": {
+      "issuer": "https://login.microsoftonline.com/<tenant-id>/v2.0",
+      "audience": "",
+      "tenantId": "<tenant-id>"
+    }
+  },
+  "policy": { "default": "deny", "document": "/config/grants.json" },
+  "audit": { "enabled": true, "path": "-" },
+  "egress": { "enabled": false, "allowedHosts": [] }
+}

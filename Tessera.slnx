@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Tessera.Broker/Tessera.Broker.csproj" />
+    <Project Path="src/Tessera.Cli/Tessera.Cli.csproj" />
     <Project Path="src/Tessera.Core/Tessera.Core.csproj" />
     <Project Path="src/Tessera.Identity/Tessera.Identity.csproj" />
     <Project Path="src/Tessera.Mcp/Tessera.Mcp.csproj" />

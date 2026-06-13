@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tessera.Cli — the `tessera` executable: `validate` (offline config + policy
+       check) and `serve` (run the broker host). The container entrypoint runs
+       `tessera serve`. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Tessera.Cli</RootNamespace>
+    <AssemblyName>tessera</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Tessera.Core/Tessera.Core.csproj" />
+    <ProjectReference Include="../Tessera.Broker/Tessera.Broker.csproj" />
+  </ItemGroup>
+
+</Project>

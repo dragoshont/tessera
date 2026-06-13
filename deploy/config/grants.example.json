@@ -1,0 +1,42 @@
+{
+  "grants": [
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "alice@example.com",
+      "target": "health-portal",
+      "actions": ["read:*"]
+    },
+    {
+      "caller": "app-crawler",
+      "target": "marketplace",
+      "actions": ["read:listings", "read:prices"]
+    }
+  ],
+  "bindings": [
+    {
+      "target": "health-portal",
+      "onBehalfOf": "alice@example.com",
+      "credential": "health-portal-session"
+    },
+    {
+      "target": "marketplace",
+      "credential": "marketplace-crawler-session"
+    }
+  ],
+  "recipes": [
+    {
+      "target": "health-portal",
+      "driver": "browser",
+      "egress": "none",
+      "actions": ["read:results"],
+      "description": "patient portal (read-only)"
+    },
+    {
+      "target": "marketplace",
+      "driver": "browser",
+      "egress": "none",
+      "actions": ["read:listings"],
+      "description": "marketplace listings"
+    }
+  ]
+}
