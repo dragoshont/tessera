@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tessera.Identity — verify the signed end-user / automation OIDC token (the
+       RFC 8693 subject_token). Validates the ACCESS token (never the id_token):
+       JWKS signature, issuer, audience, lifetime, tenant. Fail-closed until an
+       audience is configured (ADR 0005 / 0011, review C3/G2). -->
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Identity</RootNamespace>
+    <AssemblyName>Tessera.Identity</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Tessera.Core/Tessera.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tessera.Identity.Tests" />
+  </ItemGroup>
+
+</Project>
