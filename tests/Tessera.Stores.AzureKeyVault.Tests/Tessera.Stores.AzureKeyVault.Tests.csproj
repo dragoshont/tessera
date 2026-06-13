@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Stores.AzureKeyVault.Tests</RootNamespace>
+    <AssemblyName>Tessera.Stores.AzureKeyVault.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Tessera.Stores.AzureKeyVault/Tessera.Stores.AzureKeyVault.csproj" />
+  </ItemGroup>
+
+</Project>
