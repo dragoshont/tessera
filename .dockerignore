@@ -1,0 +1,17 @@
+# Build context hygiene — keep the image build small + reproducible.
+**/bin/
+**/obj/
+**/.vs/
+.git/
+.github/
+.venv/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+spike/
+tests/
+docs/
+deploy/
+*.md
+.gitignore
+.dockerignore
