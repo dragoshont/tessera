@@ -68,6 +68,24 @@ internal sealed class TokenFactory
         return Create(claims, audience, issuer: null, expires: null);
     }
 
+    /// <summary>
+    /// A user token for a specific tenant, where <c>iss</c> is the per-tenant Entra
+    /// template URL for that <paramref name="tid"/> (the real /common behaviour).
+    /// <paramref name="spoofIssuer"/> overrides <c>iss</c> to simulate an attacker
+    /// whose <c>iss</c> doesn't match its own <c>tid</c>.
+    /// </summary>
+    public string TenantToken(string tid, string oid = "oid-alice", string preferredUsername = "alice@example.com", string? audience = null, string? spoofIssuer = null)
+    {
+        var claims = new Dictionary<string, object>
+        {
+            ["oid"] = oid,
+            ["preferred_username"] = preferredUsername,
+            ["tid"] = tid,
+            ["jti"] = Guid.NewGuid().ToString("N"),
+        };
+        return Create(claims, audience, issuer: spoofIssuer ?? $"https://login.microsoftonline.com/{tid}/v2.0", expires: null);
+    }
+
     private string Create(Dictionary<string, object> claims, string? audience, string? issuer, DateTime? expires)
     {
         var handler = new JsonWebTokenHandler();

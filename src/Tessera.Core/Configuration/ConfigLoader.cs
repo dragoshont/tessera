@@ -66,8 +66,9 @@ public static class ConfigLoader
         var issuer = Get(env, "OIDC_ISSUER");
         var audience = Get(env, "OIDC_AUDIENCE");
         var tenantId = Get(env, "OIDC_TENANT_ID");
+        var allowedTenants = Get(env, "OIDC_ALLOWED_TENANTS");
         var trustDomain = Get(env, "TRUST_DOMAIN");
-        if (mode is not null || issuer is not null || audience is not null || tenantId is not null || trustDomain is not null)
+        if (mode is not null || issuer is not null || audience is not null || tenantId is not null || allowedTenants is not null || trustDomain is not null)
         {
             identity = new IdentityOptions
             {
@@ -78,6 +79,9 @@ public static class ConfigLoader
                     Issuer = issuer ?? identity.Oidc.Issuer,
                     Audience = audience ?? identity.Oidc.Audience,
                     TenantId = tenantId ?? identity.Oidc.TenantId,
+                    AllowedTenants = allowedTenants is not null
+                        ? allowedTenants.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        : identity.Oidc.AllowedTenants,
                 },
             };
         }

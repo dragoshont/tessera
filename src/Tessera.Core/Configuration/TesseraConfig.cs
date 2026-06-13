@@ -32,6 +32,12 @@ public sealed class OidcOptions
     /// <summary>The expected tenant id (<c>tid</c> claim).</summary>
     public string TenantId { get; init; } = "";
 
+    /// <summary>
+    /// For a multi-tenant authority (<c>/common</c> etc.), the tenant IDs allowed
+    /// to sign in. Empty = any tenant whose issuer matches the Entra template.
+    /// </summary>
+    public IReadOnlyList<string> AllowedTenants { get; init; } = [];
+
     /// <summary>True once an audience is configured (delegation can be enforced).</summary>
     [JsonIgnore]
     public bool DelegationEnabled => !string.IsNullOrWhiteSpace(Audience);

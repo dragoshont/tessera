@@ -158,6 +158,7 @@ public static class BrokerHost
                 Issuer = config.Identity.Oidc.Issuer,
                 Audience = config.Identity.Oidc.Audience,
                 TenantId = config.Identity.Oidc.TenantId,
+                AllowedTenants = config.Identity.Oidc.AllowedTenants,
             });
         }
 

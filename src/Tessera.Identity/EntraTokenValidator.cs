@@ -77,7 +77,6 @@ public sealed class EntraTokenValidator : ITokenValidator
 
         var parameters = new TokenValidationParameters
         {
-            ValidIssuer = _options.Issuer,
             ValidateIssuer = true,
             // Flow B: aud is the shared system app id. Accept both the bare id (v2
             // access tokens) and the api:// form (v1) for tolerance.
@@ -90,6 +89,19 @@ public sealed class EntraTokenValidator : ITokenValidator
             RequireSignedTokens = true,
             ClockSkew = _options.ClockSkew,
         };
+
+        if (_options.IsMultiTenantAuthority)
+        {
+            // A /common (or /organizations, /consumers) token's real `iss` is the
+            // PER-TENANT URL, never the authority. Validate it matches the Entra
+            // template for the token's own `tid`, optionally restricted to an
+            // allow-list of tenants (Microsoft's documented multi-tenant pattern).
+            parameters.IssuerValidator = ValidateTemplateIssuer;
+        }
+        else
+        {
+            parameters.ValidIssuer = _options.Issuer;
+        }
 
         var result = await _handler.ValidateTokenAsync(token, parameters).ConfigureAwait(false);
         if (!result.IsValid)
@@ -123,5 +135,48 @@ public sealed class EntraTokenValidator : ITokenValidator
         }
 
         return flat;
+    }
+
+    /// <summary>
+    /// Validates a multi-tenant issuer: the token's <c>iss</c> must equal
+    /// <c>https://login.microsoftonline.com/&lt;tid&gt;/v2.0</c> for the token's own
+    /// <c>tid</c>, and (when an allow-list is set) that <c>tid</c> must be allowed.
+    /// Returns the issuer when valid; throws otherwise (fail-closed).
+    /// </summary>
+    private string ValidateTemplateIssuer(string issuer, SecurityToken token, TokenValidationParameters parameters)
+    {
+        string? tid = null;
+        if (token is JsonWebToken jwt && jwt.TryGetPayloadValue<string>("tid", out var value))
+        {
+            tid = value;
+        }
+
+        if (string.IsNullOrEmpty(tid))
+        {
+            throw new SecurityTokenInvalidIssuerException("token has no tid claim for multi-tenant issuer validation")
+            {
+                InvalidIssuer = issuer,
+            };
+        }
+
+        var expected = $"https://login.microsoftonline.com/{tid}/v2.0";
+        if (!string.Equals(issuer, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SecurityTokenInvalidIssuerException($"issuer '{issuer}' does not match the Entra template for tid '{tid}'")
+            {
+                InvalidIssuer = issuer,
+            };
+        }
+
+        if (_options.AllowedTenants.Count > 0
+            && !_options.AllowedTenants.Contains(tid, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new SecurityTokenInvalidIssuerException($"tenant '{tid}' is not in the allow-list")
+            {
+                InvalidIssuer = issuer,
+            };
+        }
+
+        return issuer;
     }
 }

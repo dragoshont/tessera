@@ -113,4 +113,62 @@ public sealed class EntraTokenValidatorTests
         var result = await Validator(factory).ValidateAsync("");
         Assert.False(result.Succeeded);
     }
+
+    // ── Multi-tenant (/common) issuer validation ──────────────────────────────
+
+    // Generic test tenants (NOT real). The consumer-tenant constant below is the
+    // documented, public Microsoft personal-account tenant — not anyone's data.
+    private const string WorkforceTenant = "11111111-1111-1111-1111-111111111111";
+    private const string ConsumerTenant = "9188040d-6c67-4c5b-b112-36a304b66dad";
+
+    private static EntraTokenValidator MultiTenantValidator(TokenFactory factory, params string[] allowedTenants)
+    {
+        var options = new OidcValidationOptions
+        {
+            Issuer = "https://login.microsoftonline.com/common/v2.0",
+            Audience = TokenFactory.Audience,
+            AllowedTenants = allowedTenants,
+        };
+        return new EntraTokenValidator(factory.ConfigurationManager(), options);
+    }
+
+    [Fact]
+    public async Task MultiTenant_accepts_a_token_whose_iss_matches_its_tid()
+    {
+        var factory = new TokenFactory();
+        var result = await MultiTenantValidator(factory).ValidateAsync(
+            factory.TenantToken(WorkforceTenant, preferredUsername: "alice@example.com"));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("alice@example.com", result.ToEndUserAssertion()!.PreferredUsername);
+    }
+
+    [Fact]
+    public async Task MultiTenant_accepts_a_personal_msa_consumer_tenant_token()
+    {
+        var factory = new TokenFactory();
+        var result = await MultiTenantValidator(factory).ValidateAsync(
+            factory.TenantToken(ConsumerTenant, preferredUsername: "bob@example.com"));
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task MultiTenant_rejects_a_spoofed_issuer_not_matching_its_tid()
+    {
+        var factory = new TokenFactory();
+        // tid says tenant-B, but iss claims tenant-A → reject.
+        var result = await MultiTenantValidator(factory).ValidateAsync(
+            factory.TenantToken("tenant-B", spoofIssuer: "https://login.microsoftonline.com/tenant-A/v2.0"));
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task MultiTenant_allow_list_blocks_unlisted_tenants()
+    {
+        var factory = new TokenFactory();
+        var validator = MultiTenantValidator(factory, WorkforceTenant);
+
+        Assert.True((await validator.ValidateAsync(factory.TenantToken(WorkforceTenant))).Succeeded);
+        Assert.False((await validator.ValidateAsync(factory.TenantToken("some-other-tenant"))).Succeeded);
+    }
 }
