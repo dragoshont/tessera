@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tessera.Core — the identity & decision model, fail-closed PDP, credential
+       resolution, audit + broker pipeline, recipe model and config. NO I/O beyond
+       reading config files; NO Azure, NO web. This is the auditable security core
+       everything else builds on (ADR 0001, roadmap phase 1). -->
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Core</RootNamespace>
+    <AssemblyName>Tessera.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tessera.Core.Tests" />
+  </ItemGroup>
+
+</Project>

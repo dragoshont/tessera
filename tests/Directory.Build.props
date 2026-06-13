@@ -1,0 +1,13 @@
+<Project>
+
+  <!-- Inherit the repo-root common settings, then relax a few rules that are noise
+       in test code (underscore test names, ConfigureAwait, literal arrays). -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>$(NoWarn);CA1707;CA1861;CA2007;CA1515</NoWarn>
+  </PropertyGroup>
+
+</Project>
