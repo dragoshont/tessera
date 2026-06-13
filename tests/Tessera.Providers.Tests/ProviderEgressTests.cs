@@ -151,4 +151,80 @@ public sealed class ProviderEgressTests
         Assert.Equal(ProviderCallStatus.NotAllowed, result.Status);
         Assert.Equal(0, transport.Calls);
     }
+
+    [Fact]
+    public async Task Cookie_map_builds_named_cookies_from_token_fields()
+    {
+        var store = new InMemoryCredentialStore();
+        store.Put("portal-alice", new CredentialBundle(AccessToken: "AT123", RefreshToken: "RT456"));
+        var pdp = new PolicyDecisionPoint([new Grant(Caller, Target, ["read:*"], User)]);
+        var resolver = new CredentialResolver([new TargetBinding(Target, "portal-alice", User)], store);
+        var transport = new FakeTransport();
+        var recipe = new Recipe(Target, Egress: EgressMode.Http, UpstreamBaseUrl: $"https://{Host}/v1",
+            Injection: InjectionKind.Cookies,
+            Tools: [new RecipeTool("portal_list_items", "GET", "items", "read:items")],
+            CookieMap: new Dictionary<string, string>
+            {
+                ["TokenSSO"] = "access_token",
+                ["RefreshTokenSSO"] = "refresh_token",
+            });
+        var egress = new ProviderEgress(new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, [recipe], new SsrfGuard([Host]), transport);
+
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal("TokenSSO=AT123; RefreshTokenSSO=RT456", transport.LastHeaders!["Cookie"]);
+    }
+
+    [Fact]
+    public async Task Cookie_map_refuses_when_a_named_source_is_missing()
+    {
+        var store = new InMemoryCredentialStore();
+        store.Put("portal-alice", new CredentialBundle(AccessToken: "AT123")); // no refresh token
+        var pdp = new PolicyDecisionPoint([new Grant(Caller, Target, ["read:*"], User)]);
+        var resolver = new CredentialResolver([new TargetBinding(Target, "portal-alice", User)], store);
+        var transport = new FakeTransport();
+        var recipe = new Recipe(Target, Egress: EgressMode.Http, UpstreamBaseUrl: $"https://{Host}/v1",
+            Injection: InjectionKind.Cookies,
+            Tools: [new RecipeTool("portal_list_items", "GET", "items", "read:items")],
+            CookieMap: new Dictionary<string, string>
+            {
+                ["TokenSSO"] = "access_token",
+                ["RefreshTokenSSO"] = "refresh_token",
+            });
+        var egress = new ProviderEgress(new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, [recipe], new SsrfGuard([Host]), transport);
+
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.NoCredential, result.Status);
+        Assert.Equal(0, transport.Calls);
+    }
+
+    [Fact]
+    public async Task Env_placeholder_resolves_provider_wide_header()
+    {
+        Environment.SetEnvironmentVariable("TESSERA_TEST_SUBKEY", "SUBKEY789");
+        try
+        {
+            var store = new InMemoryCredentialStore();
+            store.Put("portal-alice", new CredentialBundle(Cookies: new Dictionary<string, string> { ["s"] = "1" }));
+            var pdp = new PolicyDecisionPoint([new Grant(Caller, Target, ["read:*"], User)]);
+            var resolver = new CredentialResolver([new TargetBinding(Target, "portal-alice", User)], store);
+            var transport = new FakeTransport();
+            var recipe = new Recipe(Target, Egress: EgressMode.Http, UpstreamBaseUrl: $"https://{Host}/v1",
+                Injection: InjectionKind.Cookies,
+                Tools: [new RecipeTool("portal_list_items", "GET", "items", "read:items")],
+                ExtraHeaders: new Dictionary<string, string> { ["Ocp-Apim-Subscription-Key"] = "{env:TESSERA_TEST_SUBKEY}" });
+            var egress = new ProviderEgress(new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, [recipe], new SsrfGuard([Host]), transport);
+
+            var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+            Assert.Equal(ProviderCallStatus.Completed, result.Status);
+            Assert.Equal("SUBKEY789", transport.LastHeaders!["Ocp-Apim-Subscription-Key"]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TESSERA_TEST_SUBKEY", null);
+        }
+    }
 }

@@ -38,6 +38,7 @@ internal sealed class RecipeDto
     public List<string>? Actions { get; init; }
     public List<RecipeToolDto>? Tools { get; init; }
     public Dictionary<string, string>? ExtraHeaders { get; init; }
+    public Dictionary<string, string>? CookieMap { get; init; }
     public string? Description { get; init; }
 }
 
@@ -94,6 +95,7 @@ public sealed record LoadedPolicy(
                     .Select(t => new RecipeTool(t.Name, t.Method, t.Path, t.Action, t.StepUp, t.Description))
                     .ToArray(),
                 ExtraHeaders: r.ExtraHeaders,
+                CookieMap: r.CookieMap,
                 Description: r.Description))
             .ToArray();
 

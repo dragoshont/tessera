@@ -24,9 +24,10 @@ internal static class ProviderHeaders
             headers[name] = value;
         }
 
-        // Static-header values may reference a bundle `extra` field as {extra:key},
-        // so an operator can put a per-account API key in the vault, not in config.
-        ResolveExtraPlaceholders(headers, bundle);
+        // Static-header values may reference a bundle `extra` field as {extra:key}
+        // (per-account secret kept in the vault, not config) or a process env var
+        // as {env:NAME} (a provider-wide key projected from a K8s secret).
+        ResolvePlaceholders(headers, bundle);
 
         switch (recipe.Injection)
         {
@@ -34,32 +35,76 @@ internal static class ProviderHeaders
                 headers["Authorization"] = $"Bearer {bundle.AccessToken}";
                 return headers;
 
-            case InjectionKind.Cookies when bundle.HasCookies:
-                headers["Cookie"] = string.Join("; ", bundle.Cookies!.Select(kv => $"{kv.Key}={kv.Value}"));
+            case InjectionKind.Cookies:
+                var cookie = BuildCookieHeader(recipe, bundle);
+                if (cookie is null)
+                {
+                    return null; // a required cookie source was missing
+                }
+                headers["Cookie"] = cookie;
                 return headers;
 
             case InjectionKind.None:
             case InjectionKind.BearerToken:
-            case InjectionKind.Cookies:
             default:
                 return null; // missing the required credential material
         }
     }
 
-    private static void ResolveExtraPlaceholders(Dictionary<string, string> headers, CredentialBundle bundle)
+    /// <summary>
+    /// Builds the <c>Cookie</c> header. When the recipe declares a cookie map
+    /// (cookie name → bundle source) the header is assembled from named bundle
+    /// fields — so a portal that carries its session as <c>TokenSSO</c>/
+    /// <c>RefreshTokenSSO</c> cookies can be fed from the bundle's access/refresh
+    /// tokens. Otherwise the raw cookie dict is joined as-is. Returns null when a
+    /// required source is absent so the egress refuses rather than send a half-auth
+    /// request.
+    /// </summary>
+    private static string? BuildCookieHeader(Recipe recipe, CredentialBundle bundle)
     {
-        if (bundle.Extra is null || bundle.Extra.Count == 0)
+        if (recipe.CookieSources.Count > 0)
         {
-            return;
+            var parts = new List<string>(recipe.CookieSources.Count);
+            foreach (var (cookieName, source) in recipe.CookieSources)
+            {
+                var value = ResolveCookieSource(source, bundle);
+                if (string.IsNullOrEmpty(value))
+                {
+                    return null; // declared cookie has no backing value
+                }
+                parts.Add($"{cookieName}={value}");
+            }
+            return string.Join("; ", parts);
         }
 
+        return bundle.HasCookies
+            ? string.Join("; ", bundle.Cookies!.Select(kv => $"{kv.Key}={kv.Value}"))
+            : null;
+    }
+
+    private static string? ResolveCookieSource(string source, CredentialBundle bundle) => source switch
+    {
+        "access_token" => bundle.AccessToken,
+        "refresh_token" => bundle.RefreshToken,
+        _ when source.StartsWith("cookie:", StringComparison.Ordinal) =>
+            bundle.Cookies is not null && bundle.Cookies.TryGetValue(source[7..], out var c) ? c : null,
+        _ => null,
+    };
+
+    private static void ResolvePlaceholders(Dictionary<string, string> headers, CredentialBundle bundle)
+    {
         foreach (var key in headers.Keys.ToArray())
         {
             var value = headers[key];
             if (value.StartsWith("{extra:", StringComparison.Ordinal) && value.EndsWith('}'))
             {
                 var field = value[7..^1];
-                headers[key] = bundle.Extra.TryGetValue(field, out var v) ? v : "";
+                headers[key] = bundle.Extra is not null && bundle.Extra.TryGetValue(field, out var v) ? v : "";
+            }
+            else if (value.StartsWith("{env:", StringComparison.Ordinal) && value.EndsWith('}'))
+            {
+                var name = value[5..^1];
+                headers[key] = Environment.GetEnvironmentVariable(name) ?? "";
             }
         }
     }
