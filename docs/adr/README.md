@@ -13,6 +13,7 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0004](0004-tenancy-and-isolation.md) | **Multitenant by default + optional dedicated instance**; per-tenant envelope keys; medical → dedicated | Accepted |
 | [0005](0005-identity-first-fail-closed.md) | **Verified identity first, fail-closed**; tenant derived only from proven identity | Accepted |
 | [0006](0006-harvest-drivers.md) | **Pluggable harvest drivers**: browser today; Android emulator & desktop as future drivers | Accepted |
+| [0007](0007-worker-transport.md) | **Broker ⇄ worker transport: gRPC + mTLS** (typed contracts, bidi streaming) | Accepted |
 
 ## Format
 

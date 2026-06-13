@@ -236,9 +236,10 @@ no OAuth (and eventually no web) + per-end-user identity.**
 
 ## 8. Open questions (tracked for build phase)
 
-- **Worker registration protocol**: gRPC + mTLS (go-plugin-style) vs a lightweight
-  HTTP/2 capability-registration (Selenium-Grid-style). Lean gRPC for typed
-  bidirectional streaming; confirm during the workers phase.
+- **Worker registration protocol**: **decided — gRPC + mTLS** with typed `.proto`
+  contracts and bidirectional streaming ([ADR 0007](adr/0007-worker-transport.md)).
+  We keep Selenium Grid's capability-*routing* model but use go-plugin-style
+  gRPC transport; co-located workers use the same contract over a local channel.
 - **Envelope-key rotation**: per-tenant key rotation cadence and re-wrap strategy.
 - **Browser-egress channel**: how the broker hands a scoped `act()` to a worker
   without the cookie crossing into the broker (capability handle vs delegated call).

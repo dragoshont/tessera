@@ -39,9 +39,10 @@ circuit breaker + CDP harvest). A worker wraps it; the broker stays browserless.
 
 ## Worker registration & routing
 
-A worker advertises **capabilities** and registers with the broker over **mTLS**.
-The broker routes a harvest/act job to a worker that has the needed capability —
-the Selenium-Grid model, with go-plugin-style out-of-process isolation
+A worker advertises **capabilities** and registers with the broker over **gRPC +
+mTLS** ([ADR 0007](../adr/0007-worker-transport.md)). The broker routes a
+harvest/act job to a worker that has the needed capability — the Selenium-Grid
+routing model, with go-plugin-style out-of-process isolation over typed gRPC
 ([ADR 0002](../adr/0002-broker-worker-topology.md)).
 
 ```mermaid
@@ -80,8 +81,6 @@ sequenceDiagram
 
 ## Open questions
 
-- Registration/transport: gRPC bidi streaming (typed, go-plugin-like) vs HTTP/2
-  capability registration (Selenium-like). Leaning gRPC.
 - `act()` channel for `driven` providers: how to give the worker a scoped, expiring
   instruction without the broker ever touching the cookie.
 - Android driver: emulator vs device farm; attestation/anti-bot arms race; whether
