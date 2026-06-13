@@ -1,0 +1,81 @@
+name: deploy-entra
+
+# Pipeline-driven IaC for the Microsoft Entra app registrations Tessera + the chat
+# need (the SAME deploy/azure/entra/main.bicep a human can run directly). This is
+# the reusable, product-grade path; a household can also just run the one-liner in
+# deploy/azure/entra/README.md.
+#
+# ── One-time human bootstrap (irreducible — any identity IaC needs it) ─────────
+# A pipeline needs its OWN Azure identity to run, and Entra app permissions need a
+# Global Admin's consent. Do this once, by hand, then this workflow is hands-off:
+#   1. az ad app create --display-name tessera-entra-deployer
+#   2. Add a FEDERATED credential trusting this repo's Actions OIDC subject:
+#        az ad app federated-credential create --id <deployerAppId> --parameters '{
+#          "name":"gha-main","issuer":"https://token.actions.githubusercontent.com",
+#          "subject":"repo:dragoshont/tessera:ref:refs/heads/main",
+#          "audiences":["api://AzureADTokenExchange"]}'
+#   3. Grant it Microsoft Graph Application.ReadWrite.OwnedBy (least-priv: manage
+#      only the apps it creates) + admin-consent THAT grant (the human gate):
+#        az ad app permission admin-consent --id <deployerAppId>
+#   4. Save repo secrets: AZURE_CLIENT_ID (deployerAppId), AZURE_TENANT_ID,
+#      AZURE_SUBSCRIPTION_ID.
+# After step 4, every run is secretless (OIDC federation, no stored client secret).
+
+on:
+  workflow_dispatch:
+    inputs:
+      chatDomain:
+        description: Public hostname of the chat (LibreChat), e.g. chat.example.com
+        required: true
+        type: string
+      location:
+        description: Azure region for the deployment metadata
+        required: false
+        default: westeurope
+        type: string
+
+permissions:
+  id-token: write   # OIDC federation to Azure (no client secret)
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: entra   # gate runs behind a GitHub Environment approval if desired
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC, secretless)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: What-if (preview; Graph resources show as unsupported — expected)
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az deployment sub what-if \
+              --location "${{ inputs.location }}" \
+              --template-file deploy/azure/entra/main.bicep \
+              --parameters chatDomain="${{ inputs.chatDomain }}" \
+              --no-pretty-print || true
+
+      - name: Deploy Entra apps (same main.bicep a human runs)
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az deployment sub create \
+              --location "${{ inputs.location }}" \
+              --template-file deploy/azure/entra/main.bicep \
+              --parameters chatDomain="${{ inputs.chatDomain }}" \
+              --query 'properties.outputs' -o json | tee entra-outputs.json
+
+      - name: Summarize outputs (chatAppId, issuer, callback)
+        run: |
+          echo '### Entra deploy outputs' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat entra-outputs.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Next: az ad app permission admin-consent --id <chatAppId> (Global Admin click).' >> "$GITHUB_STEP_SUMMARY"

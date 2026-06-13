@@ -26,24 +26,43 @@ be an Entra IdP without a broker — [ADR 0011](../../../docs/adr/0011-identity-
 
 - Azure CLI with the **Bicep** + **Microsoft Graph** support, signed in to the
   target tenant (`az login`), with rights to create app registrations.
-- The cluster's **OIDC issuer URL** (for workload identity federation).
+- The cluster's **OIDC issuer URL** — **only** if you want workload-identity
+  federation. For a **private / homelab cluster Entra can't reach, omit it**: the
+  broker keeps its working service-principal secret and no federated credential is
+  created.
 
-## Deploy
+## Deploy — two paths, same Bicep
+
+Both apply the identical `main.bicep` (declarative IaC). Pick by context.
+
+### A) Pipeline (reusable, product-grade)
+
+[`.github/workflows/deploy-entra.yml`](../../../.github/workflows/deploy-entra.yml)
+runs this Bicep via **Azure OIDC** (no stored secret) on `workflow_dispatch`. It
+needs a **one-time human bootstrap** (a deployer app + admin-consent) documented at
+the top of that workflow — an irreducible step for *any* identity IaC. After that,
+deploys are pipeline-driven and auditable.
+
+### B) Direct apply (fastest for a household — this *is* the IaC)
 
 ```bash
 az deployment sub create \
   --location westeurope \
   --template-file main.bicep \
-  --parameters chatDomain=chat.example.com \
-               clusterOidcIssuer="https://<your-cluster-oidc-issuer>"
+  --parameters chatDomain=chat.example.com
+# (add clusterOidcIssuer="https://<issuer>" ONLY for a publicly-reachable cluster)
 ```
 
-Then wire LibreChat from the outputs:
+Then grant consent (the human gate) and wire LibreChat from the outputs:
 
 ```bash
+az ad app permission admin-consent --id <chatAppId output>   # or the portal button
+
 OPENID_REUSE_TOKENS=true
-OPENID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+# Personal Microsoft accounts (gmail-backed) sign in via /common:
+OPENID_ISSUER=https://login.microsoftonline.com/common/v2.0
 OPENID_CLIENT_ID=<chatAppId output>
+OPENID_CALLBACK_URL=/oauth/openid/callback     # LibreChat's real OpenID callback
 OPENID_SCOPE="api://<chatAppId>/.default openid profile email offline_access"
 # (client secret created out-of-band or via cert; never commit it)
 ```
