@@ -25,6 +25,7 @@ public sealed class TesseraMcpService
     private readonly PolicyDecisionPoint _pdp;
     private readonly IReadOnlyList<Recipe> _recipes;
     private readonly TesseraMcpOptions _options;
+    private readonly IProviderGateway _providers;
 
     /// <summary>Creates the MCP service over the identity + broker pipeline.</summary>
     public TesseraMcpService(
@@ -32,13 +33,51 @@ public sealed class TesseraMcpService
         BrokerCore broker,
         PolicyDecisionPoint pdp,
         IReadOnlyList<Recipe> recipes,
-        TesseraMcpOptions options)
+        TesseraMcpOptions options,
+        IProviderGateway? providers = null)
     {
         _validator = validator;
         _broker = broker;
         _pdp = pdp;
         _recipes = recipes;
         _options = options;
+        _providers = providers ?? DisabledProviderGateway.Instance;
+    }
+
+    /// <summary>Lists the provider tools the current identity may call (dry — no upstream call).</summary>
+    public async Task<ListProviderToolsResult> ListProviderToolsAsync(string? token, CancellationToken cancellationToken = default)
+    {
+        var identity = await ResolveAsync(token, cancellationToken).ConfigureAwait(false);
+        if (!identity.Authenticated)
+        {
+            return new ListProviderToolsResult(false, [], identity.Detail);
+        }
+
+        var tools = _providers.ListTools(identity.Caller!, identity.User);
+        return new ListProviderToolsResult(true, tools, identity.Detail);
+    }
+
+    /// <summary>
+    /// Calls a provider tool for the current identity. <paramref name="confirmed"/>
+    /// must be true to run a write/booking tool.
+    /// </summary>
+    public async Task<ProviderCallToolResult> CallProviderAsync(
+        string? token,
+        string target,
+        string tool,
+        string? argsJson,
+        bool confirmed,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await ResolveAsync(token, cancellationToken).ConfigureAwait(false);
+        if (!identity.Authenticated)
+        {
+            return new ProviderCallToolResult("denied", null, null, identity.Detail);
+        }
+
+        return await _providers
+            .CallAsync(identity.Caller!, identity.User, target, tool, argsJson, confirmed, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Reports the identity Tessera resolved for the current call.</summary>

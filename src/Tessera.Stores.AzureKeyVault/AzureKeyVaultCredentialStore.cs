@@ -14,7 +14,7 @@ namespace Tessera.Stores.AzureKeyVault;
 /// so it works against the existing harvester service principal and upgrades to WIF
 /// with no code change.
 /// </summary>
-public sealed class AzureKeyVaultCredentialStore : ICredentialStore
+public sealed class AzureKeyVaultCredentialStore : ICredentialStore, ICredentialWriter
 {
     private readonly SecretClient _client;
 
@@ -74,6 +74,37 @@ public sealed class AzureKeyVaultCredentialStore : ICredentialStore
         catch (AuthenticationFailedException ex)
         {
             throw new StoreException($"Key Vault auth failed reading '{name}': {ex.Message}", ex);
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task PutBundleAsync(string name, CredentialBundle bundle, CancellationToken cancellationToken = default)
+    {
+        // Merge-then-write: re-read the current secret and overlay the rotated
+        // fields, so a concurrent harvester write isn't clobbered (the bundle may
+        // carry fields we don't model). Only the sole session owner calls this.
+        string merged;
+        try
+        {
+            Response<KeyVaultSecret> current = await _client.GetSecretAsync(name, cancellationToken: cancellationToken).ConfigureAwait(false);
+            merged = BundleParser.Merge(current.Value.Value, bundle);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            merged = BundleParser.Serialize(bundle);
+        }
+
+        try
+        {
+            await _client.SetSecretAsync(name, merged, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RequestFailedException ex)
+        {
+            throw new StoreException($"Key Vault SET '{name}' failed: HTTP {ex.Status}", ex);
+        }
+        catch (AuthenticationFailedException ex)
+        {
+            throw new StoreException($"Key Vault auth failed writing '{name}': {ex.Message}", ex);
         }
     }
 }

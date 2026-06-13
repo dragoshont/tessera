@@ -26,3 +26,15 @@ public interface ICredentialStore
     /// <exception cref="StoreException">The store could not be read.</exception>
     Task<CredentialBundle> GetBundleAsync(string name, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Optional write-back for stores that can persist a rotated bundle. Only the
+/// <em>sole session owner</em> writes (ADR 0014): when Tessera owns rotation it
+/// merges the rotated tokens back so the next read uses the live session.
+/// </summary>
+public interface ICredentialWriter
+{
+    /// <summary>Persists <paramref name="bundle"/> under <paramref name="name"/> (merge-then-write).</summary>
+    /// <exception cref="StoreException">The store could not be written.</exception>
+    Task PutBundleAsync(string name, CredentialBundle bundle, CancellationToken cancellationToken = default);
+}

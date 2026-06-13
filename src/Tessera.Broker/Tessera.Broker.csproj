@@ -23,6 +23,7 @@
     <ProjectReference Include="../Tessera.Core/Tessera.Core.csproj" />
     <ProjectReference Include="../Tessera.Identity/Tessera.Identity.csproj" />
     <ProjectReference Include="../Tessera.Stores.AzureKeyVault/Tessera.Stores.AzureKeyVault.csproj" />
+    <ProjectReference Include="../Tessera.Providers/Tessera.Providers.csproj" />
     <ProjectReference Include="../Tessera.Mcp/Tessera.Mcp.csproj" />
   </ItemGroup>
 

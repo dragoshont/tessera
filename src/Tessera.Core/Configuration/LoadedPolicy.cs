@@ -36,6 +36,18 @@ internal sealed class RecipeDto
     public string? UpstreamBaseUrl { get; init; }
     public string? Injection { get; init; }
     public List<string>? Actions { get; init; }
+    public List<RecipeToolDto>? Tools { get; init; }
+    public Dictionary<string, string>? ExtraHeaders { get; init; }
+    public string? Description { get; init; }
+}
+
+internal sealed class RecipeToolDto
+{
+    public string Name { get; init; } = "";
+    public string Method { get; init; } = "GET";
+    public string Path { get; init; } = "";
+    public string Action { get; init; } = "";
+    public bool StepUp { get; init; }
     public string? Description { get; init; }
 }
 
@@ -78,6 +90,10 @@ public sealed record LoadedPolicy(
                 UpstreamBaseUrl: r.UpstreamBaseUrl,
                 Injection: ParseInjection(r.Injection),
                 Actions: r.Actions,
+                Tools: r.Tools?
+                    .Select(t => new RecipeTool(t.Name, t.Method, t.Path, t.Action, t.StepUp, t.Description))
+                    .ToArray(),
+                ExtraHeaders: r.ExtraHeaders,
                 Description: r.Description))
             .ToArray();
 

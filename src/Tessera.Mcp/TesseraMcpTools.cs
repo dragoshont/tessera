@@ -47,6 +47,23 @@ public sealed class TesseraMcpTools
         CancellationToken cancellationToken) =>
         _service.CheckAccessAsync(ForwardedToken(), target, action, cancellationToken);
 
+    /// <summary>Lists the provider operations the signed-in user may call.</summary>
+    [McpServerTool(Name = "tessera_list_provider_tools")]
+    [Description("List the provider operations (per target) the signed-in user may call through Tessera — each with its method and whether it is a write that needs confirmation. Read-only.")]
+    public Task<ListProviderToolsResult> ListProviderToolsAsync(CancellationToken cancellationToken) =>
+        _service.ListProviderToolsAsync(ForwardedToken(), cancellationToken);
+
+    /// <summary>Calls a provider operation on behalf of the signed-in user (Tessera injects their credential).</summary>
+    [McpServerTool(Name = "tessera_call")]
+    [Description("Call a provider operation as the signed-in user — Tessera injects that user's credential and returns only the result (the caller never sees the secret). For a WRITE/booking operation you MUST first read back the exact details to the user, get a spoken/typed yes, then call again with confirm=true; a write never runs with confirm=false.")]
+    public Task<ProviderCallToolResult> CallAsync(
+        [Description("The provider/target, e.g. the health portal.")] string target,
+        [Description("The operation name, from tessera_list_provider_tools.")] string tool,
+        [Description("Optional JSON arguments/body for the operation.")] string? args,
+        [Description("Set true ONLY for a write/booking after the user has explicitly confirmed the exact details.")] bool confirm,
+        CancellationToken cancellationToken) =>
+        _service.CallProviderAsync(ForwardedToken(), target, tool, args, confirm, cancellationToken);
+
     private string? ForwardedToken()
     {
         var context = _httpContextAccessor.HttpContext;

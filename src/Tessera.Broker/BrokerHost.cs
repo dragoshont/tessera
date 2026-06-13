@@ -115,6 +115,12 @@ public static class BrokerHost
         services.AddSingleton(status);
         services.AddHttpForwarder();
         services.AddSingleton(sp => new InjectionEgress(config.Egress, sp.GetRequiredService<IHttpForwarder>()));
+        // Provider egress (ADR 0014): the real HTTP transport + the gateway the MCP
+        // surface uses to inject a credential by identity. Disabled (every call
+        // refused) until egress.enabled — so deploying never opens an upstream path.
+        services.AddSingleton<Tessera.Providers.IHttpTransport>(new Egress.HttpClientTransport());
+        services.AddSingleton<Tessera.Mcp.IProviderGateway>(sp => BrokerProviderGateway.Build(
+            config, pdp, resolver, policy.Recipes, sp.GetRequiredService<Tessera.Providers.IHttpTransport>()));
         services.AddTesseraMcp(mcpOptions);
 
         var app = builder.Build();
