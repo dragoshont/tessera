@@ -1,81 +1,93 @@
-# Tessera — Roadmap
+# Tessera — Roadmap (.NET 10)
 
-Tessera is built in phases that each leave the project in a coherent, honest
-state. The guiding rule: **the identity primitive comes first**, because every
-per-identity feature is a confused-deputy vulnerability until callers can be
-cryptographically verified.
+Built in phases that each leave the project coherent and honest. The guiding rule
+is unchanged: **the identity primitive comes first**, because every per-identity
+feature is a confused-deputy vulnerability until callers are cryptographically
+verified ([ADR 0005](adr/0005-identity-first-fail-closed.md)).
+
+> The Python spike (v0.0.2) is archived (`*.python-spike.md`). It proved the model
+> and ran live read-only. The .NET 10 build replaces it; no backwards compat.
 
 ---
 
-## Phase 1 — Identity & policy core  ✅ *(v0.0.1, shipped)*
+## Phase 0 — Design  ✅ *(this phase)*
 
-The trustworthy foundation, fully offline-tested, stdlib-only.
+Architecture, ADRs, and specs (you are here):
+[architecture](architecture.md) · [ADRs](adr/README.md) ·
+[recipes](specs/recipes.md) · [harvest drivers](specs/harvest-drivers.md).
 
-- `model.py` — the two-identity vocabulary (`CallerIdentity`, `EndUserAssertion`,
-  `AccessRequest`, `Decision`).
-- `config.py` — TOML config with safe defaults and fail-closed validation
-  (refuses fail-open policy; refuses unverified callers off loopback).
-- `policy.py` — the fail-closed **Policy Decision Point**: default deny, exact
-  delegation matching, glob-scoped least-privilege actions.
-- `tessera validate` — author a config + grants and get immediate, specific
-  feedback.
+## Phase 1 — Broker core (.NET 10)
 
-## Phase 2 — The data plane (injection)
+The trustworthy foundation, offline-tested (xUnit), no I/O in `Tessera.Core`.
 
-Turn the decision core into a running broker.
+- `Tessera.Core`: identity & decision model (`CallerIdentity`, `EndUserAssertion`,
+  `AccessRequest`, `Decision`), **tenant** model, fail-closed **Policy Decision
+  Point** (default deny, exact delegation, glob-scoped actions), recipe model.
+- Config + validation (rejects fail-open policy; refuses unverified callers off
+  loopback).
+- `tessera validate` CLI.
 
-- **Ingress / authentication**: terminate mTLS, verify SPIFFE X.509-SVIDs and
-  signed end-user (OIDC) assertions — `aud`, `exp`, `jti`, issuer allow-list.
-- **Credential resolver**: pluggable backends — Vault/OpenBao and the existing
-  Azure KV; OAuth Token Exchange (RFC 8693) for OAuth upstreams; **session
-  injection** for the un-API'd web (consuming `sessionkeeper`'s warm sessions).
-- **Egress / injection**: perform the upstream call on the caller's behalf with
-  an **SSRF egress allow-list**, domain-pinned credentials, and never returning
-  the secret to the caller.
-- **Audit sink**: append-only, structured, non-repudiable.
-- **`tessera serve`**: the daemon, with `/healthz` and metrics.
+## Phase 2 — Identity plane (the gate)
 
-## Phase 3 — Scale, ergonomics & governance
+- `Tessera.Identity`: terminate **mTLS** (Kestrel), verify **SPIFFE X.509-SVID** /
+  client certs; verify signed **OIDC** end-user assertions (`aud`, `exp`, `jti`,
+  issuer allow-list); **RFC 8693** token exchange.
+- **Tenant derived from verified identity** (ambient, server-set).
+- This is what lets the brokering endpoint stop being fail-closed.
 
-- **Multi-consumer onboarding**: first-class recipes for n8n, crawlers, and CI
-  (ephemeral per-run SPIRE identities).
-- **Step-up / human-in-the-loop**: approval flow for high-impact actions
-  (writes, payments, bookings) via push/chat notification.
-- **Trust-domain segmentation**: isolate high-sensitivity (medical) from
-  low-sensitivity (marketplace) principals.
-- **Policy-as-data**: optionally back the PDP with OPA/Rego or Cedar for richer
-  rules, keeping the fail-closed default.
-- **Lifecycle**: TTLs and revoke-on-offboard for every identity↔session mapping.
+## Phase 3 — Store + injection egress (the data plane)
+
+- `Tessera.Stores.Abstractions` + `Tessera.Stores.AzureKeyVault`:
+  `DefaultAzureCredential` (**Managed Identity / WIF — no secret**), **per-tenant
+  envelope keys**, JIT read.
+- `Tessera.Broker` egress via **YARP**: inject credential, **SSRF allow-list**,
+  domain-pinned, return result only. RFC 8693 downscoping for OAuth upstreams;
+  session injection for the un-API'd web.
+- Secret-free append-only **audit**. `tessera serve` daemon (`/healthz`, metrics).
+
+## Phase 4 — Harvest workers
+
+- `Tessera.Workers.Abstractions`: driver contract + **mTLS capability
+  registration**; broker **router** (route by capability).
+- `Tessera.Workers.Browser`: wraps the Python `sessionkeeper` browser driver.
+- **Topology**: co-located (batteries-included) *and* separate-deployment
+  (`tessera-browser`) — identical client contract
+  ([ADR 0002](adr/0002-broker-worker-topology.md)).
+- `driven` egress: scoped `act()` to the worker holding the warm session, cookie
+  never crossing into the broker.
+
+## Phase 5 — Tenancy, isolation & governance
+
+- **Dedicated-instance** tier (deployment stamp) for medical; shared+envelope-keys
+  for the rest ([ADR 0004](adr/0004-tenancy-and-isolation.md)).
+- **Step-up / human-in-the-loop** for high-impact actions (write / pay / book).
+- Multi-consumer onboarding recipes (n8n, crawlers, CI with ephemeral per-run
+  identities); lifecycle TTLs + revoke-on-offboard.
+- Optional policy-as-data (OPA/Cedar) keeping the fail-closed default.
+
+## Future drivers
+
+- `Tessera.Workers.Android` — emulator driver for app-only / cert-pinned providers
+  ([ADR 0006](adr/0006-harvest-drivers.md)), deployed as its own worker farm.
+- `Tessera.Workers.Desktop` — desktop-app driver, same contract.
 
 ---
 
 ## Does Tessera need a UI?
 
-**Short answer: not to *function*. Eventually, yes — a small admin UI — but it's
-deliberately Phase 3+, and the system is designed API-first so the UI is a thin
-client, never a dependency.**
+**Not to function. Eventually a small admin UI — Phase 5+, and API-first so the UI
+is a thin client, never load-bearing for a security decision.**
 
-**The data plane needs no UI.** Brokering a call is a headless,
-machine-to-machine path: a caller connects, Tessera verifies/authorizes/injects.
-A human is never in that loop, so a UI there would be pure overhead. Config is
-files + CLI (`tessera validate`), which is the right interface for something that
-lives in GitOps and code review.
+The data plane is headless machine-to-machine; a UI there is pure overhead. Config
+is files + CLI (`tessera validate`), which suits GitOps/code review. Four genuinely
+human moments benefit from a UI later, each with a no-UI starting point:
 
-**Four genuinely human moments *do* benefit from a UI later** — but each has a
-no-UI starting point so we don't block on building one:
-
-| Human moment | UI value | No-UI starting point (P2) |
+| Human moment | UI value | No-UI start |
 |---|---|---|
-| **"A session died — please log in"** | see which accounts are healthy/stale/dead, re-auth in place | Sev-3 alert (already in `sessionkeeper`) + Grafana panel from metrics |
-| **Step-up approval** for a risky action | one-tap approve/deny with context | push/chat notification with approve/deny links |
-| **Managing identities, grants, policy** | browse/edit grants, see who-can-do-what | the `grants.toml` file under version control |
-| **Audit / "who did what as whom"** | searchable timeline | structured audit log → Loki/Grafana or `jq` |
-
-So the recommendation is: **lean on the existing stack first** (Grafana for
-health + audit, chat/push for approvals, Git for grants), and add a focused admin
-UI in Phase 3 once the data plane is real and the management surface has settled.
-Designing the management API first means that UI is additive — it never becomes
-load-bearing for security.
+| "A session died — log in" | health view + re-auth in place | Sev-3 alert (harvester) + Grafana from metrics |
+| Step-up approval | one-tap approve/deny | push/chat notification with approve/deny links |
+| Managing grants/policy | browse/edit who-can-do-what | the grants file under version control |
+| Audit / "who did what as whom" | searchable timeline | structured audit log → Loki/Grafana or `jq` |
 
 > Rule of thumb: **the broker must be fully operable headlessly.** A UI is a
 > convenience over the API, never a place where a security decision secretly lives.

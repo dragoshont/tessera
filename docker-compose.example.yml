@@ -1,0 +1,43 @@
+# Runnable demo: the Tessera broker + a sample caller (your MCP / CLI / job).
+#
+#   docker compose -f docker-compose.example.yml up
+#
+# The `caller` shares the broker's network namespace so it reaches Tessera over
+# loopback — the only place Tessera trusts a dev-mode (unverified) caller. This
+# is for LOCAL EXPERIMENTATION ONLY. In production, callers prove identity with
+# mTLS / SPIFFE SVID (see docs/roadmap.md), never a plain header.
+
+services:
+  tessera:
+    image: ghcr.io/dragoshont/tessera:latest
+    environment:
+      # Bind loopback so dev-mode header auth is permitted (security invariant:
+      # an unverified caller is never trusted on a network-exposed address).
+      TESSERA_SERVER_HOST: "127.0.0.1"
+      # Dev only: trust the X-Tessera-Caller header (loopback-gated).
+      TESSERA_DEV_HEADER_AUTH: "1"
+    volumes:
+      - ./examples/quickstart/tessera.toml:/config/tessera.toml:ro
+      - ./examples/quickstart/grants.toml:/config/grants.toml:ro
+
+  # Stands in for YOUR service. Note it holds NO upstream credential — only the
+  # broker's URL (via loopback) and its own caller identity.
+  caller:
+    image: curlimages/curl:8.11.1
+    depends_on: [tessera]
+    network_mode: "service:tessera"   # share tessera's loopback
+    command:
+      - sh
+      - -c
+      - |
+        sleep 2
+        echo '--- asking Tessera to act as alice@example.com on health-portal ---'
+        curl -s -XPOST 127.0.0.1:8080/v1/broker \
+          -H 'X-Tessera-Caller: spiffe://tessera.local/chatbot' \
+          -d '{"target":"health-portal","action":"read:record","on_behalf_of":"alice@example.com"}'
+        echo
+        echo '--- a write is denied (only read:* was granted) ---'
+        curl -s -XPOST 127.0.0.1:8080/v1/broker \
+          -H 'X-Tessera-Caller: spiffe://tessera.local/chatbot' \
+          -d '{"target":"health-portal","action":"write:delete","on_behalf_of":"alice@example.com"}'
+        echo

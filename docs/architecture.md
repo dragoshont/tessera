@@ -1,247 +1,247 @@
-# Tessera — Architecture
+# Tessera — System Architecture
 
 > A secretless, identity-aware **credential broker** for non-human identities
-> (NHIs): agents, bots, workflows, crawlers, and pipelines. It lets a verified
-> caller act *as a specific person* against any service — including the un-API'd
-> web — without the caller ever holding the secret.
+> (agents, automations, workflows, crawlers, pipelines). It lets a
+> cryptographically-verified caller act *as a specific person* against any
+> service — including the un-API'd web and (in future) app-only services — without
+> the calling code ever holding the password, cookie, or token.
 
-This document is the design of record. It covers the mental model, the request
-pipeline, the credential-handling contract, the threat model, and where Tessera
-sits among existing open-source projects. The phased build plan is in
-[roadmap.md](roadmap.md).
+This is the design of record for the **.NET 10** implementation. The Python v0.0.2
+was a spike that proved the model; it is being replaced, not extended
+([ADR 0001](adr/0001-language-and-runtime.md)). Decisions live in
+[docs/adr/](adr/README.md); this document draws the whole system. The archived
+spike design is at [architecture.python-spike.md](architecture.python-spike.md).
 
 ---
 
-## 1. The core idea
+## 1. One-paragraph mental model
 
-Two problems are usually tangled together and must be kept apart:
+A caller (an MCP server, a CLI, an n8n flow, a CI job) connects to **one** Tessera
+endpoint over mTLS, carrying **its own identity but no secret**. Tessera verifies
+*who* is calling and *for whom*, checks policy, fetches the right credential from a
+pluggable store just-in-time, and performs the upstream call on the caller's
+behalf — returning only the result. Credentials for services with no API are kept
+warm by a separate **harvest-worker** tier (browser today, Android/desktop later)
+that the broker reaches only through the store. The broker is small and auditable;
+the messy automation is isolated behind it.
 
-1. **Who is calling, and for whom?** — *authentication of the caller* (a
-   workload) and, optionally, *the human it acts on behalf of*.
-2. **What credential lets that action happen, and how is it used without
-   leaking?** — *credential resolution and injection* against the upstream.
+---
 
-Tessera owns the seam between them. It is the trusted intermediary that
-**represents an outside caller to a protected service**: it vouches for identity,
-enforces policy, and brokers sanctioned access — the modern form of the
-*tessera hospitalis*.
-
-### Two identities, never conflated
+## 2. The whole system
 
 ```mermaid
 flowchart TB
-  subgraph who["WHO is calling — the workload (always required)"]
-    W["CallerIdentity<br/>spiffe://tessera.local/n8n<br/>proven by mTLS / X.509-SVID / signed JWT"]
-  end
-  subgraph for["FOR WHOM — the human (optional, for delegation)"]
-    H["EndUserAssertion<br/>alice@example.com<br/>proven by signed OIDC/JWT"]
-  end
-  who --> R["AccessRequest<br/>(caller, on_behalf_of?, target, action)"]
-  for -.optional.-> R
-  R --> D["Decision<br/>allow · deny · step-up"]
+    subgraph clients["Consumers (each a verified non-human identity)"]
+      MCP["chat → MCP server"]
+      CLI["CLI / script"]
+      N8N["n8n workflow"]
+      CI["CI / pipeline job"]
+    end
+
+    subgraph idp["Identity plane"]
+      SPIRE["SPIFFE / SPIRE or cert-manager<br/>(workload X.509-SVID / mTLS)"]
+      OIDC["OIDC IdP<br/>(signed end-user assertions)"]
+    end
+
+    subgraph broker["TESSERA BROKER — control plane (.NET 10, Kestrel + YARP)"]
+      direction TB
+      ING["① Ingress / AuthN<br/>mTLS · verify SVID + OIDC (aud,exp,jti)"]
+      TEN["② Tenant resolve<br/>(ambient, from verified identity only)"]
+      PDP["③ Policy Decision Point<br/>default-deny · per (caller,user,target,action)"]
+      RES["④ Credential resolve<br/>ICredentialStore · per-tenant envelope decrypt"]
+      EG["⑤ Egress / inject (YARP)<br/>SSRF allow-list · domain-pinned · result only"]
+      AUD["⑥ Audit (secret-free, append-only)"]
+      RTR["Router → harvest workers (by capability)"]
+    end
+
+    subgraph workers["Harvest workers — data plane (separate or co-located)"]
+      WB["browser driver (Playwright/CDP)"]
+      WA["android driver (emulator, future)"]
+    end
+
+    STORE[("Credential store<br/>Azure Key Vault (default, MI/WIF)<br/>· Vault/OpenBao · file/dev")]
+    UP["Upstream services<br/>OAuth (Google) · un-API'd portal · app-only"]
+
+    SPIRE -. issues .-> MCP & CLI & N8N & CI
+    OIDC -. signs end-user .-> MCP
+    MCP & CLI & N8N & CI -->|one endpoint, mTLS + assertion| ING
+    ING --> TEN --> PDP --> RES --> EG --> UP
+    UP -->|result| EG -->|result only| clients
+    RES <-->|just-in-time| STORE
+    RTR -. mTLS, route by capability .-> WB & WA
+    WB & WA -->|warm session bundle| STORE
+    ING & PDP & RES & EG --> AUD
+
+    classDef sec stroke:#c0392b,stroke-width:2px;
+    class ING,PDP,RES,EG sec
 ```
 
-Conflating these is the root of the **confused-deputy** vulnerability: if the
-broker trusts an unauthenticated *"I'm Dragoș"* hint, then anything that can reach
-it — a network attacker, a **prompt-injected tool**, a **compromised n8n
-workflow** — can request anyone's access. So the load-bearing rule is:
-
-> **Identity is cryptographically verifiable, or the request is denied.**
-
-These map to the dataclasses in [`model.py`](../src/tessera/model.py):
-`CallerIdentity`, `EndUserAssertion`, `AccessRequest`, `Decision`.
+**Trust boundaries:** the red path (ingress → policy → resolve → egress) is the
+security boundary and stays small. The harvest workers are a *separate* trust zone
+(heavy, sandboxed) that never shares the broker's process and meets it only at the
+store.
 
 ---
 
-## 2. The request pipeline
-
-Modeled on the well-trodden Identity-Aware-Proxy decision flow (Ory Oathkeeper's
-*Match → Authenticate → Authorize → Mutate*), specialized for credential
-injection:
+## 3. The request lifecycle (a single brokered call)
 
 ```mermaid
 sequenceDiagram
     participant A as Caller (NHI)
-    participant B as Tessera
+    participant B as Broker
     participant P as Policy (PDP)
-    participant V as Credential store
-    participant U as Upstream service
+    participant S as Store
+    participant U as Upstream
 
-    A->>B: request — mTLS(SVID) + optional signed end-user assertion
-    B->>B: ① Authenticate — verify workload + end-user (sig, aud, exp, jti)
-    B->>P: ② Authorize(caller, on_behalf_of, target, action)
-    alt denied / unverified
+    A->>B: request — mTLS(SVID) + signed end-user assertion + {target, action}
+    B->>B: ① verify workload SVID + end-user assertion (sig, aud, exp, jti)
+    B->>B: ② resolve tenant from verified identity (ambient)
+    B->>P: ③ authorize(caller, end-user, tenant, target, action)
+    alt unverified / no grant
         P-->>A: deny (default) — audited
-    else needs human confirmation
-        P-->>A: step-up required (writes, payments, medical bookings)
-    else allowed
+    else high-impact (write / pay / book)
+        P-->>A: step-up required (human-in-the-loop)
+    else allow
         P-->>B: allow (scoped)
-        B->>V: ③ just-in-time fetch the principal's credential (server-side)
-        B->>U: ④ inject credential, perform the action on the caller's behalf
-        U-->>B: result
-        B-->>A: ⑤ result only — caller never saw the secret
-        B->>B: ⑥ audit(caller, end-user, target, action, decision, jti)
+        B->>S: ④ fetch bundle (JIT) + per-tenant envelope decrypt
+        alt upstream is HTTP-injectable (common)
+            B->>U: ⑤ inject credential, forward (SSRF allow-listed)
+            U-->>B: response
+        else upstream is drive-only (cert-pinned app)
+            B->>U: ⑤' dispatch scoped act() to the worker holding the warm session
+            U-->>B: response (cookie never leaves the worker tier)
+        end
+        B-->>A: ⑥ result only — caller never saw the secret
+        B->>B: audit(caller, user, tenant, target, action, decision, jti)
     end
 ```
 
-**Stage 1 — Authenticate** establishes both identities and refuses anything
-unverified (outside loopback dev mode). **Stage 2 — Authorize** is the
-[`PolicyDecisionPoint`](../src/tessera/policy.py): explicit grants, **default
-deny**, exact delegation matching, glob-scoped actions. Stages 3–5 are the
-**injection plane** (P2). Stage 6 is non-repudiable audit.
-
 ---
 
-## 3. Credential handling: *injection*, not *brokering*
+## 4. Deployment topologies (the "seamless" requirement)
 
-HashiCorp Boundary draws the distinction Tessera adopts as its contract:
+Harvest capability is **relocatable**: co-located for simplicity, or a separate
+deployment for scale/isolation — and the **client contract is identical** either
+way ([ADR 0002](adr/0002-broker-worker-topology.md)).
 
-| Mode | What happens | Does the caller see the secret? |
-|---|---|---|
-| Credential **brokering** | secret is fetched and *returned to the caller* | **yes** — caller handles it |
-| Credential **injection** | the broker authenticates to the upstream *on the caller's behalf* | **no — never** |
-
-**Tessera does injection.** This is the same principle as CyberArk's *Secretless
-Broker*: *"applications cannot leak what they don't have."* Concretely:
-
-- For **OAuth/OIDC upstreams** (Google, etc.): mint a short-lived, **downscoped**
-  token per call via OAuth Token Exchange ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)).
-  The caller's own token is **never** passed through (per the
-  [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
-  §3.7).
-- For the **un-API'd web** (health portals, marketplaces): there is no token
-  endpoint — only a human login that yields a cookie/session. Tessera injects
-  that session **server-side**, egress-pinned to the upstream domain. Keeping
-  those sessions alive is the job of the harvester (§4).
-
----
-
-## 4. The harvester (`sessionkeeper`)
-
-The distinctive capability. The polished commercial tools assume OAuth already
-exists; the services real people care about often don't have it. The harvester —
-the existing [`sessionkeeper`](https://github.com/dragoshont/sessionkeeper)
-project — keeps human-login sessions **warm** so the broker always has a fresh
-credential to inject:
-
+### 4a. Batteries-included (one container)
 ```mermaid
 flowchart LR
-  KV[("credential store<br/>seed creds + last session")] -->|seed, JIT| SK["sessionkeeper<br/>scheduler · adapters · harvester"]
-  SK -->|silent refresh / browser harvest| Svc[("service with custom login")]
-  SK -->|rotated session| KV
-  KV -.->|fresh session, JIT| TES["Tessera<br/>(injection plane)"]
-  SK -.->|needs-human → alert| You((human))
+    C["client"] --> T["tessera (broker + in-proc browser driver)"]
+    T --> KV[("store")]
 ```
+A first-time user runs exactly one thing. Good for a household / small setup.
 
-Two arms, split by cost: a cheap, frequent **silent token refresh** (≈99% of
-keep-alive), and a rare, expensive **automated browser cold-login** (a warm
-headful browser driven over CDP) for cold starts or fully-lapsed chains, bounded
-by a circuit breaker so a re-login storm can't trip bot-detection. Only a genuine
-dead-end pages a human. Tessera consumes the sessions it keeps warm; the two meet
-**only at the credential store**.
-
----
-
-## 5. Multi-consumer model
-
-Because identity is two-dimensional, the same broker serves every kind of caller
-without special cases:
-
+### 4b. Split workers (scale or stronger isolation)
 ```mermaid
 flowchart TB
-    subgraph Consumers
-        LC["chat agent<br/>(human-on-behalf)"]
-        N8N["n8n workflow"]
-        CRAWL["crawler"]
-        CI["CI / pipeline"]
-    end
-    subgraph IdP["identity plane"]
-        SPIRE["SPIFFE/SPIRE<br/>workload SVIDs"]
-        OIDC["OIDC IdP<br/>end-user assertions"]
-    end
-    SPIRE -. issues .-> LC & N8N & CRAWL & CI
-    OIDC -. signs .-> LC
-    LC & N8N & CRAWL & CI -->|mTLS + assertion| TES["Tessera"]
-    TES --> UP["upstream services"]
+    C["client"] -->|one endpoint| T["tessera-broker"]
+    T -. capability route, mTLS .-> TB["tessera-browser<br/>(browser workers)"]
+    T -. capability route, mTLS .-> TA["tessera-android<br/>(emulator workers)"]
+    TB & TA --> KV[("store")]
+    T --> KV
 ```
+The client still sees one endpoint. `tessera-android` and `tessera-browser` are
+independent deployments that **register their capabilities** with the broker
+(Selenium-Grid-style), so the broker routes a harvest/act job to whichever worker
+can do it. Add an Android farm without touching the broker or any client.
 
-- **Agents** act for the signed-in human (delegated).
-- **n8n flows** get a per-workflow identity; a user-triggered flow can carry that
-  user's assertion, a scheduled one carries none.
-- **Crawlers / pipelines** act purely as themselves with their own scoped grants;
-  pipeline jobs get **ephemeral per-run** identities (SPIRE attestation).
-
-No automation borrows a human's identity — directly answering
-[OWASP NHI #10](https://owasp.org/www-project-non-human-identities-top-10/).
+### 4c. Dedicated instance (medical / high isolation)
+```mermaid
+flowchart LR
+    C["client (medical context)"] --> TD["tessera (dedicated stamp)"]
+    TD --> KVD[("isolated Key Vault")]
+```
+Shared-nothing per [ADR 0004](adr/0004-tenancy-and-isolation.md): own broker, own
+vault, own network policy. The default tier for medical accounts.
 
 ---
 
-## 6. Threat model
+## 5. Components (.NET 10 solution layout — planned)
 
-Mapped to the [OWASP Non-Human Identities Top 10 (2025)](https://owasp.org/www-project-non-human-identities-top-10/)
-and the MCP authorization spec.
+| Project | Responsibility |
+|---|---|
+| `Tessera.Core` | identity & decision model, tenancy, policy (PDP), recipe model — no I/O |
+| `Tessera.Broker` | Kestrel (mTLS), YARP egress, ingress authN, audit, worker router — the host |
+| `Tessera.Identity` | SVID/mTLS + OIDC/JWT validation; RFC 8693 token exchange |
+| `Tessera.Stores.Abstractions` | `ICredentialStore` + envelope-encryption interfaces |
+| `Tessera.Stores.AzureKeyVault` | default store; `DefaultAzureCredential` (MI/WIF); per-tenant keys |
+| `Tessera.Stores.Vault` | HashiCorp Vault / OpenBao (opt-in) |
+| `Tessera.Workers.Abstractions` | harvest-driver contract + worker registration protocol |
+| `Tessera.Workers.Browser` | browser-driver worker (may shell to the Python harvester) |
+| `Tessera.Cli` | `tessera validate` / `serve` / recipe + identity tooling |
+| `Tessera.*.Tests` | xUnit; transports injectable so the security core is offline-tested |
 
-| # | Threat | Mitigation in Tessera |
+The **harvest engine** (browser/Android automation) stays a separate process — the
+existing Python [`sessionkeeper`](https://github.com/dragoshont/sessionkeeper) is
+the first browser-driver implementation; `Tessera.Workers.Browser` wraps/dispatches
+it. The broker carries no browser/emulator dependency.
+
+---
+
+## 6. Security model (summary; full threat model below)
+
+Five invariants carry the design:
+
+1. **Verified identity or denied.** mTLS/SVID for the workload ⊕ signed OIDC for
+   the human; tenant is derived from that, never from request content
+   ([ADR 0005](adr/0005-identity-first-fail-closed.md)).
+2. **Fail closed.** Default-deny policy; brokering endpoint refuses until the auth
+   plane is wired.
+3. **Inject, never hand over.** The caller never receives the secret; no caller
+   token is ever passed through to an upstream (MCP spec).
+4. **Secretless transit.** Store access via Managed Identity / Workload Identity
+   Federation — no client secret to leak
+   ([ADR 0003](adr/0003-credential-store-pluggable.md)).
+5. **Per-tenant isolation.** Envelope key per tenant; dedicated instance for
+   medical ([ADR 0004](adr/0004-tenancy-and-isolation.md)).
+
+### Threat model (OWASP NHI Top 10 + MCP authorization spec)
+
+| # | Threat | Mitigation |
 |---|---|---|
-| **A** | **Identity spoofing at the boundary** (confused deputy) — a forged/poisoned caller claims to be someone else | Caller identity is **cryptographically verified** (mTLS / X.509-SVID for the workload; signed OIDC for the end-user); validate sig + `aud` + `exp` + `jti`; **never trust a header**. Prefer X.509-SVID over JWT (replay). |
-| **B** | **Blast radius** — one broker holds many sensitive sessions | Caller→principal mapping enforced **server-side** (a caller can only ever trigger *its own* principal); JIT fetch + zeroize; per-tenant keys; **separate trust domains** for high- vs low-sensitivity (medical vs marketplace). |
-| **C** | **Token passthrough / long-lived secret leak** (NHI2, NHI7) | **Injection, not brokering**; downscope via RFC 8693; sessions egress-pinned and server-side only; **no passthrough** of caller tokens. |
-| **D** | **Prompt-injection / tool poisoning / excessive agency** | Least-privilege **per-(caller, end-user, target, action)** grants, default deny; **step-up / human-in-the-loop** for writes, payments, bookings; treat tool descriptions as untrusted; rate-limit + anomaly-detect. |
-| **E** | **Replay / session fixation** | Short-lived single-use assertions (`jti` + nonce); mTLS channel binding; rotate harvested sessions. |
-| **F** | **Harvester abuse / seed-credential theft** (NHI7) | Seed creds in Vault/HSM with tight access; prefer refresh-rotation over re-login; per-service circuit breaker; alert on any forced interactive login. |
-| **G** | **Stale grants & supply chain** (NHI1, NHI3) | TTL on every identity↔session mapping; revoke-on-offboard; pin/scan/sign tool images; **sandbox** untrusted tool servers. |
-| **H** | **Non-repudiation gap** (NHI10) | Structured, append-only audit at the decision point: `(workload, end-user, target, action, decision, jti)`. |
+| A | Confused deputy / identity spoof at the boundary | cryptographically verified caller + end-user; tenant from identity; never trust headers |
+| B | Blast radius (one broker, many secrets) | per-tenant envelope keys; server-side caller→tenant map; dedicated instance + isolated vault for medical |
+| C | Token passthrough / long-lived secret leak | injection not brokering; RFC 8693 downscoping for OAuth; MI/WIF (no client secret) |
+| D | Prompt-injection / tool poisoning / excessive agency | least-privilege per-(caller,user,target,action); step-up for write/pay/book |
+| E | Replay / session fixation | short-lived single-use assertions (jti+nonce); prefer X.509-SVID; rotate harvested sessions |
+| F | Harvest abuse / seed-credential theft | seed creds in vault; refresh-over-relogin; circuit breaker; workers isolated from broker |
+| G | Stale grants / supply chain | TTL + revoke-on-offboard; pinned/sandboxed worker images |
+| H | Non-repudiation gap | secret-free append-only audit of every decision (caller,user,tenant,target,action,jti) |
 
-**Secure-by-default switches** (borrowed from the MCP-gateway state of the art):
-require `exp` + `jti` (revocation), **fail closed**, an **egress allow-list**
-(critical for an egress broker — SSRF defense), content-size limits, rate limits,
-and OpenTelemetry audit.
+Secure-by-default switches: require `exp`+`jti`, **egress SSRF allow-list**
+(critical for an egress proxy), content-size limits, rate limits, OpenTelemetry
+audit, sandboxed workers.
 
 ---
 
 ## 7. Where Tessera sits (OSS landscape)
 
-| Project | Category | Caller identity | Cred handling | Harvests human logins? | Relationship |
+| Project | Category | Self-hosted | Un-API'd? | Per-end-user | Relationship |
 |---|---|---|---|---|---|
-| **CyberArk Secretless Broker** | secretless proxy | mTLS / k8s SA | inject | no | nearest ancestor (same *injection* idea) |
-| **HashiCorp Boundary** | access broker | Boundary authN | broker **or** inject | no | source of the broker/inject vocabulary |
-| **Vault / OpenBao** | secrets engine | AppRole / JWT / k8s | dynamic + static secrets | no | **use as the credential store** |
-| **SPIFFE / SPIRE** | workload identity | X.509/JWT-SVID + attestation | issues identity, not creds | no | **issues the caller identity Tessera consumes** |
-| **Ory Oathkeeper / Pomerium** | identity-aware proxy | bearer / JWT / device | forwards identity | no | decision-pipeline reference |
-| **IBM ContextForge / Docker MCP Gateway** | MCP/AI gateway | JWT + RBAC / profile | injects creds, sandboxes servers | no | front-door + hardening reference |
-| **Arcade.dev / Composio** | auth-for-agents (SaaS) | IdP / per-user sessions | OAuth/keys, "act on behalf of user" | no (assumes OAuth) | closest twins — but hosted, no un-API'd |
-| **→ Tessera** | **secretless NHI credential broker** | **mTLS/SVID ⊕ signed end-user** | **inject; downscope; harvest** | **yes** | **OSS · self-hosted · un-API'd · per-end-user** |
+| CyberArk Secretless Broker | secretless proxy | yes | no | no | nearest ancestor (injection) |
+| HashiCorp Boundary | access broker | yes | no | no | broker/inject vocabulary |
+| Vault / OpenBao | secrets engine | yes | n/a | n/a | a *store* backend |
+| SPIFFE / SPIRE | workload identity | yes | n/a | n/a | issues the caller identity Tessera consumes |
+| Ory Oathkeeper / Pomerium | identity-aware proxy | yes | no | no | decision-pipeline reference |
+| Selenium Grid | browser worker grid | yes | n/a | n/a | the worker-routing model (ADR 0002) |
+| HashiCorp go-plugin | out-of-proc plugins | yes | n/a | n/a | the driver-isolation model (ADR 0002) |
+| Arcade.dev / Composio | auth-for-agents (SaaS) | no | no (assumes OAuth) | yes | closest twins, but hosted |
+| **→ Tessera** | **secretless NHI credential broker** | **yes** | **yes** | **yes** | OSS · self-hosted · un-API'd · per-end-user |
 
-The white space Tessera owns: **open-source + self-hosted + covers services with
-no OAuth + per-end-user identity.** Complementary to (not competing with) SPIFFE
-(identity issuance) and Vault (secret storage).
+The white space Tessera owns: **open-source + self-hosted + handles services with
+no OAuth (and eventually no web) + per-end-user identity.**
 
 ---
 
-## 8. Component boundaries
+## 8. Open questions (tracked for build phase)
 
-```mermaid
-flowchart TB
-  subgraph trust["control plane"]
-    PDP["Policy Decision Point<br/>(policy.py) — fail-closed"]
-    CFG["Config + grants<br/>(config.py)"]
-    AUD["Audit sink"]
-  end
-  subgraph data["data plane (P2)"]
-    ING["ingress / authN<br/>mTLS · verify assertions"]
-    RES["credential resolver<br/>RFC 8693 · session inject"]
-    EG["egress / inject<br/>SSRF allow-list · domain-pinned"]
-  end
-  STORE[("credential store<br/>Vault / KV")]
-  HARV["sessionkeeper (harvester)"]
-  ING --> PDP --> RES --> EG
-  CFG --> PDP
-  RES <-->|JIT| STORE
-  HARV -->|warm sessions| STORE
-  ING & PDP & RES & EG --> AUD
-```
+- **Worker registration protocol**: gRPC + mTLS (go-plugin-style) vs a lightweight
+  HTTP/2 capability-registration (Selenium-Grid-style). Lean gRPC for typed
+  bidirectional streaming; confirm during the workers phase.
+- **Envelope-key rotation**: per-tenant key rotation cadence and re-wrap strategy.
+- **Browser-egress channel**: how the broker hands a scoped `act()` to a worker
+  without the cookie crossing into the broker (capability handle vs delegated call).
+- **Vaultwarden viability** as a real store (vs test-only) — validate empirically.
 
-**Implemented today (P1):** the control-plane core — `model`, `config`, `policy`
-(fail-closed PDP), and the `tessera validate` CLI. **Next (P2):** the data
-plane — ingress authN, resolver, and the injection egress. See
-[roadmap.md](roadmap.md).
+See [roadmap.md](roadmap.md) for the phased plan.
