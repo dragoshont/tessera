@@ -67,7 +67,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          # Fast amd64-only on branch pushes; full multi-arch on version tags
+          # (arm64 builds the .NET image under QEMU, which is slow — reserve it
+          # for releases). The homelab node is amd64.
+          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
