@@ -93,7 +93,11 @@ public sealed class AzureKeyVaultCredentialStore : ICredentialStore, ICredential
             ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
         };
 
-        var options = new SecretClientOptions
+        // Pin the Key Vault service version: the Azure SDK defaults to the newest
+        // API version (7.6+), which Lowkey 2.7.1 rejects with HTTP 400. 7.5 is the
+        // highest Lowkey speaks, and the broker only uses plain secret get/set, so
+        // 7.5 is fully sufficient for the dev loop.
+        var options = new SecretClientOptions(SecretClientOptions.ServiceVersion.V7_5)
         {
             DisableChallengeResourceVerification = true,
             Transport = new HttpClientTransport(new HttpClient(handler)),
