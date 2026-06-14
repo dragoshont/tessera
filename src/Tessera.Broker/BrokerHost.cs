@@ -170,11 +170,15 @@ public static class BrokerHost
         // are ever touched (the orchestrator's own gate).
         if (config.Refresh.Enabled && store is ICredentialWriter writer)
         {
+            // The refresher egresses to the recipe's refresh/token endpoint, so it is
+            // bound by the same SSRF allow-list as the data egress (an OAuth token URL
+            // on a different host must be allow-listed too).
+            var refreshGuard = new Tessera.Core.Egress.SsrfGuard(config.Egress.AllowedHosts);
             services.AddSingleton(sp => new Tessera.Providers.SessionRefreshOrchestrator(
                 policy,
                 store,
                 new Tessera.Providers.SessionRefresher(
-                    sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), writer)));
+                    sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), writer, refreshGuard)));
             services.AddHostedService(sp => new SessionRefreshService(
                 sp.GetRequiredService<Tessera.Providers.SessionRefreshOrchestrator>(),
                 TimeSpan.FromSeconds(config.Refresh.IntervalSeconds),

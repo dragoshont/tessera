@@ -3,6 +3,7 @@ using Tessera.Core.Identity;
 using Tessera.Core.Policy;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
+using Tessera.Core.Results;
 using Tessera.Core.Stores;
 using Xunit;
 
@@ -227,4 +228,81 @@ public sealed class ProviderEgressTests
             Environment.SetEnvironmentVariable("TESSERA_TEST_SUBKEY", null);
         }
     }
+
+    // ── Result-class enforcement (service-access spec §"Output classes") ───────
+
+    private static (ProviderEgress Egress, FakeTransport Transport) BuildMail(string body = "{\"ok\":true}")
+    {
+        var store = new InMemoryCredentialStore();
+        store.Put("mail-alice", new CredentialBundle(AccessToken: "AT"));
+        var pdp = new PolicyDecisionPoint([new Grant(Caller, "gmail", ["read:*"], User)]);
+        var resolver = new CredentialResolver([new TargetBinding("gmail", "mail-alice", User)], store);
+        var transport = new FakeTransport(200, body);
+        var recipe = new Recipe("gmail", Egress: EgressMode.Http, UpstreamBaseUrl: $"https://{Host}/v1",
+            Injection: InjectionKind.BearerToken,
+            Tools:
+            [
+                new RecipeTool("mail_search", "GET", "messages", "read:mail.metadata", OutputClass: ResultClass.Metadata),
+                new RecipeTool("mail_read", "GET", "messages/{handle}", "read:mail.body", OutputClass: ResultClass.FullBody),
+            ]);
+        var egress = new ProviderEgress(new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, [recipe], new SsrfGuard([Host]), transport, metadataMaxBytes: 16);
+        return (egress, transport);
+    }
+
+    [Fact]
+    public async Task A_full_body_tool_requires_a_handle_and_does_not_call_upstream_without_one()
+    {
+        var (egress, transport) = BuildMail();
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "gmail", "mail_read", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.BadRequest, result.Status);
+        Assert.Equal(0, transport.Calls); // never reached upstream — no bulk read
+        Assert.Contains("handle", result.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_full_body_tool_reads_by_a_target_scoped_handle()
+    {
+        var (egress, transport) = BuildMail("the full body");
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "gmail", "mail_read", "{\"handle\":\"gmail:msg-42\"}", confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal($"https://{Host}/v1/messages/msg-42", transport.LastUrl);
+        Assert.Equal(ResultClass.FullBody, result.OutputClass);
+    }
+
+    [Fact]
+    public async Task A_handle_from_another_provider_is_rejected()
+    {
+        var (egress, transport) = BuildMail();
+        // A handle minted for a different target must not be replayed against gmail.
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "gmail", "mail_read", "{\"handle\":\"graph-mail:msg-1\"}", confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.BadRequest, result.Status);
+        Assert.Equal(0, transport.Calls);
+    }
+
+    [Fact]
+    public async Task A_handle_is_url_encoded_into_the_path_no_injection()
+    {
+        var (egress, transport) = BuildMail();
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "gmail", "mail_read", "{\"handle\":\"gmail:a/b?c\"}", confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        // The slash + query chars are percent-encoded so they can't escape the path segment.
+        Assert.Equal($"https://{Host}/v1/messages/a%2Fb%3Fc", transport.LastUrl);
+    }
+
+    [Fact]
+    public async Task A_metadata_result_is_capped_tighter_than_a_full_body()
+    {
+        var big = new string('x', 1000);
+        var (egress, _) = BuildMail(big);
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "gmail", "mail_search", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal(ResultClass.Metadata, result.OutputClass);
+        Assert.Equal(16, result.Body!.Length); // capped at metadataMaxBytes, not the 1MB body cap
+    }
 }
+

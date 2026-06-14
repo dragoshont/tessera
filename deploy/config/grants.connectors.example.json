@@ -36,11 +36,11 @@
       "injection": "bearer",
       "actions": ["read:calendar"],
       "tools": [
-        { "name": "graph_calendar_view", "method": "GET", "path": "me/calendarView", "action": "read:calendar", "description": "List calendar events in a date range (metadata: subject, organizer, start/end; body by handle only)." }
+        { "name": "graph_calendar_view", "method": "GET", "path": "me/calendarView", "action": "read:calendar", "resultClass": "metadata", "description": "List calendar events in a date range (metadata: subject, organizer, start/end; body by handle only)." }
       ],
       "rotation": { "owner": "tessera", "detail": "Tessera owns Graph token refresh via offline_access (Mode U)." },
-      "refreshSpec": { "path": "../oauth2/v2.0/token", "method": "POST", "accessTokenField": "access_token", "refreshTokenField": "refresh_token", "absorbSetCookie": false },
-      "description": "Microsoft Graph calendar (Calendars.ReadBasic) — read:calendar; owner: user. Separate consent from mail."
+      "refreshSpec": { "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token", "method": "POST", "accessTokenField": "access_token", "refreshTokenField": "refresh_token", "absorbSetCookie": false },
+      "description": "Microsoft Graph calendar (Calendars.ReadBasic) — read:calendar; owner: user. Separate consent from mail. NOTE: allow-list BOTH graph.microsoft.com (data) and login.microsoftonline.com (token refresh)."
     },
     {
       "target": "graph-mail",
@@ -50,9 +50,9 @@
       "injection": "bearer",
       "actions": ["read:mail.metadata", "read:mail.body", "use:mail.send"],
       "tools": [
-        { "name": "graph_mail_search", "method": "GET", "path": "me/messages", "action": "read:mail.metadata", "description": "Search mail — returns metadata + opaque handles only (no body)." },
-        { "name": "graph_mail_read", "method": "GET", "path": "me/messages/{id}", "action": "read:mail.body", "description": "Read one message's full body by handle (from a prior search)." },
-        { "name": "graph_mail_send", "method": "POST", "path": "me/sendMail", "action": "use:mail.send", "stepUp": true, "plane": "use", "description": "Send a drafted message — draft/preview, get an explicit yes, then confirm=true." }
+        { "name": "graph_mail_search", "method": "GET", "path": "me/messages", "action": "read:mail.metadata", "resultClass": "metadata", "description": "Search mail — returns metadata + opaque handles only (no body)." },
+        { "name": "graph_mail_read", "method": "GET", "path": "me/messages/{handle}", "action": "read:mail.body", "resultClass": "fullBody", "description": "Read one message's full body by handle (from a prior search)." },
+        { "name": "graph_mail_send", "method": "POST", "path": "me/sendMail", "action": "use:mail.send", "stepUp": true, "resultClass": "receipt", "description": "Send a drafted message — draft/preview, get an explicit yes, then confirm=true." }
       ],
       "description": "Microsoft Graph mail (Mail.ReadBasic / Mail.Read / Mail.Send) — metadata-first; send is draft->confirm->step-up; owner: user."
     },
@@ -64,9 +64,9 @@
       "injection": "bearer",
       "actions": ["read:mail.metadata", "read:mail.body", "use:mail.send"],
       "tools": [
-        { "name": "gmail_search", "method": "GET", "path": "users/me/messages", "action": "read:mail.metadata", "description": "Search mail — returns metadata + opaque handles only (no body)." },
-        { "name": "gmail_read", "method": "GET", "path": "users/me/messages/{id}", "action": "read:mail.body", "description": "Read one message's full body by handle (from a prior search)." },
-        { "name": "gmail_send", "method": "POST", "path": "users/me/messages/send", "action": "use:mail.send", "stepUp": true, "plane": "use", "description": "Send a drafted message — draft/preview, get an explicit yes, then confirm=true." }
+        { "name": "gmail_search", "method": "GET", "path": "users/me/messages", "action": "read:mail.metadata", "resultClass": "metadata", "description": "Search mail — returns metadata + opaque handles only (no body)." },
+        { "name": "gmail_read", "method": "GET", "path": "users/me/messages/{handle}", "action": "read:mail.body", "resultClass": "fullBody", "description": "Read one message's full body by handle (from a prior search)." },
+        { "name": "gmail_send", "method": "POST", "path": "users/me/messages/send", "action": "use:mail.send", "stepUp": true, "resultClass": "receipt", "description": "Send a drafted message — draft/preview, get an explicit yes, then confirm=true." }
       ],
       "description": "Gmail (gmail.readonly / gmail.send) — metadata-first; send is draft->confirm->step-up; owner: user."
     }

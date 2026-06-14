@@ -73,7 +73,9 @@ public sealed class BrokerProviderGateway : IProviderGateway
                         tool.Method,
                         tool.RequiresConfirmation,
                         tool.Description,
-                        Tessera.Core.Policy.ActionPlanes.ToToken(tool.EffectivePlane)));
+                        Tessera.Core.Policy.ActionPlanes.ToToken(tool.EffectivePlane),
+                        OutputClassToken(tool.OutputClass),
+                        tool.RequiresHandle));
                 }
             }
         }
@@ -102,9 +104,21 @@ public sealed class BrokerProviderGateway : IProviderGateway
             ProviderCallStatus.Denied => "denied",
             ProviderCallStatus.NoCredential => "nocredential",
             ProviderCallStatus.NotAllowed => "notallowed",
+            ProviderCallStatus.BadRequest => "badrequest",
             ProviderCallStatus.TransportError => "error",
             _ => "error",
         };
-        return new ProviderCallToolResult(status, result.HttpStatus, result.Body, result.Detail);
+        return new ProviderCallToolResult(status, result.HttpStatus, result.Body, result.Detail, OutputClassToken(result.OutputClass));
     }
+
+    /// <summary>The lowercase wire token for an output class, or null when unclassified.</summary>
+    private static string? OutputClassToken(Tessera.Core.Results.ResultClass? outputClass) => outputClass switch
+    {
+        Tessera.Core.Results.ResultClass.Metadata => "metadata",
+        Tessera.Core.Results.ResultClass.Preview => "preview",
+        Tessera.Core.Results.ResultClass.FullBody => "fullBody",
+        Tessera.Core.Results.ResultClass.Attachment => "attachment",
+        Tessera.Core.Results.ResultClass.Receipt => "receipt",
+        _ => null,
+    };
 }

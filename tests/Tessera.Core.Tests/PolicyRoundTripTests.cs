@@ -20,7 +20,7 @@ public sealed class PolicyRoundTripTests
     }
 
     [Fact]
-    public void Recipe_tool_plane_and_binding_owner_survive_a_save_reload()
+    public void Recipe_tool_output_class_and_binding_owner_survive_a_save_reload()
     {
         var path = WriteTemp("""
             {
@@ -33,8 +33,8 @@ public sealed class PolicyRoundTripTests
                 {
                   "target": "media", "egress": "http", "upstreamBaseUrl": "https://media.example.com",
                   "tools": [
-                    { "name": "search", "method": "GET", "path": "/search", "action": "read:search" },
-                    { "name": "settings", "method": "POST", "path": "/settings", "action": "pay:settings", "plane": "manage" }
+                    { "name": "search", "method": "GET", "path": "/search", "action": "read:search", "resultClass": "metadata" },
+                    { "name": "read", "method": "GET", "path": "/items/{handle}", "action": "read:item", "resultClass": "fullBody" }
                   ]
                 }
               ]
@@ -53,12 +53,13 @@ public sealed class PolicyRoundTripTests
             var serviceBinding = loaded.Bindings.Single(b => b.Credential == "media-key");
             Assert.Equal(CredentialOwner.Service, serviceBinding.Owner); // default, no token in JSON
 
-            // The legacy-verb tool carries an explicit plane override; the namespaced
-            // one derives its plane.
+            // Tool output classes parse; the plane always derives from the verb.
             var media = loaded.Recipes.Single(r => r.Target == "media");
-            var settings = media.ExposedTools.Single(t => t.Name == "settings");
-            Assert.Equal(ActionPlane.Manage, settings.EffectivePlane);
+            var read = media.ExposedTools.Single(t => t.Name == "read");
+            Assert.Equal(Results.ResultClass.FullBody, read.OutputClass);
+            Assert.True(read.RequiresHandle);
             var search = media.ExposedTools.Single(t => t.Name == "search");
+            Assert.Equal(Results.ResultClass.Metadata, search.OutputClass);
             Assert.Equal(ActionPlane.Read, search.EffectivePlane);
 
             // Save + reload: the values survive.
@@ -67,15 +68,14 @@ public sealed class PolicyRoundTripTests
             Assert.Equal(CredentialOwner.User, reloaded.Bindings.Single(b => b.Credential == "hp-alice").Owner);
             Assert.Equal(CredentialOwner.Dependent, reloaded.Bindings.Single(b => b.Credential == "hp-kid").Owner);
             Assert.Equal("alice@example.com", reloaded.Bindings.Single(b => b.Credential == "hp-kid").Guardian);
-            Assert.Equal(ActionPlane.Manage, reloaded.Recipes.Single(r => r.Target == "media").ExposedTools.Single(t => t.Name == "settings").EffectivePlane);
+            Assert.Equal(Results.ResultClass.FullBody, reloaded.Recipes.Single(r => r.Target == "media").ExposedTools.Single(t => t.Name == "read").OutputClass);
 
-            // A clean diff: the default owner + the derived plane are omitted on write.
+            // A clean diff: the default owner is omitted on write; the output classes persist.
             var written = File.ReadAllText(path);
             Assert.DoesNotContain("\"owner\": \"service\"", written, StringComparison.Ordinal);
-            Assert.DoesNotContain("\"plane\": \"read\"", written, StringComparison.Ordinal);
-            // … but the non-default ones are persisted.
             Assert.Contains("\"owner\": \"user\"", written, StringComparison.Ordinal);
-            Assert.Contains("\"plane\": \"manage\"", written, StringComparison.Ordinal);
+            Assert.Contains("\"resultClass\": \"fullBody\"", written, StringComparison.Ordinal);
+            Assert.Contains("\"resultClass\": \"metadata\"", written, StringComparison.Ordinal);
             Assert.Contains("\"guardian\": \"alice@example.com\"", written, StringComparison.Ordinal);
         }
         finally

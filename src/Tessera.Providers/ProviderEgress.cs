@@ -5,6 +5,7 @@ using Tessera.Core.Identity;
 using Tessera.Core.Model;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
+using Tessera.Core.Results;
 
 namespace Tessera.Providers;
 
@@ -23,6 +24,9 @@ public enum ProviderCallStatus
     /// <summary>The tool/target isn't an HTTP-egress recipe, or the host isn't allow-listed.</summary>
     NotAllowed,
 
+    /// <summary>The call arguments are invalid (e.g. a full-body tool called without a handle).</summary>
+    BadRequest,
+
     /// <summary>The upstream call completed (see <see cref="ProviderCallResult.HttpStatus"/>).</summary>
     Completed,
 
@@ -35,11 +39,13 @@ public enum ProviderCallStatus
 /// <param name="HttpStatus">The upstream HTTP status, when a call was made.</param>
 /// <param name="Body">The upstream response body, when a call was made.</param>
 /// <param name="Detail">A secret-free explanation.</param>
+/// <param name="OutputClass">The output class the tool declared (service-access spec); null = unclassified. Tells a downstream surface the retention rule + that the body is untrusted provider content.</param>
 public sealed record ProviderCallResult(
     ProviderCallStatus Status,
     int? HttpStatus = null,
     string? Body = null,
-    string Detail = "")
+    string Detail = "",
+    ResultClass? OutputClass = null)
 {
     /// <summary>True when the upstream call completed with a 2xx status.</summary>
     public bool Ok => Status == ProviderCallStatus.Completed && HttpStatus is >= 200 and < 300;
@@ -59,6 +65,7 @@ public sealed class ProviderEgress
     private readonly SsrfGuard _guard;
     private readonly IHttpTransport _transport;
     private readonly int _maxBodyBytes;
+    private readonly int _metadataMaxBytes;
 
     /// <summary>Creates the egress over the policy + resolver + recipes + transport.</summary>
     public ProviderEgress(
@@ -67,7 +74,8 @@ public sealed class ProviderEgress
         IEnumerable<Recipe> recipes,
         SsrfGuard guard,
         IHttpTransport transport,
-        int maxBodyBytes = 1_000_000)
+        int maxBodyBytes = 1_000_000,
+        int metadataMaxBytes = 65_536)
     {
         _pdp = pdp;
         _resolver = resolver;
@@ -75,6 +83,7 @@ public sealed class ProviderEgress
         _guard = guard;
         _transport = transport;
         _maxBodyBytes = maxBodyBytes;
+        _metadataMaxBytes = metadataMaxBytes;
     }
 
     /// <summary>
@@ -118,7 +127,16 @@ public sealed class ProviderEgress
                 Detail: $"'{toolName}' is a write action and needs explicit confirmation (re-issue with confirm=true after reviewing the request)");
         }
 
-        var url = CombineUrl(recipe.UpstreamBaseUrl, tool.Path);
+        // Build the upstream path: fill {placeholders} from the args, and require a
+        // handle for a full-body/attachment tool — so full content is read by a
+        // specific id from a prior search, never as a bulk-readable bare path.
+        var (path, pathError) = BuildPath(tool, target, requestBody);
+        if (pathError is not null)
+        {
+            return new ProviderCallResult(ProviderCallStatus.BadRequest, Detail: pathError);
+        }
+
+        var url = CombineUrl(recipe.UpstreamBaseUrl, path!);
         if (!_guard.IsAllowed(url))
         {
             return new ProviderCallResult(ProviderCallStatus.NotAllowed, Detail: "destination host is not on the SSRF allow-list");
@@ -136,7 +154,11 @@ public sealed class ProviderEgress
             return new ProviderCallResult(ProviderCallStatus.NoCredential, Detail: "stored bundle lacks the material to inject");
         }
 
-        if (!string.IsNullOrEmpty(requestBody))
+        // A GET/HEAD never carries a body — the args were consumed into the path
+        // (e.g. the handle). A write method forwards the args as the JSON body.
+        var sendBody = !string.IsNullOrEmpty(requestBody)
+            && !IsBodyless(tool.Method);
+        if (sendBody)
         {
             headers["Content-Type"] = "application/json";
         }
@@ -144,15 +166,136 @@ public sealed class ProviderEgress
         TransportResponse response;
         try
         {
-            response = await _transport.SendAsync(tool.Method, url, headers, requestBody, cancellationToken).ConfigureAwait(false);
+            response = await _transport.SendAsync(tool.Method, url, headers, sendBody ? requestBody : null, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             return new ProviderCallResult(ProviderCallStatus.TransportError, Detail: ex.Message);
         }
 
-        var body = response.Body.Length > _maxBodyBytes ? response.Body[.._maxBodyBytes] : response.Body;
-        return new ProviderCallResult(ProviderCallStatus.Completed, response.Status, body, $"{tool.Method} {tool.Path} -> {response.Status}");
+        // A metadata result is capped tighter than a full body, so a list/search
+        // can't spill more than ids + snippets (service-access spec §"Output classes").
+        var cap = tool.OutputClass == ResultClass.Metadata ? Math.Min(_maxBodyBytes, _metadataMaxBytes) : _maxBodyBytes;
+        var body = response.Body.Length > cap ? response.Body[..cap] : response.Body;
+        return new ProviderCallResult(ProviderCallStatus.Completed, response.Status, body, $"{tool.Method} {tool.Path} -> {response.Status}", tool.OutputClass);
+    }
+
+    /// <summary>GET/HEAD calls never carry a request body.</summary>
+    private static bool IsBodyless(string method) =>
+        string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Fills <c>{placeholder}</c> segments in the tool's path from the call args. A
+    /// <c>{handle}</c> segment is filled from a target-scoped <see cref="ResultHandle"/>
+    /// (rejecting a malformed or cross-provider handle); other placeholders take a
+    /// scalar arg of the same name. Every value is URL-encoded (no path injection).
+    /// A full-body/attachment tool with no placeholder is rejected — it must read by
+    /// a handle, never as a bulk path.
+    /// </summary>
+    private static (string? Path, string? Error) BuildPath(RecipeTool tool, string target, string? argsJson)
+    {
+        var placeholders = Placeholders(tool.Path);
+
+        if (tool.RequiresHandle && placeholders.Count == 0)
+        {
+            return (null, $"'{tool.Name}' returns full content and must be called by a handle, but its path defines no placeholder");
+        }
+
+        if (placeholders.Count == 0)
+        {
+            return (tool.Path, null);
+        }
+
+        JsonElement args;
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return (null, "arguments must be a JSON object to fill the path placeholders");
+            }
+            args = doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return (null, "arguments are not valid JSON");
+        }
+
+        var path = tool.Path;
+        foreach (var name in placeholders)
+        {
+            string value;
+            if (string.Equals(name, "handle", StringComparison.Ordinal))
+            {
+                if (!args.TryGetProperty("handle", out var h) || h.ValueKind != JsonValueKind.String)
+                {
+                    return (null, "missing required 'handle' argument (read by a handle returned from a prior search)");
+                }
+                var parsed = ResultHandle.Parse(h.GetString(), target);
+                if (parsed is null)
+                {
+                    return (null, "'handle' is malformed or belongs to a different provider");
+                }
+                value = parsed.Value;
+            }
+            else if (!TryGetScalarArg(args, name, out value))
+            {
+                return (null, $"missing required '{name}' argument for the path");
+            }
+
+            path = path.Replace("{" + name + "}", Uri.EscapeDataString(value), StringComparison.Ordinal);
+        }
+
+        return (path, null);
+    }
+
+    /// <summary>Extracts the distinct <c>{name}</c> placeholder names from a path, in order.</summary>
+    private static List<string> Placeholders(string path)
+    {
+        var names = new List<string>();
+        var i = 0;
+        while (i < path.Length)
+        {
+            var open = path.IndexOf('{', i);
+            if (open < 0)
+            {
+                break;
+            }
+            var close = path.IndexOf('}', open + 1);
+            if (close < 0)
+            {
+                break;
+            }
+            var name = path[(open + 1)..close];
+            if (name.Length > 0 && !names.Contains(name, StringComparer.Ordinal))
+            {
+                names.Add(name);
+            }
+            i = close + 1;
+        }
+        return names;
+    }
+
+    /// <summary>Reads a string/number arg as a non-empty string; false when absent or not a scalar.</summary>
+    private static bool TryGetScalarArg(JsonElement obj, string name, out string value)
+    {
+        value = "";
+        if (!obj.TryGetProperty(name, out var el))
+        {
+            return false;
+        }
+        switch (el.ValueKind)
+        {
+            case JsonValueKind.String:
+                value = el.GetString() ?? "";
+                return value.Length > 0;
+            case JsonValueKind.Number:
+                value = el.GetRawText();
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static string CombineUrl(string baseUrl, string path) =>

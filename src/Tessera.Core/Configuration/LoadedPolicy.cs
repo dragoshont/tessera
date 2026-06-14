@@ -1,6 +1,7 @@
 using Tessera.Core.Policy;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
+using Tessera.Core.Results;
 
 namespace Tessera.Core.Configuration;
 
@@ -53,6 +54,7 @@ internal sealed class RefreshSpecDto
     public string AccessTokenField { get; init; } = "access_token";
     public string RefreshTokenField { get; init; } = "refresh_token";
     public bool AbsorbSetCookie { get; init; } = true;
+    public string? TokenUrl { get; init; }
 }
 
 internal sealed class RecipeRotationDto
@@ -69,7 +71,7 @@ internal sealed class RecipeToolDto
     public string Action { get; init; } = "";
     public bool StepUp { get; init; }
     public string? Description { get; init; }
-    public string? Plane { get; init; }
+    public string? ResultClass { get; init; }
 }
 
 /// <summary>
@@ -112,7 +114,7 @@ public sealed record LoadedPolicy(
                 Injection: ParseInjection(r.Injection),
                 Actions: r.Actions,
                 Tools: r.Tools?
-                    .Select(t => new RecipeTool(t.Name, t.Method, t.Path, t.Action, t.StepUp, t.Description, ParsePlane(t.Plane)))
+                    .Select(t => new RecipeTool(t.Name, t.Method, t.Path, t.Action, t.StepUp, t.Description, ParseResultClass(t.ResultClass)))
                     .ToArray(),
                 ExtraHeaders: r.ExtraHeaders,
                 CookieMap: r.CookieMap,
@@ -120,7 +122,7 @@ public sealed record LoadedPolicy(
                 Rotation: r.Rotation is null ? null : new RecipeRotation(r.Rotation.Owner, r.Rotation.Detail),
                 Refresh: r.RefreshSpec is null
                     ? null
-                    : new RefreshSpec(r.RefreshSpec.Path, r.RefreshSpec.Method, r.RefreshSpec.AccessTokenField, r.RefreshSpec.RefreshTokenField, r.RefreshSpec.AbsorbSetCookie)))
+                    : new RefreshSpec(r.RefreshSpec.Path, r.RefreshSpec.Method, r.RefreshSpec.AccessTokenField, r.RefreshSpec.RefreshTokenField, r.RefreshSpec.AbsorbSetCookie, r.RefreshSpec.TokenUrl)))
             .ToArray();
 
         return new LoadedPolicy(grants, bindings, recipes);    }
@@ -138,13 +140,25 @@ public sealed record LoadedPolicy(
         _ => InjectionKind.None,
     };
 
-    // Only the three real planes round-trip; anything else (legacy/unknown) is null
-    // ⇒ derive the plane from the action verb (RecipeTool.EffectivePlane).
-    private static ActionPlane? ParsePlane(string? value) => value?.ToLowerInvariant() switch
+    // The output class a tool declares (service-access spec). Unknown/empty ⇒ null
+    // (unclassified — no result-class enforcement, the legacy behaviour).
+    private static ResultClass? ParseResultClass(string? value) => value?.ToLowerInvariant() switch
     {
-        "read" => ActionPlane.Read,
-        "use" => ActionPlane.Use,
-        "manage" => ActionPlane.Manage,
+        "metadata" => ResultClass.Metadata,
+        "preview" => ResultClass.Preview,
+        "fullbody" or "full_body" or "body" => ResultClass.FullBody,
+        "attachment" or "export" => ResultClass.Attachment,
+        "receipt" => ResultClass.Receipt,
+        _ => null,
+    };
+
+    private static string? ResultClassToken(ResultClass value) => value switch
+    {
+        ResultClass.Metadata => "metadata",
+        ResultClass.Preview => "preview",
+        ResultClass.FullBody => "fullBody",
+        ResultClass.Attachment => "attachment",
+        ResultClass.Receipt => "receipt",
         _ => null,
     };
 
@@ -201,9 +215,9 @@ public sealed record LoadedPolicy(
                         Action = t.Action,
                         StepUp = t.StepUp,
                         Description = t.Description,
-                        // Persist only an explicit plane override so a derived plane
+                        // Persist the declared output class; an unclassified tool
                         // round-trips back to null (faithful document, ADR 0008).
-                        Plane = t.Plane is { } p ? ActionPlanes.ToToken(p) : null,
+                        ResultClass = t.OutputClass is { } oc ? ResultClassToken(oc) : null,
                     }).ToList()
                     : null,
                 ExtraHeaders = r.ExtraHeaders is { Count: > 0 } ? new Dictionary<string, string>(r.ExtraHeaders) : null,
@@ -219,6 +233,7 @@ public sealed record LoadedPolicy(
                         AccessTokenField = r.Refresh.AccessTokenField,
                         RefreshTokenField = r.Refresh.RefreshTokenField,
                         AbsorbSetCookie = r.Refresh.AbsorbSetCookie,
+                        TokenUrl = r.Refresh.TokenUrl,
                     },
             })
             .ToList(),

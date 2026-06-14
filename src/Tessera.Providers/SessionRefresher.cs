@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Tessera.Core.Egress;
 using Tessera.Core.Recipes;
 using Tessera.Core.Stores;
 
@@ -36,12 +37,22 @@ public sealed class SessionRefresher
 {
     private readonly IHttpTransport _transport;
     private readonly ICredentialWriter _writer;
+    private readonly SsrfGuard? _guard;
 
     /// <summary>Creates a refresher over the transport + a store writer.</summary>
-    public SessionRefresher(IHttpTransport transport, ICredentialWriter writer)
+    /// <param name="transport">The HTTP transport that performs the refresh call.</param>
+    /// <param name="writer">The store writer for the rotated bundle.</param>
+    /// <param name="guard">
+    /// The SSRF allow-list the refresh URL must pass (the same list the data egress
+    /// uses). When null the refresh URL is <b>not</b> host-checked — only acceptable
+    /// in a unit test; the host always supplies one in production so an OAuth token
+    /// endpoint on a different host can't be used to reach an un-allow-listed URL.
+    /// </param>
+    public SessionRefresher(IHttpTransport transport, ICredentialWriter writer, SsrfGuard? guard = null)
     {
         _transport = transport;
         _writer = writer;
+        _guard = guard;
     }
 
     /// <summary>Refreshes <paramref name="secretName"/>'s session per <paramref name="spec"/> and writes it back.</summary>
@@ -63,7 +74,18 @@ public sealed class SessionRefresher
             return new RefreshResult(RefreshStatus.Dead, "no current credential to refresh");
         }
 
-        var url = recipe.UpstreamBaseUrl.TrimEnd('/') + "/" + spec.Path.TrimStart('/');
+        // Use the absolute OAuth token endpoint when declared (a different host than
+        // the data API, e.g. login.microsoftonline.com vs graph.microsoft.com),
+        // otherwise the data base URL + path. Either way it must pass the SSRF
+        // allow-list — the refresher never reaches a host the data egress couldn't.
+        var url = !string.IsNullOrWhiteSpace(spec.TokenUrl)
+            ? spec.TokenUrl!
+            : recipe.UpstreamBaseUrl.TrimEnd('/') + "/" + spec.Path.TrimStart('/');
+
+        if (_guard is not null && !_guard.IsAllowed(url))
+        {
+            return new RefreshResult(RefreshStatus.Error, "refresh URL host is not on the SSRF allow-list");
+        }
 
         TransportResponse response;
         try

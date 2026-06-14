@@ -58,7 +58,7 @@
           "path": "appointments",
           "action": "use:book",
           "stepUp": true,
-          "plane": "use",
+          "resultClass": "receipt",
           "description": "Book a slot (echo the slot back and get an explicit yes first)."
         }
       ],

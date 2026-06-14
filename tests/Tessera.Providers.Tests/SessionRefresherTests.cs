@@ -68,6 +68,43 @@ public sealed class SessionRefresherTests
         Assert.Equal("NEW", writer.LastBundle!.Cookies!["session"]);
     }
 
+    // ── OAuth absolute token URL + SSRF guard (F3) ────────────────────────────
+
+    [Fact]
+    public async Task Uses_an_absolute_token_url_on_a_different_host()
+    {
+        var transport = new FakeTransport(200, "{\"access_token\":\"NEW_AT\"}");
+        var writer = new CapturingWriter();
+        // Graph: data API graph.microsoft.com, token endpoint login.microsoftonline.com.
+        var guard = new Tessera.Core.Egress.SsrfGuard(["graph.microsoft.com", "login.microsoftonline.com"]);
+        var refresher = new SessionRefresher(transport, writer, guard);
+        var recipe = new Recipe("graph", Egress: EgressMode.Http, UpstreamBaseUrl: "https://graph.microsoft.com/v1.0", Injection: InjectionKind.BearerToken);
+        var spec = new RefreshSpec("ignored", TokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token");
+
+        var result = await refresher.RefreshAsync(recipe, spec, "graph-alice", new CredentialBundle(AccessToken: "OLD", RefreshToken: "RT"));
+
+        Assert.Equal(RefreshStatus.Rotated, result.Status);
+        Assert.Equal("https://login.microsoftonline.com/common/oauth2/v2.0/token", transport.LastUrl);
+    }
+
+    [Fact]
+    public async Task Refuses_a_refresh_url_off_the_ssrf_allow_list()
+    {
+        var transport = new FakeTransport(200, "{\"access_token\":\"NEW\"}");
+        var writer = new CapturingWriter();
+        // The data host is allowed, but the token URL points elsewhere — refuse.
+        var guard = new Tessera.Core.Egress.SsrfGuard(["graph.microsoft.com"]);
+        var refresher = new SessionRefresher(transport, writer, guard);
+        var recipe = new Recipe("graph", Egress: EgressMode.Http, UpstreamBaseUrl: "https://graph.microsoft.com/v1.0", Injection: InjectionKind.BearerToken);
+        var spec = new RefreshSpec("ignored", TokenUrl: "https://evil.example.com/token");
+
+        var result = await refresher.RefreshAsync(recipe, spec, "graph-alice", new CredentialBundle(AccessToken: "OLD", RefreshToken: "RT"));
+
+        Assert.Equal(RefreshStatus.Error, result.Status);
+        Assert.Equal(0, transport.Calls);
+        Assert.Null(writer.LastBundle);
+    }
+
     private sealed class CapturingWriter : ICredentialWriter
     {
         public string? LastName { get; private set; }
