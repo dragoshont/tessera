@@ -9,9 +9,8 @@ namespace Tessera.Core.Tests;
 /// <summary>
 /// The portal read-model that touches the store: connection health (presence flags
 /// + status) and the per-person attention rollup. Uses generic identities — alice
-/// is the operator, bob a member — mirroring the live shape (alice=admin,
-/// bob/carol=members) without naming a real person. No secret value is ever
-/// part of the projection.
+/// is the operator, bob and carol members — without naming a real person. No secret
+/// value is ever part of the projection.
 /// </summary>
 public sealed class PortalServiceTests
 {

@@ -24,16 +24,19 @@ set -eu
 
 cd "$(git rev-parse --show-toplevel)"
 
-# Real homelab identities/secrets. The bare first names use word boundaries (\b) so
-# they catch "alice"/"bob"/"carol" as standalone words but NOT the public
-# GitHub handle "dragoshont" (no boundary inside it). Lesson: an earlier doc slipped
-# in real first names because the gate only matched the numeric-suffixed handles.
-patterns='alice79|bob84|\balice\b|\bbob\b|\bcarol\b|health-portal|account-[abc]-session|examplekv|hont\.ro|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+# Real homelab identities/secrets. Bare first names are matched WITHOUT \b (git
+# grep's word-boundary support differs between macOS and Linux — \b silently
+# no-matched on macOS, so a real name once slipped past the local gate and only CI
+# caught it). Instead we match the bare name and allowlist the public GitHub handle
+# "dragoshont" below — identical behaviour on both engines.
+patterns='alice|bob|carol|health-portal|account-[abc]-session|examplekv|hont\.ro|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 
 # Exclude this script + SECURITY.md (maintainer contact) + the CI file (which
-# documents the same patterns). Then drop the allowlisted public/placeholder
-# GUIDs so they don't trip the gate.
+# documents the same patterns). Then drop the allowlisted values: the public GitHub
+# handle/namespace "dragoshont", the documented Microsoft consumer-tenant GUID, and
+# obvious placeholder GUIDs.
 if git grep -nIE "$patterns" -- . ':!SECURITY.md' ':!scripts/check-pii.sh' ':!.github/workflows/ci.yml' \
+     | grep -vE 'dragoshont' \
      | grep -vE '9188040d-6c67-4c5b-b112-36a304b66dad' \
      | grep -viE '\b([0-9a-f])\1{7}-' \
      | grep -vE '1111-1111-1111|2222-3333-4444'; then
