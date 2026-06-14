@@ -89,7 +89,14 @@ export interface Connection {
   hasCookies: boolean
   hasRefreshToken: boolean
   hasAccessToken: boolean
+  /** Whose credential backs this connection (ADR 0020): a household/brokered key, the person's own login, or a guardian-seeded dependent. */
+  owner?: CredentialOwner
+  /** For an `owner: 'dependent'` connection, the guardian who seeded it. */
+  guardian?: string | null
 }
+
+/** Whose credential a connection is backed by (ADR 0020). */
+export type CredentialOwner = 'service' | 'user' | 'dependent'
 
 /** Whether the embedded worker browser is interactive (login) or view-only. */
 export type LiveViewMode = 'readonly' | 'readwrite'
@@ -172,6 +179,8 @@ export interface Delegation {
   actions: string[]
   /** Actions that require a human step-up confirmation before proceeding. */
   stepUpActions: string[]
+  /** The distinct action planes (ADR 0019) these actions touch, ordered read → use → manage. */
+  planes: ActionPlane[]
   /** True when the grant is pure automation (no delegated human). */
   isAutomation: boolean
   onBehalfOf: string | null
@@ -187,11 +196,16 @@ export interface Module {
   /** True only when http AND the broker's global egress gate is on. */
   egressEnabled: boolean
   actions: string[]
+  /** The distinct action planes (ADR 0019) this module's actions/tools touch, ordered read → use → manage. */
+  planes: ActionPlane[]
   toolCount: number
   connectionCount: number
   /** The upstream host (host only, never a path/secret), or null. */
   upstreamHost: string | null
 }
+
+/** An action plane (ADR 0019): observe (read), operate (use), or reshape (manage). */
+export type ActionPlane = 'read' | 'use' | 'manage'
 
 /** Who owns rotating a connection's session. */
 export type RotationOwner = 'none' | 'external' | 'tessera'

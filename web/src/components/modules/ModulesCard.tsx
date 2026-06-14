@@ -1,6 +1,7 @@
 import { Globe, ShieldOff } from 'lucide-react'
 import { Badge } from '../ui/badge'
 import { Skeleton } from '../ui/skeleton'
+import { PlaneBadges } from '../access/PlaneBadges'
 import { cn } from '../../lib/utils'
 import type { Module } from '../../data/types'
 
@@ -48,7 +49,8 @@ function ModuleRow({ module }: { module: Module }) {
           {module.toolCount > 0 ? <> · {module.toolCount} tools</> : null}
         </p>
       </div>
-      <div className="flex flex-wrap gap-1.5 sm:justify-end">
+      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+        <PlaneBadges planes={module.planes} />
         {module.actions.length === 0 ? (
           <span className="text-xs text-muted-foreground">no actions</span>
         ) : (

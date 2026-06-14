@@ -101,6 +101,7 @@ public sealed class PortalService
                 DisplayName: recipe?.Description ?? grant.Target,
                 Actions: grant.Actions,
                 StepUpActions: grant.StepUpActions ?? [],
+                Planes: ActionPlanes.TokensOf(grant.Actions),
                 IsAutomation: grant.OnBehalfOf is null,
                 OnBehalfOf: grant.OnBehalfOf));
         }
@@ -146,6 +147,9 @@ public sealed class PortalService
                 Egress: isHttp ? "http" : "none",
                 EgressEnabled: isHttp && egressGloballyEnabled,
                 Actions: recipe.ExposedActions,
+                // Planes span the declared action verbs and every tool's action, so a
+                // module that exposes a manage: tool shows the manage chip (ADR 0019).
+                Planes: ActionPlanes.TokensOf(recipe.ExposedActions.Concat(recipe.ExposedTools.Select(t => t.Action))),
                 ToolCount: recipe.ExposedTools.Count,
                 ConnectionCount: count,
                 UpstreamHost: ExtractHost(recipe.UpstreamBaseUrl)));
@@ -284,7 +288,9 @@ public sealed class PortalService
                 // are honest: expiry is unknown/estimated rather than a fake date.
                 ExpiresAt: null,
                 ExpiryIsEstimated: true,
-                Detail: health.Detail));
+                Detail: health.Detail,
+                Owner: CredentialOwners.ToToken(binding.Owner),
+                Guardian: binding.Guardian));
         }
 
         // Stable order: needs-attention first, then by provider name.
@@ -358,7 +364,9 @@ public sealed class PortalService
             HasAccessToken: health.HasAccessToken,
             ExpiresAt: null,
             ExpiryIsEstimated: true,
-            Detail: health.Detail);
+            Detail: health.Detail,
+            Owner: CredentialOwners.ToToken(binding.Owner),
+            Guardian: binding.Guardian);
     }
 
     private static bool SameTarget(string a, string b) => string.Equals(a, b, StringComparison.Ordinal);

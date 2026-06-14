@@ -1,7 +1,8 @@
 import { RotateCw, Trash2 } from 'lucide-react'
-import type { Connection, Schedule } from '../../data/types'
+import type { Connection, CredentialOwner, Schedule } from '../../data/types'
 import { formatExpiry, relativeTime } from '../../lib/format'
 import { Alert, AlertDescription } from '../ui/alert'
+import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Separator } from '../ui/separator'
 import {
@@ -37,6 +38,27 @@ function rotationLabel(schedule: Schedule): string {
       return 'Automatic · external'
     default:
       return 'Manual · re-seed by hand'
+  }
+}
+
+/** Phrases the credential owner (ADR 0020): whose secret backs this connection. */
+function ownerMeta(owner: CredentialOwner | undefined, guardian?: string | null): { label: string; title: string } {
+  switch (owner) {
+    case 'user':
+      return {
+        label: 'personal login',
+        title: 'Tessera holds this person’s own login for this provider. The owner knows the secret; it is never revealed to an agent or another user.',
+      }
+    case 'dependent':
+      return {
+        label: guardian ? `dependent · seeded by ${guardian}` : 'dependent',
+        title: 'A guardian seeded this credential for a dependent. The guardian owns the seeding; the dependent owns the data.',
+      }
+    default:
+      return {
+        label: 'household key',
+        title: 'A shared/brokered key — nobody personally holds it. Tessera never reveals it to anyone, including the acting user.',
+      }
   }
 }
 
@@ -99,6 +121,9 @@ export function ConnectionDrawer({ connection, open, onOpenChange, onAction, sch
             </div>
             <div className="flex items-center gap-2 pt-1 text-sm">
               <HealthBadge status={connection.status} />
+              <Badge variant="secondary" title={ownerMeta(connection.owner, connection.guardian).title}>
+                {ownerMeta(connection.owner, connection.guardian).label}
+              </Badge>
               {connection.lastUsedAt || connection.lastSeededAt ? (
                 <span className="text-muted-foreground">
                   · verified {relativeTime(connection.lastUsedAt ?? connection.lastSeededAt)}
@@ -143,6 +168,7 @@ export function ConnectionDrawer({ connection, open, onOpenChange, onAction, sch
                   />
                   <DetailRow label="expires" value={formatExpiry(connection)} />
                   {schedule ? <DetailRow label="auto-refresh" value={rotationLabel(schedule)} /> : null}
+                  <DetailRow label="credential owner" value={ownerMeta(connection.owner, connection.guardian).label} />
                   <DetailRow label="acts as" value={connection.ownerPrincipal} />
                 </section>
               </TabsContent>

@@ -1,6 +1,7 @@
 import { Bot, ShieldCheck, User } from 'lucide-react'
 import { Badge } from '../ui/badge'
 import { Skeleton } from '../ui/skeleton'
+import { PlaneBadges } from './PlaneBadges'
 import { cn } from '../../lib/utils'
 import type { Delegation } from '../../data/types'
 
@@ -28,7 +29,8 @@ function DelegationRow({ delegation }: { delegation: Delegation }) {
           {delegation.onBehalfOf ? <> · as {delegation.onBehalfOf}</> : null}
         </p>
       </div>
-      <div className="flex flex-wrap gap-1.5 sm:justify-end">
+      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+        <PlaneBadges planes={delegation.planes} />
         {delegation.actions.map((action) => (
           <Badge key={action} variant="outline">
             {action}

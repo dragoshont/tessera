@@ -23,25 +23,26 @@
 The shared foundation several later phases reuse. Pure code, fully testable, no
 egress, no deploy. Build before the media broker; Mode U also benefits.
 
-- [ ] **0.1 ActionPlane** — `src/Tessera.Core/Policy/ActionPlane.cs`: enum
+- [x] **0.1 ActionPlane** — `src/Tessera.Core/Policy/ActionPlane.cs`: enum
   `Unspecified|Read|Use|Manage` + `ActionPlanes.Of(verb)` (prefix before `:`) +
-  `IsManageScoped`. Backward compatible (legacy `write:`/`pay:` ⇒ Unspecified).
-- [ ] **0.2 RecipeTool.Plane** — add an optional `plane` field to `RecipeTool` +
-  the DTO round-trip in `LoadedPolicy.cs` (like `RecipeRotation` did).
-- [ ] **0.3 PDP plane enforcement** — `PolicyDecisionPoint`: a `manage:` action is
+  `IsManageScoped` + `TokensOf` + `ToToken`. Backward compatible (legacy `write:`/`pay:` ⇒ Unspecified).
+- [x] **0.2 RecipeTool.Plane** — added an optional `plane` field to `RecipeTool`
+  (+ `EffectivePlane` fallback to the verb) + the DTO round-trip in `LoadedPolicy.cs`.
+- [x] **0.3 PDP plane enforcement** — `Grant.MatchesAction`: a `manage:` action is
   default-deny unless a grant pattern is *manage-scoped* (a broad `*`/`use:*` never
-  reaches manage); `manage:` defaults to step-up unless explicitly loosened. Config
-  default `manageRequiresStepUp: true`.
-- [ ] **0.4 CredentialOwner** — enum `Service|User|Dependent` (default **Service** =
-  fail-safe). Add an optional `owner` to `TargetBinding` + DTO round-trip; a
-  `guardian` field for dependent. Pure model + parse, no behaviour change yet.
-- [ ] **0.5 Surface plane + owner in awareness DTOs** — extend `DelegationView`/
-  `ModuleView`/`PortalConnection` projections + the SPA so the dashboard shows
-  "use / manage" and "your account vs household key vs for <dependent>".
-- [ ] **0.6 Tests** — Core: plane classification, manage default-deny + step-up,
-  owner default=service, round-trips. Broker: a `manage:` call is denied/step-up via
-  a real grant; awareness DTOs carry plane/owner.
-- [ ] **0.7** Adversarial review + commit + push.
+  reaches manage); `PolicyDecisionPoint` defaults `manage:` to step-up. Config knob
+  `policy.manageRequiresStepUp: true` wired through `BrokerHost`.
+- [x] **0.4 CredentialOwner** — enum `Service|User|Dependent` (default **Service** =
+  fail-safe) + `CredentialOwners.Parse/ToToken`. Added optional `owner` + `guardian`
+  to `TargetBinding` + DTO round-trip. Pure model + parse.
+- [x] **0.5 Surface plane + owner in awareness DTOs** — extended `DelegationView`/
+  `ModuleView` (`Planes`) + `PortalConnection` (`Owner`/`Guardian`) projections, the
+  portal HTTP DTOs, and the SPA (a shared `PlaneBadges`, an owner chip + row in the
+  connection drawer, types + fixtures).
+- [x] **0.6 Tests** — Core: `ActionPlaneTests`, `PlaneEnforcementTests`,
+  `CredentialOwnerTests`, `PolicyRoundTripTests` (+38). Broker: delegation/module
+  planes + connection owner (+3). 221 .NET green; web build + 52 tests + lint green.
+- [x] **0.7** Adversarial review + commit + push.
 
 ---
 
@@ -151,4 +152,7 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
 
 - 2026-06-14: docs committed — ADR 0018/0019 (+ read/use/manage planes), ADR 0020
   (credential ownership), service-access spec, this plan. Job A broker side done
-  (commit `164309f`, 180 tests green). **Next: Phase 0 (policy primitives).**
+  (commit `164309f`, 180 tests green).
+- 2026-06-14 (overnight): **Phase 0 complete** — ActionPlane + CredentialOwner +
+  PDP manage default-deny/step-up + awareness DTO/SPA surfacing + tests (221 .NET
+  green, web build + 52 + lint green). **Next: Phase 1.2 (Job A worker contract doc).**

@@ -82,7 +82,10 @@ public static class BrokerHost
             ?? AzureKeyVaultCredentialStore.FromEnvironment(options.Environment)
             ?? (ICredentialStore)new InMemoryCredentialStore();
 
-        var pdp = new PolicyDecisionPoint(policy.Grants, allowUnverified: config.Identity.Mode == "dev");
+        var pdp = new PolicyDecisionPoint(
+            policy.Grants,
+            allowUnverified: config.Identity.Mode == "dev",
+            manageRequiresStepUp: config.Policy.ManageRequiresStepUp);
         var resolver = new CredentialResolver(policy.Bindings, store);
         var baseAudit = config.Audit.Enabled ? JsonlAuditSink.Open(config.Audit.Path) : (IAuditSink)NullAuditSink.Instance;
         // Wrap the durable sink with a bounded in-memory tail for the portal's

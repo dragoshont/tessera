@@ -414,17 +414,17 @@ internal static class PortalEndpoints
         new(p.Principal, p.Role.ToString(), p.ConnectionCount, p.NeedsAttentionCount);
 
     private static DelegationDto ToDelegationDto(DelegationView d) =>
-        new(d.Caller, d.Target, d.DisplayName, d.Actions, d.StepUpActions, d.IsAutomation, d.OnBehalfOf);
+        new(d.Caller, d.Target, d.DisplayName, d.Actions, d.StepUpActions, d.Planes, d.IsAutomation, d.OnBehalfOf);
 
     private static ModuleDto ToModuleDto(ModuleView m) =>
-        new(m.Target, m.DisplayName, m.Driver, m.Egress, m.EgressEnabled, m.Actions, m.ToolCount, m.ConnectionCount, m.UpstreamHost);
+        new(m.Target, m.DisplayName, m.Driver, m.Egress, m.EgressEnabled, m.Actions, m.Planes, m.ToolCount, m.ConnectionCount, m.UpstreamHost);
 
     private static ScheduleDto ToScheduleDto(ScheduleView s) =>
         new(s.ConnectionId, s.RotationOwner, s.RefreshConfigured, s.Detail, s.LastRotatedAt, s.NextRotationAt);
 
     private static ConnectionDto ToDto(PortalConnection c) =>
         new(c.ConnectionId, c.OwnerPrincipal, c.Provider, c.DisplayName, c.Status,
-            c.HasCookies, c.HasRefreshToken, c.HasAccessToken, c.ExpiresAt, c.ExpiryIsEstimated);
+            c.HasCookies, c.HasRefreshToken, c.HasAccessToken, c.ExpiresAt, c.ExpiryIsEstimated, c.Owner, c.Guardian);
 }
 
 /// <summary>The /portal/me payload.</summary>
@@ -452,6 +452,7 @@ internal sealed record DelegationDto(
     string DisplayName,
     IReadOnlyList<string> Actions,
     IReadOnlyList<string> StepUpActions,
+    IReadOnlyList<string> Planes,
     bool IsAutomation,
     string? OnBehalfOf);
 
@@ -463,6 +464,7 @@ internal sealed record ModuleDto(
     string Egress,
     bool EgressEnabled,
     IReadOnlyList<string> Actions,
+    IReadOnlyList<string> Planes,
     int ToolCount,
     int ConnectionCount,
     string? UpstreamHost);
@@ -487,7 +489,9 @@ internal sealed record ConnectionDto(
     bool HasRefreshToken,
     bool HasAccessToken,
     DateTimeOffset? ExpiresAt,
-    bool ExpiryIsEstimated);
+    bool ExpiryIsEstimated,
+    string Owner,
+    string? Guardian);
 
 /// <summary>A live-view handle payload for the captcha hand-off.</summary>
 internal sealed record LiveViewResponse(

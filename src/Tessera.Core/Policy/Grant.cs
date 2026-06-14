@@ -48,7 +48,32 @@ public sealed record Grant(
             return false;
         }
 
-        return Glob.AnyMatch(Actions, request.Action);
+        return MatchesAction(request.Action);
+    }
+
+    /// <summary>
+    /// True when this grant's <see cref="Actions"/> authorize <paramref name="action"/>.
+    /// The control plane is default-deny: a <c>manage:</c> action is authorized only
+    /// by a grant pattern that is itself manage-scoped (ADR 0019), so a broad
+    /// <c>*</c> or a <c>use:*</c> grant never silently reaches <c>manage:</c>. Read
+    /// and use verbs keep plain least-privilege glob matching.
+    /// </summary>
+    private bool MatchesAction(string action)
+    {
+        if (ActionPlanes.Of(action) == ActionPlane.Manage)
+        {
+            foreach (var pattern in Actions)
+            {
+                if (ActionPlanes.IsManageScoped(pattern) && Glob.IsMatch(pattern, action))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return Glob.AnyMatch(Actions, action);
     }
 
     private bool DelegationMatches(EndUserAssertion? user)

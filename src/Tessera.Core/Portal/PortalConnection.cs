@@ -18,6 +18,8 @@ namespace Tessera.Core.Portal;
 /// <param name="ExpiresAt">When the session expires, if knowable (often null — cookies carry no readable TTL).</param>
 /// <param name="ExpiryIsEstimated">True when <see cref="ExpiresAt"/> is an estimate or unknown — surface "~estimated".</param>
 /// <param name="Detail">A secret-free explanation of the status.</param>
+/// <param name="Owner">Whose credential backs this connection (ADR 0020): <c>service</c> (household/brokered key) | <c>user</c> (the person's own login) | <c>dependent</c> (a guardian seeded it).</param>
+/// <param name="Guardian">For an <c>owner: dependent</c> connection, the guardian who seeded it; otherwise null.</param>
 public sealed record PortalConnection(
     string ConnectionId,
     string OwnerPrincipal,
@@ -29,7 +31,9 @@ public sealed record PortalConnection(
     bool HasAccessToken,
     DateTimeOffset? ExpiresAt,
     bool ExpiryIsEstimated,
-    string Detail = "");
+    string Detail = "",
+    string Owner = "service",
+    string? Guardian = null);
 
 /// <summary>A person plus the portal's attention rollup (Users-view row).</summary>
 /// <param name="Principal">The verified principal (e.g. <c>alice@example.com</c>).</param>
@@ -60,6 +64,7 @@ public sealed record RecipeSummary(string Provider, string DisplayName);
 /// <param name="DisplayName">A human label (recipe description, else the target).</param>
 /// <param name="Actions">The action globs the caller may perform.</param>
 /// <param name="StepUpActions">The action globs that require a human step-up first.</param>
+/// <param name="Planes">The distinct action planes (ADR 0019) these actions touch, ordered read → use → manage.</param>
 /// <param name="IsAutomation">True when the grant is pure automation (no delegated human).</param>
 /// <param name="OnBehalfOf">The delegated principal, or <c>null</c> for automation.</param>
 public sealed record DelegationView(
@@ -68,6 +73,7 @@ public sealed record DelegationView(
     string DisplayName,
     IReadOnlyList<string> Actions,
     IReadOnlyList<string> StepUpActions,
+    IReadOnlyList<string> Planes,
     bool IsAutomation,
     string? OnBehalfOf);
 
@@ -84,6 +90,7 @@ public sealed record DelegationView(
 /// <param name="Egress"><c>none</c> (status-only) or <c>http</c> (injectable upstream).</param>
 /// <param name="EgressEnabled">True only when this module is HTTP <b>and</b> the broker's global egress gate is on — i.e. it can actually reach upstream right now.</param>
 /// <param name="Actions">The action verbs this module exposes.</param>
+/// <param name="Planes">The distinct action planes (ADR 0019) this module's actions/tools touch, ordered read → use → manage.</param>
 /// <param name="ToolCount">How many callable HTTP operations the recipe defines.</param>
 /// <param name="ConnectionCount">How many connections (bindings) use this module.</param>
 /// <param name="UpstreamHost">The upstream host (host only, never a path/secret), or null for status-only modules.</param>
@@ -94,6 +101,7 @@ public sealed record ModuleView(
     string Egress,
     bool EgressEnabled,
     IReadOnlyList<string> Actions,
+    IReadOnlyList<string> Planes,
     int ToolCount,
     int ConnectionCount,
     string? UpstreamHost);

@@ -74,6 +74,14 @@ public sealed class PolicyOptions
 
     /// <summary>Path to the policy document (grants + bindings + recipes).</summary>
     public string Document { get; init; } = "grants.json";
+
+    /// <summary>
+    /// Whether an authorized control-plane (<c>manage:</c>) action always requires a
+    /// human step-up (ADR 0019). Default <c>true</c> — reshaping an integration is
+    /// high-impact, so the manage plane is step-up unless an operator deliberately
+    /// loosens it here.
+    /// </summary>
+    public bool ManageRequiresStepUp { get; init; } = true;
 }
 
 /// <summary>Audit settings (ADR 0008).</summary>

@@ -49,17 +49,17 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         File.WriteAllText(grantsPath, """
             {
               "grants": [
-                { "caller": "spiffe://tessera.local/chat", "onBehalfOf": "alice@example.com", "target": "health-portal", "actions": ["read:*"], "stepUpActions": ["write:*"] },
+                { "caller": "spiffe://tessera.local/chat", "onBehalfOf": "alice@example.com", "target": "health-portal", "actions": ["read:*", "use:book"], "stepUpActions": ["write:*", "use:book"] },
                 { "caller": "spiffe://tessera.local/chat", "onBehalfOf": "bob@example.com",   "target": "health-portal", "actions": ["read:appointments"] },
                 { "caller": "portal://tessera", "target": "utility-co", "actions": ["read:*"] }
               ],
               "bindings": [
-                { "target": "health-portal", "onBehalfOf": "alice@example.com", "credential": "hp-alice" },
+                { "target": "health-portal", "onBehalfOf": "alice@example.com", "credential": "hp-alice", "owner": "user" },
                 { "target": "utility-co",    "onBehalfOf": "alice@example.com", "credential": "uc-alice" },
                 { "target": "health-portal", "onBehalfOf": "bob@example.com",   "credential": "hp-bob" }
               ],
               "recipes": [
-                { "target": "health-portal", "egress": "none", "description": "Health Portal", "rotation": { "owner": "external", "detail": "a domain MCP keep-warm owns rotation" } }
+                { "target": "health-portal", "egress": "none", "actions": ["read:selftest"], "description": "Health Portal", "rotation": { "owner": "external", "detail": "a domain MCP keep-warm owns rotation" } }
               ]
             }
             """);
@@ -222,6 +222,19 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         // … and her connection is listable.
         using var conns = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/connections?principal={newPerson}"))).Content.ReadAsStringAsync());
         Assert.Contains(conns.RootElement.EnumerateArray(), c => c.GetProperty("provider").GetString() == "health-portal");
+    }
+
+    [Fact]
+    public async Task Connections_surface_the_credential_owner()
+    {
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/connections?principal={Admin}"))).Content.ReadAsStringAsync());
+        var conns = doc.RootElement.EnumerateArray().ToArray();
+
+        // alice's health-portal binding is owner: user; her utility-co binding defaults to service.
+        var health = conns.Single(c => c.GetProperty("connectionId").GetString() == $"health-portal:{Admin}");
+        Assert.Equal("user", health.GetProperty("owner").GetString());
+        var utility = conns.Single(c => c.GetProperty("connectionId").GetString() == $"utility-co:{Admin}");
+        Assert.Equal("service", utility.GetProperty("owner").GetString());
     }
 
     [Fact]
@@ -414,6 +427,17 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Delegations_surface_the_action_planes()
+    {
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/delegations?principal={Admin}"))).Content.ReadAsStringAsync());
+        var grant = doc.RootElement.EnumerateArray().Single();
+
+        // alice's grant spans read:* + use:book → the read and use planes, ordered.
+        var planes = grant.GetProperty("planes").EnumerateArray().Select(p => p.GetString()!).ToArray();
+        Assert.Equal(["read", "use"], planes);
+    }
+
+    [Fact]
     public async Task Delegations_let_an_operator_see_everyone_including_automation()
     {
         using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/delegations"))).Content.ReadAsStringAsync());
@@ -459,6 +483,17 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         Assert.False(hp.GetProperty("egressEnabled").GetBoolean());
         // alice + bob both have a health-portal binding.
         Assert.Equal(2, hp.GetProperty("connectionCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task Modules_surface_the_action_planes_of_their_recipe()
+    {
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Member, HttpMethod.Get, "/portal/modules"))).Content.ReadAsStringAsync());
+        var hp = doc.RootElement.EnumerateArray().Single(m => m.GetProperty("target").GetString() == "health-portal");
+
+        // The recipe exposes read:selftest → the read plane.
+        var planes = hp.GetProperty("planes").EnumerateArray().Select(p => p.GetString()!).ToArray();
+        Assert.Equal(["read"], planes);
     }
 
     // ── Schedule (ADR 0017) ────────────────────────────────────────────────────

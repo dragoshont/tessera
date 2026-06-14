@@ -16,16 +16,28 @@ public sealed class PolicyDecisionPoint
 {
     private readonly IReadOnlyList<Grant> _grants;
     private readonly bool _allowUnverified;
+    private readonly bool _manageRequiresStepUp;
 
     /// <summary>Creates a PDP over a set of grants.</summary>
     /// <param name="grants">The authorization rules (empty = deny everything).</param>
     /// <param name="allowUnverified">
     /// When true, unverified (dev) callers are tolerated — local loopback only.
     /// </param>
-    public PolicyDecisionPoint(IEnumerable<Grant>? grants = null, bool allowUnverified = false)
+    /// <param name="manageRequiresStepUp">
+    /// When true (the default), an authorized control-plane (<c>manage:</c>) action
+    /// always requires a human step-up, even when the grant didn't list it in
+    /// <see cref="Grant.StepUpActions"/> (ADR 0019). Reshaping an integration is
+    /// high-impact by default; an operator must deliberately set this false to
+    /// loosen the whole manage plane.
+    /// </param>
+    public PolicyDecisionPoint(
+        IEnumerable<Grant>? grants = null,
+        bool allowUnverified = false,
+        bool manageRequiresStepUp = true)
     {
         _grants = grants?.ToArray() ?? [];
         _allowUnverified = allowUnverified;
+        _manageRequiresStepUp = manageRequiresStepUp;
     }
 
     /// <summary>Evaluates a request, fail-closed.</summary>
@@ -61,6 +73,15 @@ public sealed class PolicyDecisionPoint
             {
                 return Decision.StepUp(
                     $"step-up required: {who} may {request.Action} on {request.Target} only after human approval",
+                    obligation: request.Action);
+            }
+
+            // The control plane reshapes an integration — default to step-up unless
+            // an operator has deliberately loosened the whole manage plane (ADR 0019).
+            if (_manageRequiresStepUp && ActionPlanes.Of(request.Action) == ActionPlane.Manage)
+            {
+                return Decision.StepUp(
+                    $"step-up required: {who} may manage {request.Target} ({request.Action}) only after human approval",
                     obligation: request.Action);
             }
 

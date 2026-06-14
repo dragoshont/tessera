@@ -26,6 +26,8 @@ internal sealed class BindingDto
     public string Target { get; init; } = "";
     public string Credential { get; init; } = "";
     public string? OnBehalfOf { get; init; }
+    public string? Owner { get; init; }
+    public string? Guardian { get; init; }
 }
 
 internal sealed class RecipeDto
@@ -57,6 +59,7 @@ internal sealed class RecipeToolDto
     public string Action { get; init; } = "";
     public bool StepUp { get; init; }
     public string? Description { get; init; }
+    public string? Plane { get; init; }
 }
 
 /// <summary>
@@ -87,7 +90,7 @@ public sealed record LoadedPolicy(
             .ToArray();
 
         var bindings = dto.Bindings
-            .Select(b => new TargetBinding(b.Target, b.Credential, b.OnBehalfOf))
+            .Select(b => new TargetBinding(b.Target, b.Credential, b.OnBehalfOf, CredentialOwners.Parse(b.Owner), b.Guardian))
             .ToArray();
 
         var recipes = dto.Recipes
@@ -99,7 +102,7 @@ public sealed record LoadedPolicy(
                 Injection: ParseInjection(r.Injection),
                 Actions: r.Actions,
                 Tools: r.Tools?
-                    .Select(t => new RecipeTool(t.Name, t.Method, t.Path, t.Action, t.StepUp, t.Description))
+                    .Select(t => new RecipeTool(t.Name, t.Method, t.Path, t.Action, t.StepUp, t.Description, ParsePlane(t.Plane)))
                     .ToArray(),
                 ExtraHeaders: r.ExtraHeaders,
                 CookieMap: r.CookieMap,
@@ -120,6 +123,16 @@ public sealed record LoadedPolicy(
         "bearer" or "bearertoken" => InjectionKind.BearerToken,
         "cookie" or "cookies" => InjectionKind.Cookies,
         _ => InjectionKind.None,
+    };
+
+    // Only the three real planes round-trip; anything else (legacy/unknown) is null
+    // ⇒ derive the plane from the action verb (RecipeTool.EffectivePlane).
+    private static ActionPlane? ParsePlane(string? value) => value?.ToLowerInvariant() switch
+    {
+        "read" => ActionPlane.Read,
+        "use" => ActionPlane.Use,
+        "manage" => ActionPlane.Manage,
+        _ => null,
     };
 
     /// <summary>
@@ -146,6 +159,10 @@ public sealed record LoadedPolicy(
                 Target = b.Target,
                 Credential = b.Credential,
                 OnBehalfOf = b.Principal,
+                // Persist only a non-default owner so service-owned bindings (the
+                // default) round-trip back to null — a faithful document (ADR 0008).
+                Owner = b.Owner == CredentialOwner.Service ? null : CredentialOwners.ToToken(b.Owner),
+                Guardian = b.Guardian,
             })
             .ToList(),
         Recipes = Recipes
@@ -171,6 +188,9 @@ public sealed record LoadedPolicy(
                         Action = t.Action,
                         StepUp = t.StepUp,
                         Description = t.Description,
+                        // Persist only an explicit plane override so a derived plane
+                        // round-trips back to null (faithful document, ADR 0008).
+                        Plane = t.Plane is { } p ? ActionPlanes.ToToken(p) : null,
                     }).ToList()
                     : null,
                 ExtraHeaders = r.ExtraHeaders is { Count: > 0 } ? new Dictionary<string, string>(r.ExtraHeaders) : null,

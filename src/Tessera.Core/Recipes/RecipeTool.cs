@@ -1,3 +1,5 @@
+using Tessera.Core.Policy;
+
 namespace Tessera.Core.Recipes;
 
 /// <summary>
@@ -16,14 +18,27 @@ namespace Tessera.Core.Recipes;
 /// (ADR 0013 / 0014). The agent can never invoke it autonomously.
 /// </param>
 /// <param name="Description">Human/agent-facing description of what the tool does.</param>
+/// <param name="Plane">
+/// An explicit action plane (ADR 0019), or <c>null</c> to derive it from
+/// <see cref="Action"/>. Set this only for a legacy verb whose namespace doesn't
+/// already say the plane (e.g. a <c>pay:</c> tool declaring <c>use</c>); namespaced
+/// <c>read:</c>/<c>use:</c>/<c>manage:</c> verbs classify themselves.
+/// </param>
 public sealed record RecipeTool(
     string Name,
     string Method,
     string Path,
     string Action,
     bool StepUp = false,
-    string? Description = null)
+    string? Description = null,
+    ActionPlane? Plane = null)
 {
     /// <summary>True when this is a mutating tool requiring human confirmation.</summary>
     public bool RequiresConfirmation => StepUp;
+
+    /// <summary>
+    /// The plane this tool operates on: the explicit <see cref="Plane"/> when set,
+    /// otherwise derived from the <see cref="Action"/> verb's namespace.
+    /// </summary>
+    public ActionPlane EffectivePlane => Plane ?? ActionPlanes.Of(Action);
 }
