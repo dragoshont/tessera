@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+/* Dark mode is driven by a `.dark` class on a parent (toggled on <html> by the
+   theme provider, or on a wrapper in Storybook). */
+@custom-variant dark (&:is(.dark *));
+
+/* --- Visual tokens (styling, kept separate from behavior) ---------------------
+   Mirrors the token table in docs/ui/tessera-admin-portal-ui-spec.md.
+   Behavior rule that overrides styling: Absent is neutral gray, never red.
+   Red is reserved for true `error` only. */
+:root {
+  --surface: #fafafa;            /* zinc-50  */
+  --card: #ffffff;               /* white    */
+  --foreground: #18181b;         /* zinc-900 */
+  --muted: #f4f4f5;              /* zinc-100 (muted surface) */
+  --muted-foreground: #71717a;   /* zinc-500 */
+  --border: #e4e4e7;             /* zinc-200 */
+  --accent: #4f46e5;             /* indigo-600 */
+  --accent-foreground: #ffffff;
+  --health-live: #059669;        /* emerald-600 */
+  --health-expiring: #d97706;    /* amber-600 */
+  --health-absent: #a1a1aa;      /* zinc-400 (neutral, not alarming) */
+  --health-error: #dc2626;       /* red-600 (error only) */
+  --ring: #4f46e5;
+}
+
+.dark {
+  --surface: #09090b;            /* zinc-950 */
+  --card: #18181b;               /* zinc-900 */
+  --foreground: #f4f4f5;         /* zinc-100 */
+  --muted: #27272a;              /* zinc-800 */
+  --muted-foreground: #a1a1aa;   /* zinc-400 */
+  --border: #27272a;             /* zinc-800 */
+  --accent: #818cf8;             /* indigo-400 */
+  --accent-foreground: #0b1020;
+  --health-live: #34d399;        /* emerald-400 */
+  --health-expiring: #fbbf24;    /* amber-400 */
+  --health-absent: #71717a;      /* zinc-500 */
+  --health-error: #f87171;       /* red-400 */
+  --ring: #818cf8;
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-background: var(--surface);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-health-live: var(--health-live);
+  --color-health-expiring: var(--health-expiring);
+  --color-health-absent: var(--health-absent);
+  --color-health-error: var(--health-error);
+  --color-ring: var(--ring);
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
