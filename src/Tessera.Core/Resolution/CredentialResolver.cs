@@ -21,13 +21,41 @@ public sealed class CredentialResolver
     }
 
     /// <summary>Finds the binding that backs <paramref name="request"/>, if any.</summary>
+    /// <remarks>
+    /// Exact match wins: a person's own per-principal binding (including an
+    /// <c>owner: user</c>/<c>dependent</c> one) backs their delegated request, and an
+    /// automation binding backs an automation (no-human) request. Only when no exact
+    /// binding matches a <em>delegated</em> request does it fall back to a shared
+    /// <b>service-owned</b> key (ADR 0020): a <c>principal = null, owner = service</c>
+    /// binding for the same target — the brokered authority nobody personally holds.
+    /// The grant has already authorized this exact user (the PDP runs first); the
+    /// binding only supplies the key. A non-service principal-null binding is never a
+    /// fallback, and a request with no human never reaches the fallback.
+    /// </remarks>
     public TargetBinding? BindingFor(AccessRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 1) Exact match — per-principal (the person's own key) or automation.
         foreach (var binding in _bindings)
         {
             if (binding.Matches(request))
             {
                 return binding;
+            }
+        }
+
+        // 2) Service-owned fallback for a delegated request with no per-person key.
+        if (request.OnBehalfOf is not null)
+        {
+            foreach (var binding in _bindings)
+            {
+                if (binding.Principal is null
+                    && binding.Owner == CredentialOwner.Service
+                    && string.Equals(binding.Target, request.Target, StringComparison.Ordinal))
+                {
+                    return binding;
+                }
             }
         }
 

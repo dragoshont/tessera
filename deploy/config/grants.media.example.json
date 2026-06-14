@@ -1,0 +1,114 @@
+{
+  "_comment": "Media action broker example (ADR 0019/0020). Service-owned household keys (owner: service, principal: null) brokered to user-delegated callers: a member may read + use, an operator may also manage (step-up). The real API keys + hosts live in the homelab overlay; egress stays gated until the operator enables it. read = observe, use = operate (data plane), manage = reshape (control plane, default step-up).",
+  "grants": [
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "bob@example.com",
+      "target": "seerr",
+      "actions": ["read:requests", "read:media", "use:request"]
+    },
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "bob@example.com",
+      "target": "sonarr",
+      "actions": ["read:series", "read:calendar", "use:search"]
+    },
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "bob@example.com",
+      "target": "qbittorrent",
+      "actions": ["read:torrents", "use:pause", "use:resume"]
+    },
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "alice@example.com",
+      "target": "seerr",
+      "actions": ["read:requests", "read:media", "use:request", "use:approve", "manage:settings"],
+      "stepUpActions": ["use:approve", "manage:settings"]
+    },
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "alice@example.com",
+      "target": "sonarr",
+      "actions": ["read:series", "read:calendar", "use:search", "manage:settings"],
+      "stepUpActions": ["manage:settings"]
+    },
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "alice@example.com",
+      "target": "qbittorrent",
+      "actions": ["read:torrents", "use:pause", "use:resume", "use:delete", "manage:preferences"],
+      "stepUpActions": ["use:delete", "manage:preferences"]
+    }
+  ],
+  "bindings": [
+    { "target": "seerr", "credential": "seerr-api-key", "owner": "service" },
+    { "target": "sonarr", "credential": "sonarr-api-key", "owner": "service" },
+    { "target": "radarr", "credential": "radarr-api-key", "owner": "service" },
+    { "target": "qbittorrent", "credential": "qbittorrent-session", "owner": "service" }
+  ],
+  "recipes": [
+    {
+      "target": "seerr",
+      "driver": "browser",
+      "egress": "http",
+      "upstreamBaseUrl": "https://seerr.example/api/v1",
+      "injection": "bearer",
+      "actions": ["read:requests", "read:media", "use:request", "use:approve", "manage:settings"],
+      "tools": [
+        { "name": "seerr_search", "method": "GET", "path": "search", "action": "read:media", "description": "Search the catalog for a title." },
+        { "name": "seerr_requests", "method": "GET", "path": "request", "action": "read:requests", "description": "List existing requests." },
+        { "name": "seerr_request", "method": "POST", "path": "request", "action": "use:request", "description": "Request a title be added." },
+        { "name": "seerr_approve", "method": "POST", "path": "request/{id}/approve", "action": "use:approve", "stepUp": true, "description": "Approve a pending request (operator, step-up)." },
+        { "name": "seerr_settings", "method": "POST", "path": "settings/main", "action": "manage:settings", "stepUp": true, "description": "Change service settings (control plane, step-up)." }
+      ],
+      "description": "Overseerr/Jellyseerr — request media (member) · approve + settings (operator)."
+    },
+    {
+      "target": "sonarr",
+      "driver": "browser",
+      "egress": "http",
+      "upstreamBaseUrl": "https://sonarr.example/api/v3",
+      "injection": "bearer",
+      "actions": ["read:series", "read:calendar", "use:search", "manage:settings"],
+      "tools": [
+        { "name": "sonarr_series", "method": "GET", "path": "series", "action": "read:series", "description": "List monitored series." },
+        { "name": "sonarr_calendar", "method": "GET", "path": "calendar", "action": "read:calendar", "description": "Upcoming episodes." },
+        { "name": "sonarr_search", "method": "POST", "path": "command", "action": "use:search", "description": "Trigger a search for missing episodes." },
+        { "name": "sonarr_settings", "method": "POST", "path": "config/host", "action": "manage:settings", "stepUp": true, "description": "Change Sonarr settings (control plane, step-up)." }
+      ],
+      "description": "Sonarr — read series/calendar · trigger search (use) · settings (manage, step-up)."
+    },
+    {
+      "target": "radarr",
+      "driver": "browser",
+      "egress": "http",
+      "upstreamBaseUrl": "https://radarr.example/api/v3",
+      "injection": "bearer",
+      "actions": ["read:movies", "use:search", "manage:settings"],
+      "tools": [
+        { "name": "radarr_movies", "method": "GET", "path": "movie", "action": "read:movies", "description": "List movies." },
+        { "name": "radarr_search", "method": "POST", "path": "command", "action": "use:search", "description": "Trigger a search for missing movies." },
+        { "name": "radarr_settings", "method": "POST", "path": "config/host", "action": "manage:settings", "stepUp": true, "description": "Change Radarr settings (control plane, step-up)." }
+      ],
+      "description": "Radarr — read movies · trigger search (use) · settings (manage, step-up)."
+    },
+    {
+      "target": "qbittorrent",
+      "driver": "browser",
+      "egress": "http",
+      "upstreamBaseUrl": "https://qbittorrent.example/api/v2",
+      "injection": "cookies",
+      "cookieMap": { "SID": "access_token" },
+      "actions": ["read:torrents", "use:pause", "use:resume", "use:delete", "manage:preferences"],
+      "tools": [
+        { "name": "qbt_list", "method": "GET", "path": "torrents/info", "action": "read:torrents", "description": "List torrents + their state." },
+        { "name": "qbt_pause", "method": "POST", "path": "torrents/pause", "action": "use:pause", "description": "Pause a torrent." },
+        { "name": "qbt_resume", "method": "POST", "path": "torrents/resume", "action": "use:resume", "description": "Resume a torrent." },
+        { "name": "qbt_delete", "method": "POST", "path": "torrents/delete", "action": "use:delete", "stepUp": true, "description": "Delete a torrent (destructive, step-up)." },
+        { "name": "qbt_preferences", "method": "POST", "path": "app/setPreferences", "action": "manage:preferences", "stepUp": true, "description": "Change qBittorrent preferences (control plane, step-up)." }
+      ],
+      "description": "qBittorrent — list/pause/resume (member) · delete + preferences (operator, step-up)."
+    }
+  ]
+}

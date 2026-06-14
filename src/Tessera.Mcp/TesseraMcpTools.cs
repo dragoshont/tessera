@@ -49,7 +49,7 @@ public sealed class TesseraMcpTools
 
     /// <summary>Lists the provider operations the signed-in user may call.</summary>
     [McpServerTool(Name = "tessera_list_provider_tools")]
-    [Description("List the provider operations (per target) the signed-in user may call through Tessera — each with its method and whether it is a write that needs confirmation. Read-only.")]
+    [Description("List the provider operations (per target) the signed-in user may call through Tessera — each with its method, action plane (read=observe, use=operate, manage=reshape), and whether it is a write that needs confirmation. Read-only.")]
     public Task<ListProviderToolsResult> ListProviderToolsAsync(CancellationToken cancellationToken) =>
         _service.ListProviderToolsAsync(ForwardedToken(), cancellationToken);
 

@@ -89,6 +89,67 @@ public sealed class ResolverTests
         Assert.Equal(CredentialStatus.Error, result.Status);
     }
 
+    // ── Service-owned shared-key fallback (ADR 0020) ──────────────────────────
+
+    [Fact]
+    public void A_delegated_request_falls_back_to_a_service_owned_shared_key()
+    {
+        // Media key: principal = null, owner = service (the household key nobody holds).
+        var serviceKey = new TargetBinding("seerr", "seerr-key", Principal: null, Owner: CredentialOwner.Service);
+        var resolver = new CredentialResolver([serviceKey], new InMemoryCredentialStore());
+
+        // bob, acting via chat, has no per-person seerr binding → uses the shared key.
+        var binding = resolver.BindingFor(TestData.Request(target: "seerr", onBehalfOf: TestData.VerifiedUser("bob@example.com")));
+        Assert.Same(serviceKey, binding);
+    }
+
+    [Fact]
+    public void A_personal_binding_still_wins_over_the_shared_service_key()
+    {
+        var serviceKey = new TargetBinding("seerr", "seerr-key", Principal: null, Owner: CredentialOwner.Service);
+        var alicesOwn = new TargetBinding("seerr", "seerr-alice", "alice@example.com", CredentialOwner.User);
+        var resolver = new CredentialResolver([serviceKey, alicesOwn], new InMemoryCredentialStore());
+
+        var binding = resolver.BindingFor(TestData.Request(target: "seerr", onBehalfOf: TestData.VerifiedUser("alice@example.com")));
+        Assert.Same(alicesOwn, binding); // exact per-principal match wins
+    }
+
+    [Fact]
+    public void Automation_does_not_use_the_fallback_path_it_matches_directly()
+    {
+        // A no-human (automation) request matches the principal-null binding directly
+        // (step 1), so the fallback is irrelevant — and an automation request never
+        // triggers the delegated fallback.
+        var serviceKey = new TargetBinding("seerr", "seerr-key", Principal: null, Owner: CredentialOwner.Service);
+        var resolver = new CredentialResolver([serviceKey], new InMemoryCredentialStore());
+
+        Assert.Same(serviceKey, resolver.BindingFor(new AccessRequest(TestData.VerifiedCaller(), "seerr", "read:requests")));
+    }
+
+    [Fact]
+    public void A_non_service_principal_null_binding_is_never_a_delegated_fallback()
+    {
+        // Only owner: service is a shared key. A principal-null binding explicitly
+        // marked user/dependent is not a fallback for some other person.
+        var notShared = new TargetBinding("seerr", "seerr-key", Principal: null, Owner: CredentialOwner.User);
+        var resolver = new CredentialResolver([notShared], new InMemoryCredentialStore());
+
+        Assert.Null(resolver.BindingFor(TestData.Request(target: "seerr", onBehalfOf: TestData.VerifiedUser("bob@example.com"))));
+    }
+
+    [Fact]
+    public async Task Resolve_uses_the_shared_service_key_bundle_for_a_delegated_call()
+    {
+        var store = new InMemoryCredentialStore();
+        store.Put("seerr-key", new CredentialBundle(AccessToken: "shared-key"));
+        var resolver = new CredentialResolver(
+            [new TargetBinding("seerr", "seerr-key", Principal: null, Owner: CredentialOwner.Service)],
+            store);
+
+        var result = await resolver.ResolveAsync(TestData.Request(target: "seerr", onBehalfOf: TestData.VerifiedUser("bob@example.com")));
+        Assert.Equal(CredentialStatus.Present, result.Status);
+    }
+
     private sealed class ThrowingStore : ICredentialStore
     {
         public string Kind => "throwing";

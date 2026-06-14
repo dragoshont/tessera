@@ -6,7 +6,8 @@ namespace Tessera.Mcp;
 /// <param name="Method">HTTP method.</param>
 /// <param name="Write">True if this is a write/booking tool (needs confirmation).</param>
 /// <param name="Description">What the tool does.</param>
-public sealed record ProviderToolInfo(string Target, string Tool, string Method, bool Write, string? Description);
+/// <param name="Plane">The action plane (ADR 0019): <c>read</c> (observe) / <c>use</c> (operate) / <c>manage</c> (reshape), or null for an unclassified legacy verb.</param>
+public sealed record ProviderToolInfo(string Target, string Tool, string Method, bool Write, string? Description, string? Plane = null);
 
 /// <summary>The provider tools visible to the current identity.</summary>
 /// <param name="Authenticated">Whether a verified identity was established.</param>

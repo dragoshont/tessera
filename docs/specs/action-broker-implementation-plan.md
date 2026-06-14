@@ -108,14 +108,19 @@ User-delegated actions on `owner: service` keys ([ADR 0019](../adr/0019-app-inte
 Needs **Phase 0** (planes + owner). Lower risk than Mode U (own homelab apps, stable
 API keys), but flipping egress live with real keys is operator.
 
-- [ ] **3.1 Recipes** (tessera repo) — `seerr`, `sonarr`, `radarr`, `qbittorrent`
-  recipes with read/use/manage tools (e.g. `seerr_search`=read, `seerr_request`=use,
-  `seerr_approve`=use+step-up+admin, `seerr_settings`=manage+step-up). `owner:
-  service`. Recipe + tests; no live egress.
-- [ ] **3.2 Grants** — example grants over the planes (member: read+use; operator:
-  +manage, all step-up). Tests proving a member can't reach `manage:`.
-- [ ] **3.3 MCP exposure** — confirm `tessera_call` surfaces these tools with the
-  plane/step-up metadata; the chat can call read/use, manage is step-up-gated.
+- [x] **3.1 Recipes** (tessera repo) — [`grants.media.example.json`](../../deploy/config/grants.media.example.json):
+  `seerr`/`sonarr`/`radarr`/`qbittorrent` recipes with read/use/manage tools
+  (`seerr_search`=read, `seerr_request`=use, `seerr_approve`=use+step-up,
+  `seerr_settings`=manage+step-up, `qbt_delete`=use+step-up). `owner: service` on
+  every binding. No live egress.
+- [x] **3.2 Grants** — member (`bob`): read+use; operator (`alice`): +manage +
+  approve/delete, all step-up. The `CredentialResolver` now falls back to the shared
+  service key for a delegated call with no per-person binding (ADR 0020), exact
+  per-person match always winning. Tests prove a member can't reach `manage:` and a
+  delegated call resolves the shared key (loaded from the real file).
+- [x] **3.3 MCP exposure** — `ProviderToolInfo` + `tessera_list_provider_tools` now
+  carry each tool's `plane` (read/use/manage); the chat can tell the planes apart and
+  which calls step up. Broker test over the real gateway.
 - [ ] **3.4 🛑 STOP — operator: credentials + egress** — store the real API keys in
   KV, add bindings (`onBehalfOf: null`), add hosts to `egress.allowedHosts`,
   `egress.enabled=true`, wire into chat. Real keys + live egress → operator.
@@ -167,4 +172,8 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
   example + recipes spec, RefreshSpec on Recipe, SessionRefreshOrchestrator +
   SessionRefreshService + RefreshOptions (off by default, inert until egress).
   230 .NET green. 2.3 (domain MCP, cross-repo) + 2.4 (cutover) stay operator.
-  **Next: Phase 3 (media action broker).**
+- 2026-06-14 (overnight): **Phase 3.1-3.3 complete** — media broker recipes/grants
+  example (seerr/sonarr/radarr/qbt, owner: service, read/use/manage + step-up),
+  CredentialResolver service-key fallback (ADR 0020), MCP tool plane metadata.
+  241 .NET green. 3.4 (real keys + egress) stays operator.
+  **Next: Phase 4 (Gmail/Graph).**

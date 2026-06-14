@@ -67,7 +67,13 @@ public sealed class BrokerProviderGateway : IProviderGateway
                 var decision = _pdp.Evaluate(request);
                 if (decision.Effect is Effect.Allow or Effect.StepUp)
                 {
-                    result.Add(new ProviderToolInfo(recipe.Target, tool.Name, tool.Method, tool.RequiresConfirmation, tool.Description));
+                    result.Add(new ProviderToolInfo(
+                        recipe.Target,
+                        tool.Name,
+                        tool.Method,
+                        tool.RequiresConfirmation,
+                        tool.Description,
+                        Tessera.Core.Policy.ActionPlanes.ToToken(tool.EffectivePlane)));
                 }
             }
         }
