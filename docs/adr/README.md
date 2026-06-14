@@ -24,6 +24,8 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0015](0015-mcp-egress-through-tessera.md) | **Domain MCPs egress through Tessera** (the credential-proxy target: domain MCPs keep their tools but hold no secret; Tessera is the single custodian — inject, SSRF, rotate, audit) | Proposed |
 | [0016](0016-admin-portal.md) | **Admin portal: headless-first convenience layer** (three surfaces — captcha live hand-off, connect wizard, accounts inventory; OIDC auth; files stay source of truth; secret values never shown) | Proposed |
 | [0017](0017-awareness-dashboard.md) | **Awareness dashboard: read-only transparency surface** (who may act as me, what modules are loaded, is a job running, a secret-free audit feed; self + operator views; projections only — no mutation, no egress, no DB) | Accepted |
+| [0018](0018-access-gateway-and-action-broker.md) | **Access gateway outside Tessera; Tessera as privileged action broker** (Authentik/oauth2-proxy/Pomerium handle browser access; Tessera owns hidden credentials, action-level authorization, JIT, and audit) | Accepted |
+| [0019](0019-app-integrations-and-user-delegated-actions.md) | **Keep app-to-app integrations direct; broker user-delegated actions through Tessera** (Sonarr/Radarr/qBittorrent/Prowlarr/Seerr runtime plumbing stays native; users/tools go through Tessera for privileged actions) | Accepted |
 
 ## Format
 
