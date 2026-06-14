@@ -1,0 +1,46 @@
+# compose.dev.yaml — the containerized local dev loop (alternative to scripts/devloop/up).
+#
+# Brings up Lowkey Vault + the Tessera broker (with the baked SPA) on
+# http://localhost:8080, NO Azure. The broker binds 0.0.0.0 inside the container,
+# so identity.mode=dev (loopback-only) is NOT usable here — this compose path uses
+# the same image as production and expects OIDC, OR you run the broker on the host
+# via scripts/devloop/up for the dev loopback sign-in. See
+# docs/specs/local-azure-devloop.md.
+#
+# Fast loop (dev loopback sign-in): use ./scripts/devloop/up instead (host broker).
+# This file is for exercising the CONTAINER image end-to-end against Lowkey.
+services:
+  lowkey:
+    image: nagyesta/lowkey-vault:2.7.1
+    ports:
+      - "8443:8443"   # Key Vault REST API (TESSERA_VAULT_URL)
+      - "8081:8080"   # metadata / simulated MI (unused — dummy token)
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- --no-check-certificate https://localhost:8443/ || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  tessera:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      lowkey:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      TESSERA_VAULT_URL: "https://lowkey:8443"
+      TESSERA_KEYVAULT_EMULATOR: "lowkey"
+      TESSERA_WEB_ROOT: "/app/wwwroot"
+      # Container binds 0.0.0.0, so dev loopback identity is refused by design.
+      # Point at a local OIDC issuer (Mode 2) to exercise real sign-in, or use the
+      # host broker (scripts/devloop/up) for the dev loopback card.
+      TESSERA_IDENTITY_MODE: "oidc"
+      TESSERA_SELFTEST_TARGET: "health-portal"
+      TESSERA_SELFTEST_PRINCIPAL: "alice@example.com"
+    volumes:
+      # Mount the .dev config + grants (materialize them first: cp .dev/*.example).
+      - ./.dev/tessera.json:/config/tessera.json:ro
+      - ./.dev/grants.json:/config/grants.json:ro

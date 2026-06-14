@@ -22,6 +22,11 @@ tessera.toml
 !tessera.example.toml
 !grants.example.toml
 
+# Local dev loop (.dev): the runtime config + grants the dev loop generates and
+# the portal writes to. The committed *.example templates ARE the source of truth.
+.dev/*.json
+!.dev/*.json.example
+
 # .NET
 bin/
 obj/

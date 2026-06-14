@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#
+# up — the one-command local dev loop for Tessera (NO Azure, NO cluster).
+#
+# Starts Lowkey Vault, seeds fake bundles, builds the SPA if needed, then runs the
+# broker on http://localhost:8080 with the admin portal served at / and a local
+# dev sign-in (loopback). See docs/specs/local-azure-devloop.md.
+#
+#   ./scripts/devloop/up                # start everything, run the broker (Ctrl-C to stop)
+#   ./scripts/devloop/kv-down           # stop Lowkey afterwards
+#
+# Everything is fake (example.com principals, dev tokens). Lowkey is dev/CI only.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT"
+
+DOTNET="${DOTNET:-dotnet}"
+command -v "$DOTNET" >/dev/null 2>&1 || { echo "✗ dotnet not on PATH (the repo pins SDK 10.0.300; e.g. export PATH=/usr/local/share/dotnet:\$PATH)." >&2; exit 1; }
+
+echo "▶ 1/5  start Lowkey Vault"
+"$ROOT/scripts/devloop/kv-up"
+
+echo "▶ 2/5  seed fake credential bundles"
+TESSERA_VAULT_URL="https://localhost:8443" "$ROOT/scripts/devloop/seed-kv" "$ROOT/docs/examples/dev-bundles.json"
+
+echo "▶ 3/5  materialize .dev config (from committed .example templates, first run only)"
+[[ -f "$ROOT/.dev/tessera.json" ]] || cp "$ROOT/.dev/tessera.json.example" "$ROOT/.dev/tessera.json"
+[[ -f "$ROOT/.dev/grants.json"  ]] || cp "$ROOT/.dev/grants.json.example"  "$ROOT/.dev/grants.json"
+
+echo "▶ 4/5  build the admin-portal SPA (if not built)"
+if [[ ! -f "$ROOT/web/dist/index.html" ]]; then
+  ( cd "$ROOT/web" && npm install --no-audit --no-fund && npm run build )
+else
+  echo "  · web/dist present — skipping (rebuild with: cd web && npm run build)"
+fi
+
+echo "▶ 5/5  run the broker  →  http://localhost:8080"
+echo "        sign in with the local 'developer' card as alice@example.com (operator)"
+echo
+exec env \
+  TESSERA_VAULT_URL="https://localhost:8443" \
+  TESSERA_KEYVAULT_EMULATOR="lowkey" \
+  TESSERA_WEB_ROOT="$ROOT/web/dist" \
+  TESSERA_SELFTEST_TARGET="health-portal" \
+  TESSERA_SELFTEST_PRINCIPAL="alice@example.com" \
+  "$DOTNET" run --project "$ROOT/src/Tessera.Cli/Tessera.Cli.csproj" -c Release -- \
+    --config "$ROOT/.dev/tessera.json" --grants "$ROOT/.dev/grants.json"

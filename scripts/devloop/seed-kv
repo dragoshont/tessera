@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+#
+# seed-kv — write fake credential bundles into the local Lowkey Vault, so the
+# portal shows real "present"/"absent" connection health in the dev loop.
+#
+#   ./scripts/devloop/seed-kv [bundles.json]   (default: docs/examples/dev-bundles.json)
+#
+# The input is a JSON object: { "<secret-name>": { <bundle> }, ... }. Each value is
+# stored as ONE Key Vault secret whose value is the bundle JSON (exactly the shape
+# Tessera's BundleParser reads). Uses the Key Vault REST API that Lowkey implements,
+# so the wire shape matches production. FAKE values only — Lowkey is dev/CI only.
+set -euo pipefail
+
+VAULT="${TESSERA_VAULT_URL:-https://localhost:8443}"
+BUNDLES="${1:-$(cd "$(dirname "$0")/../.." && pwd)/docs/examples/dev-bundles.json}"
+API_VERSION="7.4"
+
+if [[ ! -f "$BUNDLES" ]]; then
+  echo "✗ bundles file not found: $BUNDLES" >&2
+  exit 1
+fi
+if ! curl -sk --max-time 3 "$VAULT/" >/dev/null 2>&1; then
+  echo "✗ Lowkey not reachable at $VAULT — run ./scripts/devloop/kv-up first." >&2
+  exit 1
+fi
+
+# Iterate the top-level keys; for each, PUT its bundle JSON as the secret value.
+names=$(python3 -c "import json,sys; print('\n'.join(json.load(open('$BUNDLES')).keys()))")
+count=0
+while IFS= read -r name; do
+  [[ -z "$name" ]] && continue
+  value=$(python3 -c "import json; print(json.dumps(json.load(open('$BUNDLES'))['$name']))")
+  body=$(python3 -c "import json,sys; print(json.dumps({'value': sys.argv[1]}))" "$value")
+  code=$(curl -sk -o /dev/null -w '%{http_code}' -X PUT \
+    "$VAULT/secrets/$name?api-version=$API_VERSION" \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer dev.lowkey.token' \
+    -d "$body")
+  if [[ "$code" == "200" || "$code" == "201" ]]; then
+    echo "  ✓ seeded secret: $name"
+    count=$((count + 1))
+  else
+    echo "  ✗ failed to seed $name (HTTP $code)" >&2
+  fi
+done <<< "$names"
+
+echo "✓ seeded $count secret(s) into $VAULT"

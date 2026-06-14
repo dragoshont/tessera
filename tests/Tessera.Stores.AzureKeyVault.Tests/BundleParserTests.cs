@@ -69,4 +69,35 @@ public sealed class BundleParserTests
         Assert.NotNull(store);
         Assert.Equal("azure-key-vault", store!.Kind);
     }
+
+    [Fact]
+    public void FromEnvironment_lowkey_emulator_marks_the_kind()
+    {
+        // The local dev loop points the same Azure SDK client at Lowkey; the Kind
+        // makes /status show local-vs-real at a glance (spec open question 1).
+        var store = AzureKeyVaultCredentialStore.FromEnvironment(
+            new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["TESSERA_VAULT_URL"] = "https://localhost:8443",
+                ["TESSERA_KEYVAULT_EMULATOR"] = "lowkey",
+            });
+
+        Assert.NotNull(store);
+        Assert.Equal("azure-key-vault(lowkey)", store!.Kind);
+    }
+
+    [Fact]
+    public void FromEnvironment_without_the_emulator_flag_is_the_real_kind()
+    {
+        // Absent/!= "lowkey" → the production path is unchanged (real DefaultAzureCredential).
+        var store = AzureKeyVaultCredentialStore.FromEnvironment(
+            new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["TESSERA_VAULT_URL"] = "https://example-vault.vault.azure.net",
+                ["TESSERA_KEYVAULT_EMULATOR"] = "",
+            });
+
+        Assert.NotNull(store);
+        Assert.Equal("azure-key-vault", store!.Kind);
+    }
 }

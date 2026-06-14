@@ -1,4 +1,6 @@
+using System.Net.Http;
 using Azure;
+using Azure.Core.Pipeline;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using Tessera.Core.Stores;
@@ -13,27 +15,53 @@ namespace Tessera.Stores.AzureKeyVault;
 /// <c>AZURE_CLIENT_ID</c> / <c>AZURE_CLIENT_SECRET</c>) via <c>EnvironmentCredential</c>,
 /// so it works against the existing harvester service principal and upgrades to WIF
 /// with no code change.
+///
+/// <para>For the LOCAL DEV LOOP (no Azure), setting <c>TESSERA_KEYVAULT_EMULATOR=lowkey</c>
+/// points the same Azure SDK client at a local <a href="https://github.com/nagyesta/lowkey-vault">Lowkey
+/// Vault</a> emulator (it speaks the Key Vault REST API). That path relaxes only
+/// what the emulator needs — a dummy token, the challenge-resource bypass, a pinned
+/// service version, and (for Lowkey's self-signed TLS) a dev cert bypass — and is
+/// reflected in <see cref="Kind"/> as <c>azure-key-vault(lowkey)</c>. The production
+/// path never sets the flag, so its behaviour is unchanged. See
+/// docs/specs/local-azure-devloop.md.</para>
 /// </summary>
 public sealed class AzureKeyVaultCredentialStore : ICredentialStore, ICredentialWriter
 {
     private readonly SecretClient _client;
 
     /// <summary>Creates a store over a configured <see cref="SecretClient"/>.</summary>
-    public AzureKeyVaultCredentialStore(SecretClient client) => _client = client;
+    public AzureKeyVaultCredentialStore(SecretClient client) : this(client, "azure-key-vault")
+    {
+    }
+
+    private AzureKeyVaultCredentialStore(SecretClient client, string kind)
+    {
+        _client = client;
+        Kind = kind;
+    }
 
     /// <summary>
     /// Builds a store from <c>TESSERA_VAULT_URL</c>, or returns <c>null</c> if it
-    /// is unset (so the runtime falls back to an empty in-memory store).
+    /// is unset (so the runtime falls back to an empty in-memory store). When
+    /// <c>TESSERA_KEYVAULT_EMULATOR=lowkey</c> is set, the client is wired for the
+    /// local Lowkey emulator instead of a real vault (dev loop only).
     /// </summary>
     public static AzureKeyVaultCredentialStore? FromEnvironment(IReadOnlyDictionary<string, string?>? environment = null)
     {
-        var vaultUrl = environment is not null
-            ? (environment.TryGetValue("TESSERA_VAULT_URL", out var v) ? v : null)
-            : Environment.GetEnvironmentVariable("TESSERA_VAULT_URL");
+        string? Get(string key) => environment is not null
+            ? (environment.TryGetValue(key, out var v) ? v : null)
+            : Environment.GetEnvironmentVariable(key);
 
+        var vaultUrl = Get("TESSERA_VAULT_URL");
         if (string.IsNullOrWhiteSpace(vaultUrl))
         {
             return null;
+        }
+
+        var emulator = Get("TESSERA_KEYVAULT_EMULATOR");
+        if (string.Equals(emulator, "lowkey", StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildLowkey(vaultUrl);
         }
 
         // Server posture: no interactive or local-dev-tool credentials — only
@@ -50,8 +78,33 @@ public sealed class AzureKeyVaultCredentialStore : ICredentialStore, ICredential
         return new AzureKeyVaultCredentialStore(client);
     }
 
+    /// <summary>
+    /// Wire the Azure SDK <see cref="SecretClient"/> for the local Lowkey emulator
+    /// (dev loop only — never reached in production, which doesn't set the flag):
+    /// a dummy token (Lowkey ignores it), the AAD challenge-resource verification
+    /// disabled (no real AAD), the service version pinned to 7.4 (Lowkey's), and a
+    /// transport that accepts Lowkey's self-signed TLS cert.
+    /// </summary>
+    private static AzureKeyVaultCredentialStore BuildLowkey(string vaultUrl)
+    {
+        // Accept Lowkey's self-signed cert — DEV ONLY, and only on this client.
+        var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+        };
+
+        var options = new SecretClientOptions
+        {
+            DisableChallengeResourceVerification = true,
+            Transport = new HttpClientTransport(new HttpClient(handler)),
+        };
+
+        var client = new SecretClient(new Uri(vaultUrl), new StaticDevTokenCredential(), options);
+        return new AzureKeyVaultCredentialStore(client, "azure-key-vault(lowkey)");
+    }
+
     /// <inheritdoc/>
-    public string Kind => "azure-key-vault";
+    public string Kind { get; }
 
     /// <inheritdoc/>
     public async Task<CredentialBundle> GetBundleAsync(string name, CancellationToken cancellationToken = default)

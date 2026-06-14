@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# kv-up — start the local Lowkey Vault emulator for the Tessera dev loop.
+#
+# Lowkey speaks the Azure Key Vault REST API, so Tessera's real Azure-SDK store
+# path works locally with NO Azure subscription. See docs/specs/local-azure-devloop.md.
+#
+#   Key Vault API : https://localhost:8443   (TESSERA_VAULT_URL)
+#   metadata/MI   : http://localhost:8081    (unused — we use a dummy token)
+#
+# Pinned by digest-able tag for reproducibility. Lowkey is a DEV/CI tool only —
+# never put a real secret in it.
+set -euo pipefail
+
+LOWKEY_TAG="${LOWKEY_TAG:-2.7.1}"
+NAME="tessera-lowkey"
+
+if ! docker info >/dev/null 2>&1; then
+  echo "✗ Docker is not running. Start Docker Desktop (or colima) and retry." >&2
+  exit 1
+fi
+
+if docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
+  echo "✓ Lowkey already running ($NAME)."
+  exit 0
+fi
+
+# Remove a stopped container of the same name (idempotent restart).
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+
+echo "▶ starting Lowkey Vault (nagyesta/lowkey-vault:$LOWKEY_TAG) …"
+docker run -d --rm --name "$NAME" \
+  -p 8443:8443 \
+  -p 8081:8080 \
+  "nagyesta/lowkey-vault:$LOWKEY_TAG" >/dev/null
+
+# Wait for the Key Vault endpoint to answer TLS (self-signed). Up to ~30s.
+echo -n "▶ waiting for https://localhost:8443 "
+for _ in $(seq 1 30); do
+  if curl -sk --max-time 2 https://localhost:8443/ping >/dev/null 2>&1 \
+     || curl -sk --max-time 2 https://localhost:8443/ >/dev/null 2>&1; then
+    echo "— ready ✓"
+    echo "  TESSERA_VAULT_URL=https://localhost:8443  TESSERA_KEYVAULT_EMULATOR=lowkey"
+    exit 0
+  fi
+  echo -n "."
+  sleep 1
+done
+
+echo
+echo "✗ Lowkey did not become ready in time. Logs:" >&2
+docker logs "$NAME" 2>&1 | tail -20 >&2
+exit 1

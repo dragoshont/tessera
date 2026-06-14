@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#
+# kv-down — stop the local Lowkey Vault emulator.
+set -euo pipefail
+NAME="tessera-lowkey"
+if docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
+  docker rm -f "$NAME" >/dev/null
+  echo "✓ stopped Lowkey ($NAME)."
+else
+  echo "· Lowkey not running."
+fi

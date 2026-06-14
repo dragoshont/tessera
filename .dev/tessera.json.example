@@ -1,0 +1,13 @@
+{
+  "server": { "host": "127.0.0.1", "port": 8080 },
+  "identity": {
+    "mode": "dev",
+    "trustDomain": "tessera.local"
+  },
+  "policy": { "default": "deny", "document": ".dev/grants.json" },
+  "audit": { "enabled": true, "path": "-" },
+  "egress": { "enabled": false, "allowedHosts": [] },
+  "portal": {
+    "admins": ["alice@example.com"]
+  }
+}

@@ -445,6 +445,31 @@ GitHub — or any other social login — works for delegation too.
 
 ---
 
+## Local development (no Azure, no cluster)
+
+Run the whole thing — broker + admin portal + a real Key Vault store path — on your
+laptop with **one command and no Azure subscription**. A local
+[Lowkey Vault](https://github.com/nagyesta/lowkey-vault) emulator speaks the Key
+Vault REST API, so Tessera's *real* Azure-SDK store code runs unchanged; identity
+uses the loopback `dev` sign-in.
+
+```bash
+export PATH=/usr/local/share/dotnet:$PATH   # if needed: the repo pins .NET SDK 10.0.300
+./scripts/devloop/up
+# → http://localhost:8080  · sign in on the local "developer" card as alice@example.com
+./scripts/devloop/kv-down                   # stop Lowkey when done
+```
+
+`up` starts Lowkey, seeds fake bundles ([docs/examples/dev-bundles.json](docs/examples/dev-bundles.json)),
+builds the SPA, and runs the broker against `.dev/tessera.json` + `.dev/grants.json`
+(materialized from the committed `*.example` templates). The portal then shows real
+connection health: `alice`'s health-portal is **live** (seeded), the rest **absent**.
+Everything is fake `example.com` data — **Lowkey is dev/CI only; never put a real
+secret in it.** Details, the containerized path (`compose.dev.yaml`), and the local
+OIDC profile are in [the local dev-loop spec](docs/specs/local-azure-devloop.md).
+
+---
+
 ## Documentation
 
 - **[Getting started](docs/getting-started.md)** — operator onboarding: the manual
@@ -453,7 +478,7 @@ GitHub — or any other social login — works for delegation too.
   request lifecycle, deployment topologies, components, threat model, OSS landscape.
 - **[Decision records](docs/adr/README.md)** — *why* the load-bearing choices were
   made (stack, topology, store, tenancy, identity, drivers).
-- **Specs** — [recipes](docs/specs/recipes.md) · [harvest drivers](docs/specs/harvest-drivers.md) · [identity & Azure setup](docs/specs/identity-azure-setup.md) · [LibreChat integration](docs/specs/librechat-integration.md).
+- **Specs** — [recipes](docs/specs/recipes.md) · [harvest drivers](docs/specs/harvest-drivers.md) · [identity & Azure setup](docs/specs/identity-azure-setup.md) · [LibreChat integration](docs/specs/librechat-integration.md) · [local dev loop](docs/specs/local-azure-devloop.md).
 - **[Roadmap](docs/roadmap.md)** — the phased plan and the UI question.
 - **[Security policy](SECURITY.md)** — invariants and how to report a vulnerability.
 - Archived Python spike: [README](README.python-spike.md) ·

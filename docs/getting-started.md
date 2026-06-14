@@ -201,6 +201,8 @@ appear with their connection's health.
 **Dev / local run** (no Azure, no cluster): bind to loopback in `dev` mode and the
 portal shows a local "developer sign-in" card instead of Microsoft — handy for a
 demo. The broker refuses `dev` mode on any non-loopback bind, so it can't leak.
+For the fuller no-Azure inner loop, including a local Key Vault-compatible
+endpoint, see [the local Azure dev-loop spec](specs/local-azure-devloop.md).
 
 ---
 

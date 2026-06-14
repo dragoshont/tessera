@@ -1,0 +1,12 @@
+{
+  "grants": [],
+  "bindings": [
+    { "target": "health-portal", "onBehalfOf": "alice@example.com", "credential": "health-portal-alice-session" },
+    { "target": "utility-co",    "onBehalfOf": "alice@example.com", "credential": "utility-co-alice-session" },
+    { "target": "health-portal", "onBehalfOf": "bob@example.com",   "credential": "health-portal-bob-session" }
+  ],
+  "recipes": [
+    { "target": "health-portal", "egress": "none", "description": "Health Portal" },
+    { "target": "utility-co",    "egress": "none", "description": "Utility Co" }
+  ]
+}

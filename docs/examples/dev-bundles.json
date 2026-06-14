@@ -1,0 +1,8 @@
+{
+  "health-portal-alice-session": {
+    "access_token": "dev-access-token-alice",
+    "refresh_token": "dev-refresh-token-alice",
+    "cookies": { "session": "dev-cookie-alice" },
+    "extra": { "subscription_key": "dev-subscription-key" }
+  }
+}
