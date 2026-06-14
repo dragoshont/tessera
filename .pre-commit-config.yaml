@@ -1,0 +1,19 @@
+# Pre-commit hooks for this PUBLIC repo.
+#
+# One-time setup per clone:
+#   pipx install pre-commit   # or: pip install pre-commit
+#   pre-commit install
+#
+# After that, `check-pii` runs on every `git commit` and BLOCKS the commit if a
+# real identity or secret would be introduced. The same script also runs as the
+# required `hygiene` job in CI, so the gate holds even if a contributor skips
+# the local hook.
+repos:
+  - repo: local
+    hooks:
+      - id: check-pii
+        name: check-pii (block private identities / secrets)
+        entry: scripts/check-pii.sh
+        language: script
+        pass_filenames: false
+        always_run: true
