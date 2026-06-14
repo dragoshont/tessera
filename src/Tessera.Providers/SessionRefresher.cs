@@ -4,19 +4,6 @@ using Tessera.Core.Stores;
 
 namespace Tessera.Providers;
 
-/// <summary>How a provider rotates a session (recipe config; ADR 0014).</summary>
-/// <param name="Path">Refresh endpoint path (appended to the recipe base URL).</param>
-/// <param name="Method">HTTP method (usually <c>POST</c>).</param>
-/// <param name="AccessTokenField">JSON field in the response holding the new access token.</param>
-/// <param name="RefreshTokenField">JSON field in the response holding the new refresh token.</param>
-/// <param name="AbsorbSetCookie">Whether to also absorb rotated cookies from <c>Set-Cookie</c>.</param>
-public sealed record RefreshSpec(
-    string Path,
-    string Method = "POST",
-    string AccessTokenField = "access_token",
-    string RefreshTokenField = "refresh_token",
-    bool AbsorbSetCookie = true);
-
 /// <summary>The outcome of a refresh attempt.</summary>
 public enum RefreshStatus
 {

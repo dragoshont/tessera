@@ -170,6 +170,25 @@ public sealed class LiveViewOptions
     public int DefaultTtlSeconds { get; init; } = 300;
 }
 
+/// <summary>
+/// Background session-refresh (Mode U rotation owner) settings (ADR 0015). When
+/// Tessera owns rotation for a provider, a background pass keeps its session warm by
+/// calling the recipe's <c>refreshSpec</c> and writing the rotated bundle back. OFF
+/// by default and inert unless <c>egress.enabled</c> too — standing this up is the
+/// sole-owner cutover (it must run only after Tessera has taken rotation over from
+/// any prior owner, or it would corrupt a single-use session). Only recipes that
+/// themselves declare <c>rotation.owner = tessera</c> + a <c>refreshSpec</c> are
+/// ever touched.
+/// </summary>
+public sealed class RefreshOptions
+{
+    /// <summary>Whether the background rotation owner runs. OFF = no session is auto-rotated.</summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>How often a rotation pass runs (seconds). Default 30 min.</summary>
+    public int IntervalSeconds { get; init; } = 1800;
+}
+
 /// <summary>The full broker configuration, with fail-closed validation.</summary>
 public sealed class TesseraConfig
 {
@@ -193,6 +212,9 @@ public sealed class TesseraConfig
 
     /// <summary>Live hand-off (captcha seeding) settings.</summary>
     public LiveViewOptions LiveView { get; init; } = new();
+
+    /// <summary>Background session-refresh (Mode U rotation owner) settings.</summary>
+    public RefreshOptions Refresh { get; init; } = new();
 
     /// <summary>
     /// Returns a list of problems. Empty list == valid. These checks encode the
@@ -252,6 +274,19 @@ public sealed class TesseraConfig
             if (LiveView.DefaultTtlSeconds <= 0)
             {
                 problems.Add($"liveView.defaultTtlSeconds {LiveView.DefaultTtlSeconds} is invalid (must be > 0).");
+            }
+        }
+
+        if (Refresh.Enabled)
+        {
+            if (Refresh.IntervalSeconds <= 0)
+            {
+                problems.Add($"refresh.intervalSeconds {Refresh.IntervalSeconds} is invalid (must be > 0).");
+            }
+
+            if (!Egress.Enabled)
+            {
+                problems.Add("refresh.enabled is true but egress.enabled is false — the rotation owner cannot reach any upstream (enable egress, or turn refresh off).");
             }
         }
 

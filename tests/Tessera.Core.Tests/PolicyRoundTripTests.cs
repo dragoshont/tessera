@@ -83,4 +83,45 @@ public sealed class PolicyRoundTripTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Recipe_rotation_and_refresh_spec_survive_a_save_reload()
+    {
+        var path = WriteTemp("""
+            {
+              "recipes": [
+                {
+                  "target": "health-portal", "egress": "http", "upstreamBaseUrl": "https://api.health-portal.example/v1",
+                  "injection": "cookies",
+                  "rotation": { "owner": "tessera", "detail": "Tessera keeps this session warm" },
+                  "refreshSpec": { "path": "auth/refresh", "method": "POST", "accessTokenField": "at", "refreshTokenField": "rt", "absorbSetCookie": true }
+                }
+              ]
+            }
+            """);
+        try
+        {
+            var loaded = ConfigLoader.LoadPolicy(path);
+            var recipe = loaded.Recipes.Single();
+            Assert.Equal("tessera", recipe.Rotation!.Owner);
+            Assert.NotNull(recipe.Refresh);
+            Assert.Equal("auth/refresh", recipe.Refresh!.Path);
+            Assert.Equal("at", recipe.Refresh.AccessTokenField);
+            Assert.Equal("rt", recipe.Refresh.RefreshTokenField);
+
+            ConfigLoader.SavePolicy(path, loaded);
+            var reloaded = ConfigLoader.LoadPolicy(path).Recipes.Single();
+            Assert.Equal("tessera", reloaded.Rotation!.Owner);
+            Assert.Equal("auth/refresh", reloaded.Refresh!.Path);
+            Assert.Equal("at", reloaded.Refresh.AccessTokenField);
+
+            var written = File.ReadAllText(path);
+            Assert.Contains("\"refreshSpec\"", written, StringComparison.Ordinal);
+            Assert.Contains("\"path\": \"auth/refresh\"", written, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

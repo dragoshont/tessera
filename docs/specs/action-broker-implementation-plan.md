@@ -77,19 +77,23 @@ The "one MCP, Tessera routes by identity" end-state ([ADR 0015](../adr/0015-mcp-
 The medical portal (the `health-portal` example target) is `owner: user` (one
 binding per person; each owns + seeds their own).
 
-- [ ] **2.1 Medical-portal HTTP recipe** (tessera repo) — author the provider
-  recipe: tools for `read:appointments`/`read:specialties`/`use:book` (`use:book` =
-  step-up), `upstreamBaseUrl`, cookie injection, `refreshSpec`. Recipe authoring +
-  tests; **no live egress yet** (`egress.enabled` stays false). Generic example in
-  the public repo; the real host stays in homelab config.
-- [ ] **2.2 Tessera SessionRefresher wiring** — enable the built-but-unwired
-  `SessionRefresher` as an opt-in background rotation owner (Core/Providers + tests).
-  Still inert until egress on.
-- [ ] **2.3 Domain MCP credential-free** (the domain-MCP repo) — drop the direct KV
-  read; add a Tessera egress client; forward the user's OIDC token
-  (`{{LIBRECHAT_OPENID_ACCESS_TOKEN}}`, already forwarded) as the subject_token;
-  keep the domain tool ergonomics. Behind a feature flag so the live single-server
-  path keeps working until proven.
+- [x] **2.1 Medical-portal HTTP recipe** (tessera repo) — the generic `health-portal`
+  recipe in [`grants.example.json`](../../deploy/config/grants.example.json) +
+  [`recipes.md`](recipes.md): `read:appointments`/`read:specialties`/`use:book`
+  (`use:book` = step-up, `plane: use`), `upstreamBaseUrl`, `cookieMap`, `rotation:
+  tessera`, `refreshSpec`. `owner: user` on the binding. No live egress (`egress`
+  stays gated). Real host stays in the homelab overlay.
+- [x] **2.2 Tessera SessionRefresher wiring** — `RefreshSpec` moved to Core +
+  carried on `Recipe`; `SessionRefreshOrchestrator` (Providers) = the sole-owner
+  pass (only `rotation.owner = tessera` + `refreshSpec` recipes); `SessionRefreshService`
+  (Broker `BackgroundService`); `RefreshOptions` (off by default, validation ties it
+  to `egress.enabled`, host registers it only when enabled + the store can write).
+  +10 tests (orchestrator, config, round-trip). Inert until egress on.
+- [ ] **2.3 🛑 STOP — operator (cross-repo): domain MCP credential-free** (the
+  domain-MCP repo, not tessera) — drop the direct KV read; add a Tessera egress
+  client; forward the user's OIDC token as the subject_token; behind a feature flag
+  so the live single-server path keeps working until proven. *(Lives in the medical
+  MCP repo + touches live medical access → operator.)*
 - [ ] **2.4 🛑 STOP — operator: cutover** — homelab: add the portal host to
   `egress.allowedHosts`, `egress.enabled=true`, point the MCP at Tessera, make
   Tessera the **sole** rotation owner (retire per-person keep-warm in the SAME
@@ -157,4 +161,10 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
   (commit `164309f`, 180 tests green).
 - 2026-06-14 (overnight): **Phase 0 complete** — ActionPlane + CredentialOwner +
   PDP manage default-deny/step-up + awareness DTO/SPA surfacing + tests (221 .NET
-  green, web build + 52 + lint green). **Next: Phase 1.2 (Job A worker contract doc).**
+  green, web build + 52 + lint green).
+- 2026-06-14 (overnight): **Phase 1.2 complete** — live-view worker contract doc.
+- 2026-06-14 (overnight): **Phase 2.1/2.2 complete** (broker side) — medical recipe
+  example + recipes spec, RefreshSpec on Recipe, SessionRefreshOrchestrator +
+  SessionRefreshService + RefreshOptions (off by default, inert until egress).
+  230 .NET green. 2.3 (domain MCP, cross-repo) + 2.4 (cutover) stay operator.
+  **Next: Phase 3 (media action broker).**

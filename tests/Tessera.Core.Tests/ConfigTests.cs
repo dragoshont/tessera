@@ -48,6 +48,33 @@ public sealed class ConfigTests
     }
 
     [Fact]
+    public void Refresh_enabled_requires_egress_enabled()
+    {
+        // The rotation owner can't reach an upstream with egress off — reject the
+        // fail-open-looking combo rather than silently doing nothing.
+        var config = new TesseraConfig { Refresh = new RefreshOptions { Enabled = true } };
+        Assert.Contains(config.Validate(), p => p.Contains("egress.enabled is false", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Refresh_enabled_with_egress_and_a_positive_interval_is_valid()
+    {
+        var config = new TesseraConfig
+        {
+            Egress = new EgressOptions { Enabled = true, AllowedHosts = ["api.example.com"] },
+            Refresh = new RefreshOptions { Enabled = true, IntervalSeconds = 900 },
+        };
+        Assert.Empty(config.Validate());
+    }
+
+    [Fact]
+    public void Refresh_is_off_by_default()
+    {
+        Assert.False(new RefreshOptions().Enabled);
+        Assert.Empty(new TesseraConfig().Validate());
+    }
+
+    [Fact]
     public void Out_of_range_port_is_rejected()
     {
         var config = new TesseraConfig { Server = new ServerOptions { Port = 70000 } };

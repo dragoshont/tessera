@@ -52,27 +52,43 @@ provider-specific is hardcoded in the broker — a new site is **config only**.
     "X-Api-Key": "{env:HEALTH_PORTAL_APIM_KEY}",
     "User-Agent": "Mozilla/5.0 (…)"
   },
-  "actions": ["read:appointments", "write:book"],   // the action verbs this recipe exposes
+  "actions": ["read:appointments", "read:specialties", "use:book"],   // the action verbs this recipe exposes
   "tools": [                              // one MCP tool per entry
     {
       "name": "list_appointments",        // MCP tool name
       "method": "GET",
       "path": "appointments",             // appended to upstreamBaseUrl
-      "action": "read:appointments",      // the grant action this tool needs
+      "action": "read:appointments",      // the grant action this tool needs (read plane)
       "description": "List the signed-in person's appointments."
     },
     {
       "name": "book_appointment",
       "method": "POST",
       "path": "appointments",
-      "action": "write:book",
-      "stepUp": true,                     // WRITE → requires an explicit confirm=true (human-in-the-loop)
+      "action": "use:book",               // use plane — operates within configured behaviour
+      "stepUp": true,                     // booking → requires an explicit confirm=true (human-in-the-loop)
       "description": "Book an appointment (echo the slot back and get a yes first)."
     }
   ],
+  // Rotation (ADR 0015/0017): who keeps this session warm. owner = none | external
+  // | tessera. When "tessera", pair it with a refreshSpec — Tessera becomes the
+  // sole rotation owner (Mode U), inert until egress.enabled + refresh.enabled.
+  "rotation": { "owner": "tessera", "detail": "Tessera keeps this session warm." },
+  "refreshSpec": {
+    "path": "auth/refresh",               // appended to upstreamBaseUrl
+    "method": "POST",
+    "accessTokenField": "access_token",   // JSON field carrying the rotated access token
+    "refreshTokenField": "refresh_token",
+    "absorbSetCookie": true               // also absorb rotated cookies from Set-Cookie
+  },
   "description": "Health portal — read appointments; step-up booking."
 }
 ```
+
+The credential's **owner** (ADR 0020) is declared on the *binding*, not the recipe —
+`"owner": "user"` for a person's own login (medical/Gmail/Apple), `"service"` (the
+default) for a household/brokered key, `"dependent"` (+ `"guardian"`) for a child's
+account. See the [binding](#relationship-to-grants) section.
 
 A **bearer** provider is simpler: `"injection": "bearer"` and omit `cookieMap`
 (the bundle's `access_token` becomes `Authorization: Bearer …`). A **status-only**
@@ -89,8 +105,11 @@ recipe (no upstream call) is `"egress": "none"` with no `tools`.
 | `injection` | string | `none` · `bearer` (→ `Authorization: Bearer <access_token>`) · `cookies` (→ `Cookie:` header). |
 | `cookieMap` | map | Cookie name → bundle source (`access_token` · `refresh_token` · `cookie:<name>`). When set, the `Cookie` header is built from these named sources. |
 | `extraHeaders` | map | Static headers on every call. Values may use `{extra:KEY}` (per-account vault field) or `{env:NAME}` (process env). |
-| `actions` | string[] | Action verbs this recipe exposes (drives the surface). |
-| `tools[]` | object[] | Each: `name`, `method`, `path`, `action`, optional `stepUp` (write → confirm-gated), `description`. |
+| `actions` | string[] | Action verbs this recipe exposes (drives the surface). Namespaced by **plane** (ADR 0019): `read:` observe · `use:` operate · `manage:` reshape. |
+| `tools[]` | object[] | Each: `name`, `method`, `path`, `action`, optional `stepUp` (write/booking → confirm-gated), optional `plane` (override when a legacy verb doesn't name the plane), `description`. |
+| `rotation` | object | Who keeps the session warm (ADR 0015/0017): `owner` = `none`/`external`/`tessera`, optional secret-free `detail`. |
+| `refreshSpec` | object | How Tessera rotates when it owns rotation: `path`, `method`, `accessTokenField`, `refreshTokenField`, `absorbSetCookie`. Inert until `egress.enabled` + `refresh.enabled`. |
+| binding `owner` (in `bindings`) | string | Whose credential it is (ADR 0020): `service` (default) · `user` · `dependent` (+ `guardian`). |
 | binding (in `grants`) | — | Which store secret backs `(target, on_behalf_of)` — see below. |
 
 ### Safety properties (enforced by the broker, not the recipe)

@@ -43,6 +43,16 @@ internal sealed class RecipeDto
     public Dictionary<string, string>? CookieMap { get; init; }
     public string? Description { get; init; }
     public RecipeRotationDto? Rotation { get; init; }
+    public RefreshSpecDto? RefreshSpec { get; init; }
+}
+
+internal sealed class RefreshSpecDto
+{
+    public string Path { get; init; } = "";
+    public string Method { get; init; } = "POST";
+    public string AccessTokenField { get; init; } = "access_token";
+    public string RefreshTokenField { get; init; } = "refresh_token";
+    public bool AbsorbSetCookie { get; init; } = true;
 }
 
 internal sealed class RecipeRotationDto
@@ -107,7 +117,10 @@ public sealed record LoadedPolicy(
                 ExtraHeaders: r.ExtraHeaders,
                 CookieMap: r.CookieMap,
                 Description: r.Description,
-                Rotation: r.Rotation is null ? null : new RecipeRotation(r.Rotation.Owner, r.Rotation.Detail)))
+                Rotation: r.Rotation is null ? null : new RecipeRotation(r.Rotation.Owner, r.Rotation.Detail),
+                Refresh: r.RefreshSpec is null
+                    ? null
+                    : new RefreshSpec(r.RefreshSpec.Path, r.RefreshSpec.Method, r.RefreshSpec.AccessTokenField, r.RefreshSpec.RefreshTokenField, r.RefreshSpec.AbsorbSetCookie)))
             .ToArray();
 
         return new LoadedPolicy(grants, bindings, recipes);    }
@@ -197,6 +210,16 @@ public sealed record LoadedPolicy(
                 CookieMap = r.CookieMap is { Count: > 0 } ? new Dictionary<string, string>(r.CookieMap) : null,
                 Description = r.Description,
                 Rotation = r.Rotation is null ? null : new RecipeRotationDto { Owner = r.Rotation.Owner, Detail = r.Rotation.Detail },
+                RefreshSpec = r.Refresh is null
+                    ? null
+                    : new RefreshSpecDto
+                    {
+                        Path = r.Refresh.Path,
+                        Method = r.Refresh.Method,
+                        AccessTokenField = r.Refresh.AccessTokenField,
+                        RefreshTokenField = r.Refresh.RefreshTokenField,
+                        AbsorbSetCookie = r.Refresh.AbsorbSetCookie,
+                    },
             })
             .ToList(),
     };

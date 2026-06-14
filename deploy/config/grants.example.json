@@ -4,7 +4,8 @@
       "caller": "chat://librechat",
       "onBehalfOf": "alice@example.com",
       "target": "health-portal",
-      "actions": ["read:*"]
+      "actions": ["read:appointments", "read:specialties", "use:book"],
+      "stepUpActions": ["use:book"]
     },
     {
       "caller": "app-crawler",
@@ -16,7 +17,8 @@
     {
       "target": "health-portal",
       "onBehalfOf": "alice@example.com",
-      "credential": "health-portal-session"
+      "credential": "health-portal-session",
+      "owner": "user"
     },
     {
       "target": "marketplace",
@@ -27,9 +29,51 @@
     {
       "target": "health-portal",
       "driver": "browser",
-      "egress": "none",
-      "actions": ["read:results"],
-      "description": "patient portal (read-only)"
+      "egress": "http",
+      "upstreamBaseUrl": "https://api.health-portal.example/v1",
+      "injection": "cookies",
+      "cookieMap": {
+        "SessionId": "access_token",
+        "RefreshId": "refresh_token"
+      },
+      "actions": ["read:appointments", "read:specialties", "use:book"],
+      "tools": [
+        {
+          "name": "list_appointments",
+          "method": "GET",
+          "path": "appointments",
+          "action": "read:appointments",
+          "description": "List the signed-in person's upcoming appointments."
+        },
+        {
+          "name": "list_specialties",
+          "method": "GET",
+          "path": "specialties",
+          "action": "read:specialties",
+          "description": "List the bookable specialties + locations."
+        },
+        {
+          "name": "book_appointment",
+          "method": "POST",
+          "path": "appointments",
+          "action": "use:book",
+          "stepUp": true,
+          "plane": "use",
+          "description": "Book a slot (echo the slot back and get an explicit yes first)."
+        }
+      ],
+      "rotation": {
+        "owner": "tessera",
+        "detail": "Tessera keeps this session warm (Mode U) once egress + refresh are enabled."
+      },
+      "refreshSpec": {
+        "path": "auth/refresh",
+        "method": "POST",
+        "accessTokenField": "access_token",
+        "refreshTokenField": "refresh_token",
+        "absorbSetCookie": true
+      },
+      "description": "Health portal — read appointments/specialties; step-up booking (owner: user; rotation: Tessera)."
     },
     {
       "target": "marketplace",

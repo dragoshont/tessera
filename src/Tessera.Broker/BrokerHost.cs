@@ -162,6 +162,25 @@ public static class BrokerHost
         services.AddSingleton<Tessera.Core.Portal.ILiveViewProvider>(
             BuildLiveViewProvider(config, options));
 
+        // Mode U rotation owner (ADR 0015): a background pass that keeps Tessera-owned
+        // sessions warm. Registered ONLY when refresh.enabled (config validation ties
+        // that to egress.enabled) AND the store can write back — so deploying never
+        // auto-rotates by default, and a read-only/in-memory store can't be a sole
+        // owner. Only recipes that declare rotation.owner = tessera + a refreshSpec
+        // are ever touched (the orchestrator's own gate).
+        if (config.Refresh.Enabled && store is ICredentialWriter writer)
+        {
+            services.AddSingleton(sp => new Tessera.Providers.SessionRefreshOrchestrator(
+                policy,
+                store,
+                new Tessera.Providers.SessionRefresher(
+                    sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), writer)));
+            services.AddHostedService(sp => new SessionRefreshService(
+                sp.GetRequiredService<Tessera.Providers.SessionRefreshOrchestrator>(),
+                TimeSpan.FromSeconds(config.Refresh.IntervalSeconds),
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger<SessionRefreshService>()));
+        }
+
         var app = builder.Build();
         ServePortalSpa(app, config);
         MapEndpoints(app);

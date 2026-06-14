@@ -56,6 +56,7 @@ public sealed record RecipeRotation(string Owner, string? Detail = null);
 /// <param name="CookieMap">For cookie injection: cookie name → bundle source (<c>access_token</c> / <c>refresh_token</c> / <c>cookie:&lt;name&gt;</c>). When set, the <c>Cookie</c> header is built from this map instead of the raw cookie dict.</param>
 /// <param name="Description">A human-readable description.</param>
 /// <param name="Rotation">Who owns rotating this provider's session (awareness dashboard, ADR 0017); null ⇒ no rotation declared (static).</param>
+/// <param name="Refresh">How Tessera rotates this session when it is the owner (Mode U, ADR 0015); null ⇒ no Tessera-owned refresh (static or external).</param>
 public sealed record Recipe(
     string Target,
     string Driver = "browser",
@@ -67,7 +68,8 @@ public sealed record Recipe(
     IReadOnlyDictionary<string, string>? ExtraHeaders = null,
     IReadOnlyDictionary<string, string>? CookieMap = null,
     string? Description = null,
-    RecipeRotation? Rotation = null)
+    RecipeRotation? Rotation = null,
+    RefreshSpec? Refresh = null)
 {
     /// <summary>The action verbs this recipe exposes (never null).</summary>
     public IReadOnlyList<string> ExposedActions => Actions ?? [];
