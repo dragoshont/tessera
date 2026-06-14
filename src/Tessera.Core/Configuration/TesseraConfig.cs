@@ -84,6 +84,16 @@ public sealed class AuditOptions
 
     /// <summary>Audit path; <c>-</c> means stdout (right for containers).</summary>
     public string Path { get; init; } = "-";
+
+    /// <summary>
+    /// How many recent entries the in-memory activity tail retains for the portal's
+    /// feed (ADR 0017). Newest-wins, bounded, O(capacity) memory; a restart drops it
+    /// (the JSONL sink → stdout/Loki stays the durable record). <c>0</c> disables the
+    /// tail entirely (the portal activity feed is then empty), independent of
+    /// <see cref="Enabled"/> — so an operator can keep durable audit while opting out
+    /// of the in-memory mirror, or vice versa.
+    /// </summary>
+    public int TailCapacity { get; init; } = 1000;
 }
 
 /// <summary>Injection-egress settings (ADR 0001 / architecture §6).</summary>

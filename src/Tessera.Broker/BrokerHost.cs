@@ -81,7 +81,25 @@ public static class BrokerHost
 
         var pdp = new PolicyDecisionPoint(policy.Grants, allowUnverified: config.Identity.Mode == "dev");
         var resolver = new CredentialResolver(policy.Bindings, store);
-        var audit = config.Audit.Enabled ? JsonlAuditSink.Open(config.Audit.Path) : (IAuditSink)NullAuditSink.Instance;
+        var baseAudit = config.Audit.Enabled ? JsonlAuditSink.Open(config.Audit.Path) : (IAuditSink)NullAuditSink.Instance;
+        // Wrap the durable sink with a bounded in-memory tail for the portal's
+        // activity feed (ADR 0017). The tail mirrors the durable record (written
+        // first, always) — it never replaces it; a restart drops the tail, never the
+        // JSONL log. TailCapacity = 0 opts out (the feed is then empty).
+        IAuditSink audit;
+        IAuditTail auditTail;
+        if (config.Audit.TailCapacity > 0)
+        {
+            var ring = new RingBufferAuditSink(baseAudit, config.Audit.TailCapacity);
+            audit = ring;
+            auditTail = ring;
+        }
+        else
+        {
+            audit = baseAudit;
+            auditTail = NullAuditTail.Instance;
+        }
+
         var broker = new BrokerCore(pdp, resolver, audit);
         var validator = options.ValidatorOverride ?? BuildValidator(config);
 
@@ -111,6 +129,7 @@ public static class BrokerHost
         services.AddSingleton(resolver);
         services.AddSingleton(store);
         services.AddSingleton(audit);
+        services.AddSingleton(auditTail);
         services.AddSingleton(broker);
         services.AddSingleton(validator);
         services.AddSingleton(status);

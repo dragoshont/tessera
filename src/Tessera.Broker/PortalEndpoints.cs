@@ -1,7 +1,10 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Tessera.Core.Audit;
 using Tessera.Core.Configuration;
+using Tessera.Core.Model;
 using Tessera.Core.Portal;
 using Tessera.Identity;
 
@@ -117,6 +120,53 @@ internal static class PortalEndpoints
             return Results.Json(connections.Select(ToDto).ToArray());
         });
 
+        // The activity feed (ADR 0017) — a secret-free, bounded tail of brokering
+        // decisions, plus a small rollup. Self-scoped by default: a member sees only
+        // decisions made on their behalf. An operator may pass ?principal= to view
+        // one person, or omit it to see everyone. ?limit caps the rows (clamped to the
+        // ring capacity); ?since is an ISO-8601 lower bound. The summary spans the
+        // whole scoped window so the counts are honest even when the rows are capped.
+        app.MapGet("/portal/audit", async (
+            HttpContext ctx, ITokenValidator validator, PortalService portal, IAuditTail tail, TesseraConfig config,
+            string? principal, int? limit, string? since, CancellationToken ct) =>
+        {
+            var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
+            if (caller is null)
+            {
+                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+            }
+
+            // Scope server-side (never a client filter). Operator: ?principal= picks a
+            // person, omitted = everyone (null scope). Member: forced to self; asking
+            // for someone else is forbidden, not silently re-scoped.
+            string? scope;
+            if (portal.IsAdmin(caller))
+            {
+                scope = string.IsNullOrWhiteSpace(principal) ? null : principal.Trim();
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(principal)
+                    && !string.Equals(principal.Trim(), caller, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Json(new { error = "forbidden: a member may only read their own activity" }, statusCode: 403);
+                }
+
+                scope = caller;
+            }
+
+            var capacity = Math.Max(tail.Capacity, 1);
+            var rowLimit = Math.Clamp(limit ?? 100, 1, capacity);
+            var sinceTs = ParseSince(since);
+
+            // One bounded query over the whole scoped window; the summary spans all of
+            // it, the rows show the freshest `rowLimit`.
+            var window = tail.Query(scope, sinceTs, capacity);
+            var rows = window.Take(rowLimit).Select(ToAuditRow).ToArray();
+            var summary = BuildAuditSummary(window);
+            return Results.Json(new AuditFeedDto(rows, summary));
+        });
+
         // Add (or re-point) a connection — the connect wizard's write. An admin may
         // add for anyone; a member may add only for themselves. Writes a binding
         // (the person + connection appear); authorizing a consumer is a separate
@@ -228,6 +278,57 @@ internal static class PortalEndpoints
         return idx >= 0 && idx < connectionId.Length - 1 ? connectionId[(idx + 1)..] : null;
     }
 
+    /// <summary>Parses an ISO-8601 <c>?since</c> bound to UTC; null when absent or unparseable.</summary>
+    private static DateTimeOffset? ParseSince(string? since) =>
+        !string.IsNullOrWhiteSpace(since)
+        && DateTimeOffset.TryParse(
+            since,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var ts)
+            ? ts
+            : null;
+
+    /// <summary>Maps the decision effect to the wire vocabulary (<c>allow|deny|step-up</c>).</summary>
+    private static string EffectString(Effect effect) => effect switch
+    {
+        Effect.Allow => "allow",
+        Effect.StepUp => "step-up",
+        _ => "deny",
+    };
+
+    private static AuditRowDto ToAuditRow(AuditEntry e) =>
+        new(e.Timestamp, e.Caller, e.CallerVerified, e.OnBehalfOf, e.Target, e.Action, EffectString(e.Effect), e.Reason, e.CredentialStatus);
+
+    /// <summary>Builds the rollup over a scoped audit window (counts + breakdowns + span).</summary>
+    private static AuditSummaryDto BuildAuditSummary(IReadOnlyList<AuditEntry> window)
+    {
+        var allow = 0;
+        var deny = 0;
+        var stepUp = 0;
+        var byTarget = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var byCaller = new Dictionary<string, int>(StringComparer.Ordinal);
+        DateTimeOffset? since = null;
+        DateTimeOffset? until = null;
+
+        foreach (var e in window)
+        {
+            switch (e.Effect)
+            {
+                case Effect.Allow: allow++; break;
+                case Effect.StepUp: stepUp++; break;
+                default: deny++; break;
+            }
+
+            byTarget[e.Target] = byTarget.GetValueOrDefault(e.Target) + 1;
+            byCaller[e.Caller] = byCaller.GetValueOrDefault(e.Caller) + 1;
+            if (since is null || e.Timestamp < since) { since = e.Timestamp; }
+            if (until is null || e.Timestamp > until) { until = e.Timestamp; }
+        }
+
+        return new AuditSummaryDto(window.Count, allow, deny, stepUp, byTarget, byCaller, since, until);
+    }
+
     private static PersonDto ToDto(PersonView p) =>
         new(p.Principal, p.Role.ToString(), p.ConnectionCount, p.NeedsAttentionCount);
 
@@ -275,3 +376,29 @@ internal sealed record LiveViewResponse(
     DateTimeOffset ExpiresAt,
     string TargetHostname,
     string? FaviconUrl);
+
+/// <summary>The activity feed (ADR 0017): newest-first rows + a scoped rollup.</summary>
+internal sealed record AuditFeedDto(IReadOnlyList<AuditRowDto> Entries, AuditSummaryDto Summary);
+
+/// <summary>One secret-free activity row (ids + enums only).</summary>
+internal sealed record AuditRowDto(
+    DateTimeOffset Timestamp,
+    string Caller,
+    bool CallerVerified,
+    string? OnBehalfOf,
+    string Target,
+    string Action,
+    string Effect,
+    string Reason,
+    string? CredentialStatus);
+
+/// <summary>The activity rollup over the scoped window.</summary>
+internal sealed record AuditSummaryDto(
+    int Total,
+    int Allow,
+    int Deny,
+    int StepUp,
+    IReadOnlyDictionary<string, int> ByTarget,
+    IReadOnlyDictionary<string, int> ByCaller,
+    DateTimeOffset? Since,
+    DateTimeOffset? Until);

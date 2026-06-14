@@ -3,6 +3,10 @@ using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Tessera.Core.Audit;
+using Tessera.Core.Identity;
+using Tessera.Core.Model;
 using Tessera.Core.Stores;
 using Xunit;
 
@@ -244,6 +248,121 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         var response = await _client.SendAsync(AsJson(Member, HttpMethod.Post, "/portal/connections",
             new { provider = "health-portal", principal = Member, credential = "hp-bob-2" }));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    // ── Activity feed (ADR 0017) ──────────────────────────────────────────────
+
+    /// <summary>Seeds one brokering decision into the live ring via the registered sink.</summary>
+    private void SeedAudit(string onBehalfOf, string target, string action, Effect effect = Effect.Allow)
+    {
+        var sink = _app.Services.GetRequiredService<IAuditSink>();
+        var caller = new CallerIdentity("spiffe://tessera.local/chat", VerificationMethod.OidcJwt, "tessera.local");
+        var user = new EndUserAssertion(onBehalfOf, "https://issuer.example", VerificationMethod.OidcJwt);
+        var decision = effect switch
+        {
+            Effect.Allow => Decision.Allow("granted"),
+            Effect.StepUp => Decision.StepUp("confirm-needed", "approve"),
+            _ => Decision.Deny("denied by policy"),
+        };
+        sink.Record(new AccessRequest(caller, target, action, user), decision, credential: null);
+    }
+
+    [Fact]
+    public async Task Audit_feed_requires_authentication()
+    {
+        var response = await _client.GetAsync(new Uri("/portal/audit", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Audit_feed_is_self_scoped_for_a_member()
+    {
+        SeedAudit(Admin, "health-portal", "read:appointments");
+        SeedAudit(Member, "health-portal", "read:appointments");
+        SeedAudit(Admin, "utility-co", "read:bill");
+
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Member, HttpMethod.Get, "/portal/audit"))).Content.ReadAsStringAsync());
+        var entries = doc.RootElement.GetProperty("entries").EnumerateArray().ToArray();
+
+        // A member sees ONLY decisions made on their own behalf.
+        Assert.Single(entries);
+        Assert.Equal(Member, entries[0].GetProperty("onBehalfOf").GetString());
+        Assert.Equal(1, doc.RootElement.GetProperty("summary").GetProperty("total").GetInt32());
+    }
+
+    [Fact]
+    public async Task Audit_feed_forbids_a_member_reading_another_person()
+    {
+        var response = await _client.SendAsync(As(Member, HttpMethod.Get, $"/portal/audit?principal={Admin}"));
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Audit_feed_lets_an_operator_see_everyone_or_one_person()
+    {
+        SeedAudit(Admin, "health-portal", "read:x");
+        SeedAudit(Member, "health-portal", "read:x");
+
+        using var all = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/audit"))).Content.ReadAsStringAsync());
+        Assert.Equal(2, all.RootElement.GetProperty("summary").GetProperty("total").GetInt32());
+
+        using var oneDoc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/audit?principal={Member}"))).Content.ReadAsStringAsync());
+        var oneEntries = oneDoc.RootElement.GetProperty("entries").EnumerateArray().ToArray();
+        Assert.Single(oneEntries);
+        Assert.Equal(Member, oneEntries[0].GetProperty("onBehalfOf").GetString());
+    }
+
+    [Fact]
+    public async Task Audit_feed_summary_counts_effects_and_breakdowns()
+    {
+        SeedAudit(Admin, "health-portal", "read:x", Effect.Allow);
+        SeedAudit(Admin, "health-portal", "read:y", Effect.Allow);
+        SeedAudit(Admin, "utility-co", "write:pay", Effect.Deny);
+        SeedAudit(Admin, "utility-co", "write:book", Effect.StepUp);
+
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/audit"))).Content.ReadAsStringAsync());
+        var summary = doc.RootElement.GetProperty("summary");
+
+        Assert.Equal(4, summary.GetProperty("total").GetInt32());
+        Assert.Equal(2, summary.GetProperty("allow").GetInt32());
+        Assert.Equal(1, summary.GetProperty("deny").GetInt32());
+        Assert.Equal(1, summary.GetProperty("stepUp").GetInt32());
+        Assert.Equal(2, summary.GetProperty("byTarget").GetProperty("health-portal").GetInt32());
+        Assert.Equal(2, summary.GetProperty("byTarget").GetProperty("utility-co").GetInt32());
+
+        // Effects render in the wire vocabulary.
+        var effects = doc.RootElement.GetProperty("entries").EnumerateArray().Select(e => e.GetProperty("effect").GetString()).ToArray();
+        Assert.Contains("allow", effects);
+        Assert.Contains("deny", effects);
+        Assert.Contains("step-up", effects);
+    }
+
+    [Fact]
+    public async Task Audit_feed_caps_rows_at_limit_but_summary_spans_the_window()
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            SeedAudit(Admin, $"target-{i}", "read:x");
+        }
+
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/audit?limit=2"))).Content.ReadAsStringAsync());
+
+        Assert.Equal(2, doc.RootElement.GetProperty("entries").GetArrayLength());
+        // The summary is honest about the whole scoped window, not just the shown rows.
+        Assert.Equal(5, doc.RootElement.GetProperty("summary").GetProperty("total").GetInt32());
+    }
+
+    [Fact]
+    public async Task Audit_feed_carries_no_secret_value()
+    {
+        // hp-alice holds a live bundle with secret "RT" in the store; the activity
+        // feed must never surface it — it is decoupled from credential material.
+        SeedAudit(Admin, "health-portal", "read:appointments");
+
+        var body = await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/audit"))).Content.ReadAsStringAsync();
+
+        Assert.DoesNotContain("RT", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"C\"", body, StringComparison.Ordinal);
     }
 
     private static HttpRequestMessage AsJson(string principal, HttpMethod method, string path, object body)

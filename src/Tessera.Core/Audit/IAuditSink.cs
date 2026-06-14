@@ -26,7 +26,27 @@ public sealed record AuditEntry(
     string Action,
     Effect Effect,
     string Reason,
-    string? CredentialStatus);
+    string? CredentialStatus)
+{
+    /// <summary>
+    /// Builds an entry from a brokering decision. The <see cref="OnBehalfOf"/> field
+    /// carries the <em>human-readable principal</em> (the <c>preferred_username</c>
+    /// when present, else the stable <c>subject</c>) — the same identity key grants,
+    /// bindings, and the portal use, so an audit row is legible and can be scoped to
+    /// a person without an oid↔email lookup. Never carries a secret value.
+    /// </summary>
+    public static AuditEntry From(AccessRequest request, Decision decision, ResolvedCredential? credential) =>
+        new(
+            DateTimeOffset.UtcNow,
+            request.Caller.Id,
+            request.Caller.IsVerified,
+            request.OnBehalfOf?.PreferredUsername ?? request.OnBehalfOf?.Subject,
+            request.Target,
+            request.Action,
+            decision.Effect,
+            decision.Reason,
+            credential?.Status.ToString());
+}
 
 /// <summary>An append-only, secret-free sink for brokering decisions (ADR 0008).</summary>
 public interface IAuditSink

@@ -40,16 +40,7 @@ public sealed class JsonlAuditSink : IAuditSink, IDisposable
     /// <inheritdoc/>
     public void Record(AccessRequest request, Decision decision, ResolvedCredential? credential)
     {
-        var entry = new AuditEntry(
-            DateTimeOffset.UtcNow,
-            request.Caller.Id,
-            request.Caller.IsVerified,
-            request.OnBehalfOf?.Subject,
-            request.Target,
-            request.Action,
-            decision.Effect,
-            decision.Reason,
-            credential?.Status.ToString());
+        var entry = AuditEntry.From(request, decision, credential);
 
         var line = JsonSerializer.Serialize(entry, AuditJson.Default);
         lock (_gate)
