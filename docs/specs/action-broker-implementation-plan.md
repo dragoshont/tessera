@@ -135,13 +135,19 @@ API keys), but flipping egress live with real keys is operator.
 Tier A (Graph official OAuth) + Tier B (IMAP/SMTP). Metadata-first, draft/confirm
 writes, result classes (metadata→preview→full-body). All `owner: user`.
 
-- [ ] **4.1 Result-class primitive** — implement the metadata/preview/full-body/
-  attachment/receipt output classes from the spec (Core + tests); search returns
-  opaque handles, full body by handle only.
-- [ ] **4.2 Microsoft Graph calendar-read** — recipe + delegated-scope consent
-  receipt; `read:calendar` first. Separate Graph grant from the login token (spec).
-- [ ] **4.3 Gmail** — decide Graph-mail vs IMAP/SMTP (Tier B); `read:mail` metadata
-  first, `use:send` = draft→confirm→step-up.
+- [x] **4.1 Result-class primitive** — [`ResultEnvelope.cs`](../../src/Tessera.Core/Results/ResultEnvelope.cs):
+  `ResultClass` (metadata/preview/full-body/attachment/receipt), `ResultHandle`
+  (opaque, target-scoped, rejects cross-provider replay), `MetadataItem`,
+  `MutationReceipt`. Search returns metadata + handles; full body by handle only; a
+  write returns a receipt, never a body. +8 Core tests.
+- [x] **4.2 Microsoft Graph calendar-read** — `graph-calendar` recipe
+  ([`grants.connectors.example.json`](../../deploy/config/grants.connectors.example.json)):
+  `read:calendar` (Calendars.ReadBasic), separate target/consent from mail,
+  Tessera-owned token refresh. Tested: calendar consent can't reach mail.
+- [x] **4.3 Gmail + Graph mail** — `gmail` + `graph-mail` recipes: `read:mail.metadata`
+  (search → handles), `read:mail.body` (by handle), `use:mail.send` (draft→confirm→
+  step-up). All `owner: user`. Tested over the real file (metadata-first, send steps
+  up, every binding user-owned).
 - [ ] **4.4 🛑 STOP — operator: consent + credentials** — per-data-class consent,
   app-specific passwords / delegated tokens into KV, live egress. Operator.
 
@@ -176,4 +182,8 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
   example (seerr/sonarr/radarr/qbt, owner: service, read/use/manage + step-up),
   CredentialResolver service-key fallback (ADR 0020), MCP tool plane metadata.
   241 .NET green. 3.4 (real keys + egress) stays operator.
-  **Next: Phase 4 (Gmail/Graph).**
+- 2026-06-14 (overnight): **Phase 4.1-4.3 complete** — result-class primitive
+  (ResultEnvelope/ResultHandle/MutationReceipt), Gmail + Graph mail/calendar
+  connectors example (owner: user, metadata-first, send step-up, separate consent).
+  257 .NET green. 4.4 (consent + real tokens + egress) stays operator.
+  **All autonomous phases done; remaining items are operator cutovers + cross-cutting.**

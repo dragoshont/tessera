@@ -1,0 +1,74 @@
+{
+  "_comment": "Personal-data connectors example (ADR 0019/0020, service-access spec). Microsoft Graph (Tier A, delegated OAuth) + Gmail (Tier A Graph-style or Tier B IMAP/SMTP). All owner: user — Tessera holds the PERSON'S OWN login; never revealed to an agent or another user. Result classes (metadata/preview/full-body) live in Tessera.Core.Results: search/list returns metadata + handles, full body by handle only, sends are draft->confirm->step-up. Separate consent per data class (calendar consent must NOT grant mail). Real tenant/app config + tokens live in the homelab overlay; egress stays gated.",
+  "grants": [
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "alice@example.com",
+      "target": "graph-calendar",
+      "actions": ["read:calendar"]
+    },
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "alice@example.com",
+      "target": "graph-mail",
+      "actions": ["read:mail.metadata", "read:mail.body", "use:mail.send"],
+      "stepUpActions": ["use:mail.send"]
+    },
+    {
+      "caller": "chat://librechat",
+      "onBehalfOf": "alice@example.com",
+      "target": "gmail",
+      "actions": ["read:mail.metadata", "read:mail.body", "use:mail.send"],
+      "stepUpActions": ["use:mail.send"]
+    }
+  ],
+  "bindings": [
+    { "target": "graph-calendar", "onBehalfOf": "alice@example.com", "credential": "graph-alice", "owner": "user" },
+    { "target": "graph-mail", "onBehalfOf": "alice@example.com", "credential": "graph-alice", "owner": "user" },
+    { "target": "gmail", "onBehalfOf": "alice@example.com", "credential": "gmail-alice", "owner": "user" }
+  ],
+  "recipes": [
+    {
+      "target": "graph-calendar",
+      "driver": "browser",
+      "egress": "http",
+      "upstreamBaseUrl": "https://graph.microsoft.com/v1.0",
+      "injection": "bearer",
+      "actions": ["read:calendar"],
+      "tools": [
+        { "name": "graph_calendar_view", "method": "GET", "path": "me/calendarView", "action": "read:calendar", "description": "List calendar events in a date range (metadata: subject, organizer, start/end; body by handle only)." }
+      ],
+      "rotation": { "owner": "tessera", "detail": "Tessera owns Graph token refresh via offline_access (Mode U)." },
+      "refreshSpec": { "path": "../oauth2/v2.0/token", "method": "POST", "accessTokenField": "access_token", "refreshTokenField": "refresh_token", "absorbSetCookie": false },
+      "description": "Microsoft Graph calendar (Calendars.ReadBasic) — read:calendar; owner: user. Separate consent from mail."
+    },
+    {
+      "target": "graph-mail",
+      "driver": "browser",
+      "egress": "http",
+      "upstreamBaseUrl": "https://graph.microsoft.com/v1.0",
+      "injection": "bearer",
+      "actions": ["read:mail.metadata", "read:mail.body", "use:mail.send"],
+      "tools": [
+        { "name": "graph_mail_search", "method": "GET", "path": "me/messages", "action": "read:mail.metadata", "description": "Search mail — returns metadata + opaque handles only (no body)." },
+        { "name": "graph_mail_read", "method": "GET", "path": "me/messages/{id}", "action": "read:mail.body", "description": "Read one message's full body by handle (from a prior search)." },
+        { "name": "graph_mail_send", "method": "POST", "path": "me/sendMail", "action": "use:mail.send", "stepUp": true, "plane": "use", "description": "Send a drafted message — draft/preview, get an explicit yes, then confirm=true." }
+      ],
+      "description": "Microsoft Graph mail (Mail.ReadBasic / Mail.Read / Mail.Send) — metadata-first; send is draft->confirm->step-up; owner: user."
+    },
+    {
+      "target": "gmail",
+      "driver": "browser",
+      "egress": "http",
+      "upstreamBaseUrl": "https://gmail.googleapis.com/gmail/v1",
+      "injection": "bearer",
+      "actions": ["read:mail.metadata", "read:mail.body", "use:mail.send"],
+      "tools": [
+        { "name": "gmail_search", "method": "GET", "path": "users/me/messages", "action": "read:mail.metadata", "description": "Search mail — returns metadata + opaque handles only (no body)." },
+        { "name": "gmail_read", "method": "GET", "path": "users/me/messages/{id}", "action": "read:mail.body", "description": "Read one message's full body by handle (from a prior search)." },
+        { "name": "gmail_send", "method": "POST", "path": "users/me/messages/send", "action": "use:mail.send", "stepUp": true, "plane": "use", "description": "Send a drafted message — draft/preview, get an explicit yes, then confirm=true." }
+      ],
+      "description": "Gmail (gmail.readonly / gmail.send) — metadata-first; send is draft->confirm->step-up; owner: user."
+    }
+  ]
+}
