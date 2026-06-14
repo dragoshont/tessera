@@ -35,6 +35,9 @@ public sealed record BrokerHostOptions
     /// <summary>Override the token validator (tests).</summary>
     public ITokenValidator? ValidatorOverride { get; init; }
 
+    /// <summary>Override the live-view provider (tests) — wire a fake browser worker.</summary>
+    public Tessera.Core.Portal.ILiveViewProvider? LiveViewProviderOverride { get; init; }
+
     /// <summary>Override the environment (tests).</summary>
     public IReadOnlyDictionary<string, string?>? Environment { get; init; }
 }
@@ -153,7 +156,8 @@ public static class BrokerHost
             ? null
             : updated => ConfigLoader.SavePolicy(policyPath, updated);
         services.AddSingleton(new PortalService(policy, resolver, config.Portal.Admins, persist));
-        services.AddSingleton<Tessera.Core.Portal.ILiveViewProvider>(Tessera.Core.Portal.DisabledLiveViewProvider.Instance);
+        services.AddSingleton<Tessera.Core.Portal.ILiveViewProvider>(
+            BuildLiveViewProvider(config, options));
 
         var app = builder.Build();
         ServePortalSpa(app, config);
@@ -203,6 +207,32 @@ public static class BrokerHost
         }
 
         return new DenyAllTokenValidator($"OIDC delegation not configured (identity.mode={config.Identity.Mode})");
+    }
+
+    /// <summary>
+    /// Builds the live-view provider for the captcha hand-off (ADR 0016 §3). A test
+    /// override wins; otherwise a real <see cref="WorkerLiveViewProvider"/> over an
+    /// <see cref="HttpLiveViewWorker"/> when <c>liveView.enabled</c> (config is
+    /// already validated to carry a valid absolute worker URL); otherwise the
+    /// fail-closed <see cref="DisabledLiveViewProvider"/>. The optional caller token
+    /// (authenticating the broker to the worker) comes from the environment, never
+    /// the config file (it is a secret).
+    /// </summary>
+    private static Tessera.Core.Portal.ILiveViewProvider BuildLiveViewProvider(TesseraConfig config, BrokerHostOptions options)
+    {
+        if (options.LiveViewProviderOverride is not null)
+        {
+            return options.LiveViewProviderOverride;
+        }
+
+        if (!config.LiveView.Enabled)
+        {
+            return Tessera.Core.Portal.DisabledLiveViewProvider.Instance;
+        }
+
+        var callerToken = Get(options.Environment, "TESSERA_LIVEVIEW_WORKER_TOKEN");
+        var worker = new HttpLiveViewWorker(new Uri(config.LiveView.WorkerArmUrl, UriKind.Absolute), callerToken);
+        return new WorkerLiveViewProvider(worker, config.LiveView.DefaultTtlSeconds);
     }
 
     private static void MapEndpoints(WebApplication app)

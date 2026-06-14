@@ -134,6 +134,34 @@ public sealed class PortalOptions
     public string? WebRoot { get; init; }
 }
 
+/// <summary>
+/// Live hand-off (captcha seeding) settings (ADR 0016 §3). The broker brokers a
+/// short-TTL, single-use, identity-bound handle to a browser worker that serves a
+/// remote browser and harvests the resulting cookie to the vault — the cookie never
+/// crosses the broker. OFF by default: deploying the broker never opens a live
+/// remote-browser path until a worker is explicitly configured (fail-closed, like
+/// egress). When disabled, <c>/portal/connections/{id}/live-view</c> returns 503.
+/// </summary>
+public sealed class LiveViewOptions
+{
+    /// <summary>Whether a browser worker is wired. OFF = the hand-off is unavailable (fail-closed).</summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>
+    /// The absolute URL the broker POSTs an arm request to (the worker's
+    /// <c>/live-view/arm</c>-style endpoint). Required (and must be absolute) when
+    /// <see cref="Enabled"/> is true. The worker resolves the slot, arms a login,
+    /// and returns an embeddable live-view URL; it harvests the cookie itself.
+    /// </summary>
+    public string WorkerArmUrl { get; init; } = "";
+
+    /// <summary>
+    /// The handle lifetime (seconds) applied when the worker does not pin its own.
+    /// Short by design — the handle is a capability, not a durable URL.
+    /// </summary>
+    public int DefaultTtlSeconds { get; init; } = 300;
+}
+
 /// <summary>The full broker configuration, with fail-closed validation.</summary>
 public sealed class TesseraConfig
 {
@@ -154,6 +182,9 @@ public sealed class TesseraConfig
 
     /// <summary>Admin-portal settings (the admins allow-list).</summary>
     public PortalOptions Portal { get; init; } = new();
+
+    /// <summary>Live hand-off (captcha seeding) settings.</summary>
+    public LiveViewOptions LiveView { get; init; } = new();
 
     /// <summary>
     /// Returns a list of problems. Empty list == valid. These checks encode the
@@ -200,6 +231,20 @@ public sealed class TesseraConfig
         if (Egress is { Enabled: true, AllowedHosts.Count: 0 })
         {
             problems.Add("egress.enabled is true but egress.allowedHosts is empty (an SSRF allow-list is required).");
+        }
+
+        if (LiveView.Enabled)
+        {
+            if (string.IsNullOrWhiteSpace(LiveView.WorkerArmUrl)
+                || !Uri.TryCreate(LiveView.WorkerArmUrl, UriKind.Absolute, out _))
+            {
+                problems.Add("liveView.enabled is true but liveView.workerArmUrl is not a valid absolute URL (the browser-worker arm endpoint is required).");
+            }
+
+            if (LiveView.DefaultTtlSeconds <= 0)
+            {
+                problems.Add($"liveView.defaultTtlSeconds {LiveView.DefaultTtlSeconds} is invalid (must be > 0).");
+            }
         }
 
         return problems;
