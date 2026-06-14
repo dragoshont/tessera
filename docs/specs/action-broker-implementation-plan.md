@@ -52,9 +52,11 @@ egress, no deploy. Build before the media broker; Mode U also benefits.
   (Core) + `HttpLiveViewWorker` (Broker) + `LiveViewOptions` config + DI +
   fail-closed default + tests (commit `164309f`). SPA `LiveHandoffView` already
   consumes it.
-- [ ] **1.2 Worker contract doc** — write the exact `POST /live-view/arm` request/
-  response contract (the shape `HttpLiveViewWorker` expects) into a runbook so the
-  homelab worker can implement it. *(agent can do — doc only.)*
+- [x] **1.2 Worker contract doc** — [`live-view-worker-contract.md`](live-view-worker-contract.md)
+  specifies the exact `POST /live-view/arm` request/response (the shape
+  `HttpLiveViewWorker` expects), the fail-closed rules, the per-principal slot
+  binding + cookie-stays-in-worker invariants, and a reference worker sketch for the
+  homelab noVNC pool.
 - [ ] **1.3 🛑 STOP — operator: homelab noVNC worker.** The playwright-pool noVNC
   (port 6080) + CDP (9222) are **deliberately pod-internal** (cardinal invariant:
   the cookie never leaves the pod; harvester `sessionkeeper` writes worker→KV). Job
