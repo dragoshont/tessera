@@ -97,3 +97,25 @@ public sealed record ModuleView(
     int ToolCount,
     int ConnectionCount,
     string? UpstreamHost);
+
+/// <summary>
+/// The rotation schedule of one connection as the awareness dashboard sees it
+/// (ADR 0017) — "is an automatic job keeping this session warm, and who owns it?"
+/// Honest about ownership: Tessera only claims <c>tessera</c> when its own refresher
+/// is wired (Mode U); a session kept warm elsewhere is <c>external</c>; a static one
+/// is <c>none</c>. <see cref="LastRotatedAt"/>/<see cref="NextRotationAt"/> populate
+/// only once Tessera itself owns and tracks rotation — null until then (not faked).
+/// </summary>
+/// <param name="ConnectionId">The connection this schedule is for.</param>
+/// <param name="RotationOwner"><c>none</c> | <c>external</c> | <c>tessera</c>.</param>
+/// <param name="RefreshConfigured">True when some component rotates the session (owner ≠ none).</param>
+/// <param name="Detail">A secret-free explanation of the rotation posture.</param>
+/// <param name="LastRotatedAt">When Tessera last rotated it, or null (unknown / not Tessera-owned).</param>
+/// <param name="NextRotationAt">When Tessera will next rotate it, or null (unknown / not Tessera-owned).</param>
+public sealed record ScheduleView(
+    string ConnectionId,
+    string RotationOwner,
+    bool RefreshConfigured,
+    string Detail,
+    DateTimeOffset? LastRotatedAt,
+    DateTimeOffset? NextRotationAt);

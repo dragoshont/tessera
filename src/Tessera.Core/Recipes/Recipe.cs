@@ -30,6 +30,17 @@ public enum InjectionKind
 }
 
 /// <summary>
+/// Who owns rotating (keeping warm) a provider's session — operator-declared
+/// provider knowledge surfaced by the awareness dashboard (ADR 0017). It is a
+/// <em>declaration</em>, not a behaviour: Tessera only actually rotates when its
+/// own refresher is wired (Mode U, ADR 0015). Until then a module that is kept warm
+/// elsewhere declares <c>external</c> so the portal can say so honestly.
+/// </summary>
+/// <param name="Owner"><c>none</c> (static, re-seed by hand), <c>external</c> (a domain component keeps it warm — today's Mode P), or <c>tessera</c> (Tessera's refresher owns it — Mode U).</param>
+/// <param name="Detail">An optional secret-free explanation shown to the user.</param>
+public sealed record RecipeRotation(string Owner, string? Detail = null);
+
+/// <summary>
 /// A provider recipe — the easy-setup unit that names a target, the harvest driver
 /// that keeps it warm, and how the broker reaches it (ADR 0006 / 0002). A recipe
 /// changes neither the broker nor the policy model; adding a provider is additive.
@@ -44,6 +55,7 @@ public enum InjectionKind
 /// <param name="ExtraHeaders">Static non-secret headers every call needs (values may use <c>{extra:key}</c> from the bundle or <c>{env:NAME}</c> from the process env).</param>
 /// <param name="CookieMap">For cookie injection: cookie name → bundle source (<c>access_token</c> / <c>refresh_token</c> / <c>cookie:&lt;name&gt;</c>). When set, the <c>Cookie</c> header is built from this map instead of the raw cookie dict.</param>
 /// <param name="Description">A human-readable description.</param>
+/// <param name="Rotation">Who owns rotating this provider's session (awareness dashboard, ADR 0017); null ⇒ no rotation declared (static).</param>
 public sealed record Recipe(
     string Target,
     string Driver = "browser",
@@ -54,7 +66,8 @@ public sealed record Recipe(
     IReadOnlyList<RecipeTool>? Tools = null,
     IReadOnlyDictionary<string, string>? ExtraHeaders = null,
     IReadOnlyDictionary<string, string>? CookieMap = null,
-    string? Description = null)
+    string? Description = null,
+    RecipeRotation? Rotation = null)
 {
     /// <summary>The action verbs this recipe exposes (never null).</summary>
     public IReadOnlyList<string> ExposedActions => Actions ?? [];

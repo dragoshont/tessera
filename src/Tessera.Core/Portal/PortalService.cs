@@ -161,6 +161,78 @@ public sealed class PortalService
         Uri.TryCreate(upstreamBaseUrl, UriKind.Absolute, out var uri) ? uri.Host : null;
 
     /// <summary>
+    /// Returns the rotation schedule of one connection (ADR 0017) — "is an automatic
+    /// job keeping this session warm, and who owns it?" Honest about ownership:
+    /// <c>none</c> (static, re-seed by hand), <c>external</c> (a domain component
+    /// keeps it warm — today's Mode P), or <c>tessera</c> (Tessera's refresher owns
+    /// it — Mode U). The last/next-run timestamps stay null until Tessera itself owns
+    /// and tracks rotation (never faked). Returns null when no such connection exists
+    /// (the endpoint maps that to 404).
+    /// </summary>
+    /// <param name="connectionId">The <c>{target}:{principal}</c> connection id.</param>
+    public ScheduleView? GetSchedule(string connectionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+
+        var (target, principal) = SplitConnectionId(connectionId);
+        if (target is null || principal is null)
+        {
+            return null;
+        }
+
+        var policy = Policy;
+        var hasConnection = policy.Bindings.Any(b =>
+            SameTarget(b.Target, target) && SamePrincipal(b.Principal, principal));
+        if (!hasConnection)
+        {
+            return null;
+        }
+
+        var recipe = FindRecipe(policy, target);
+        var owner = NormalizeRotationOwner(recipe?.Rotation?.Owner);
+        var detail = !string.IsNullOrWhiteSpace(recipe?.Rotation?.Detail)
+            ? recipe!.Rotation!.Detail!
+            : DefaultRotationDetail(owner);
+
+        return new ScheduleView(
+            ConnectionId: connectionId,
+            RotationOwner: owner,
+            RefreshConfigured: owner != "none",
+            Detail: detail,
+            // Tessera tracks these only once its own refresher owns rotation (Mode U,
+            // ADR 0015). Until then they are honestly unknown — never a fabricated date.
+            LastRotatedAt: null,
+            NextRotationAt: null);
+    }
+
+    /// <summary>Splits a <c>{target}:{principal}</c> id on the first colon (a principal may itself contain none).</summary>
+    private static (string? Target, string? Principal) SplitConnectionId(string connectionId)
+    {
+        var idx = connectionId.IndexOf(':', StringComparison.Ordinal);
+        if (idx <= 0 || idx >= connectionId.Length - 1)
+        {
+            return (null, null);
+        }
+
+        return (connectionId[..idx], connectionId[(idx + 1)..]);
+    }
+
+    /// <summary>Normalizes a declared rotation owner to the known vocabulary; anything else ⇒ <c>none</c>.</summary>
+    private static string NormalizeRotationOwner(string? owner) => owner?.Trim().ToLowerInvariant() switch
+    {
+        "external" => "external",
+        "tessera" => "tessera",
+        _ => "none",
+    };
+
+    private static string DefaultRotationDetail(string owner) => owner switch
+    {
+        "external" => "Rotation is owned by an external component (e.g. a domain MCP keep-warm); Tessera does not schedule it.",
+        "tessera" => "Tessera owns rotation; the last and next run appear once its refresher has executed.",
+        _ => "No automatic rotation — this session is static and is re-seeded by hand.",
+    };
+
+    /// <summary>
     /// Lists every person the portal knows about with an attention rollup — the
     /// Users view (admin surface). Resolves each connection's status once.
     /// </summary>

@@ -40,6 +40,13 @@ internal sealed class RecipeDto
     public Dictionary<string, string>? ExtraHeaders { get; init; }
     public Dictionary<string, string>? CookieMap { get; init; }
     public string? Description { get; init; }
+    public RecipeRotationDto? Rotation { get; init; }
+}
+
+internal sealed class RecipeRotationDto
+{
+    public string Owner { get; init; } = "none";
+    public string? Detail { get; init; }
 }
 
 internal sealed class RecipeToolDto
@@ -96,11 +103,11 @@ public sealed record LoadedPolicy(
                     .ToArray(),
                 ExtraHeaders: r.ExtraHeaders,
                 CookieMap: r.CookieMap,
-                Description: r.Description))
+                Description: r.Description,
+                Rotation: r.Rotation is null ? null : new RecipeRotation(r.Rotation.Owner, r.Rotation.Detail)))
             .ToArray();
 
-        return new LoadedPolicy(grants, bindings, recipes);
-    }
+        return new LoadedPolicy(grants, bindings, recipes);    }
 
     private static EgressMode ParseEgress(string value) => value.ToLowerInvariant() switch
     {
@@ -169,6 +176,7 @@ public sealed record LoadedPolicy(
                 ExtraHeaders = r.ExtraHeaders is { Count: > 0 } ? new Dictionary<string, string>(r.ExtraHeaders) : null,
                 CookieMap = r.CookieMap is { Count: > 0 } ? new Dictionary<string, string>(r.CookieMap) : null,
                 Description = r.Description,
+                Rotation = r.Rotation is null ? null : new RecipeRotationDto { Owner = r.Rotation.Owner, Detail = r.Rotation.Detail },
             })
             .ToList(),
     };

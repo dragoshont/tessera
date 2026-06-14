@@ -218,6 +218,36 @@ internal static class PortalEndpoints
             return Results.Json(modules.Select(ToModuleDto).ToArray());
         });
 
+        // The rotation schedule of one connection (ADR 0017) — "is an automatic job
+        // keeping this session warm, and who owns it?" Authorized like live-view: the
+        // owner or an operator. Honest ownership (none|external|tessera); last/next-run
+        // appear only once Tessera itself owns rotation (Mode U). 404 if no such
+        // connection exists.
+        app.MapGet("/portal/connections/{connectionId}/schedule", async (
+            HttpContext ctx, string connectionId, ITokenValidator validator, PortalService portal, TesseraConfig config) =>
+        {
+            var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
+            if (caller is null)
+            {
+                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+            }
+
+            var owner = OwnerOf(connectionId);
+            var isSelf = owner is not null && string.Equals(owner, caller, StringComparison.OrdinalIgnoreCase);
+            if (!isSelf && !portal.IsAdmin(caller))
+            {
+                return Results.Json(new { error = "forbidden: only the owner or an operator may view this connection's schedule" }, statusCode: 403);
+            }
+
+            var schedule = portal.GetSchedule(connectionId);
+            if (schedule is null)
+            {
+                return Results.Json(new { error = "not found: no such connection" }, statusCode: 404);
+            }
+
+            return Results.Json(ToScheduleDto(schedule));
+        });
+
         // Add (or re-point) a connection — the connect wizard's write. An admin may
         // add for anyone; a member may add only for themselves. Writes a binding
         // (the person + connection appear); authorizing a consumer is a separate
@@ -389,6 +419,9 @@ internal static class PortalEndpoints
     private static ModuleDto ToModuleDto(ModuleView m) =>
         new(m.Target, m.DisplayName, m.Driver, m.Egress, m.EgressEnabled, m.Actions, m.ToolCount, m.ConnectionCount, m.UpstreamHost);
 
+    private static ScheduleDto ToScheduleDto(ScheduleView s) =>
+        new(s.ConnectionId, s.RotationOwner, s.RefreshConfigured, s.Detail, s.LastRotatedAt, s.NextRotationAt);
+
     private static ConnectionDto ToDto(PortalConnection c) =>
         new(c.ConnectionId, c.OwnerPrincipal, c.Provider, c.DisplayName, c.Status,
             c.HasCookies, c.HasRefreshToken, c.HasAccessToken, c.ExpiresAt, c.ExpiryIsEstimated);
@@ -433,6 +466,15 @@ internal sealed record ModuleDto(
     int ToolCount,
     int ConnectionCount,
     string? UpstreamHost);
+
+/// <summary>A connection's rotation schedule (ADR 0017): who owns rotation + honest run times.</summary>
+internal sealed record ScheduleDto(
+    string ConnectionId,
+    string RotationOwner,
+    bool RefreshConfigured,
+    string Detail,
+    DateTimeOffset? LastRotatedAt,
+    DateTimeOffset? NextRotationAt);
 
 /// <summary>A connection row — presence flags + health only, never a secret value.</summary>
 internal sealed record ConnectionDto(

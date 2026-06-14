@@ -59,7 +59,7 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
                 { "target": "health-portal", "onBehalfOf": "bob@example.com",   "credential": "hp-bob" }
               ],
               "recipes": [
-                { "target": "health-portal", "egress": "none", "description": "Health Portal" }
+                { "target": "health-portal", "egress": "none", "description": "Health Portal", "rotation": { "owner": "external", "detail": "a domain MCP keep-warm owns rotation" } }
               ]
             }
             """);
@@ -236,6 +236,11 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         var doc = await File.ReadAllTextAsync(Path.Combine(_dir, "grants.json"));
         Assert.Contains("hp-dave", doc, StringComparison.Ordinal);
         Assert.Contains(newPerson, doc, StringComparison.Ordinal);
+
+        // The recipe's rotation descriptor must survive the persist round-trip
+        // (ToDocument), or a reload would silently lose "who owns rotation".
+        Assert.Contains("\"owner\"", doc, StringComparison.Ordinal);
+        Assert.Contains("external", doc, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -454,6 +459,48 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         Assert.False(hp.GetProperty("egressEnabled").GetBoolean());
         // alice + bob both have a health-portal binding.
         Assert.Equal(2, hp.GetProperty("connectionCount").GetInt32());
+    }
+
+    // ── Schedule (ADR 0017) ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Schedule_requires_authentication()
+    {
+        var response = await _client.GetAsync(new Uri($"/portal/connections/health-portal:{Admin}/schedule", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Schedule_reports_the_external_rotation_owner_without_faked_times()
+    {
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/connections/health-portal:{Admin}/schedule"))).Content.ReadAsStringAsync());
+
+        Assert.Equal("external", doc.RootElement.GetProperty("rotationOwner").GetString());
+        Assert.True(doc.RootElement.GetProperty("refreshConfigured").GetBoolean());
+        // Tessera does not own external rotation, so it never fabricates run times.
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("lastRotatedAt").ValueKind);
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("nextRotationAt").ValueKind);
+    }
+
+    [Fact]
+    public async Task A_member_cannot_view_another_persons_schedule()
+    {
+        var response = await _client.SendAsync(As(Member, HttpMethod.Get, $"/portal/connections/health-portal:{Admin}/schedule"));
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_member_can_view_their_own_schedule()
+    {
+        var response = await _client.SendAsync(As(Member, HttpMethod.Get, $"/portal/connections/health-portal:{Member}/schedule"));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Schedule_is_404_for_an_unknown_connection()
+    {
+        var response = await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/connections/health-portal:nobody@example.com/schedule"));
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private static HttpRequestMessage AsJson(string principal, HttpMethod method, string path, object body)

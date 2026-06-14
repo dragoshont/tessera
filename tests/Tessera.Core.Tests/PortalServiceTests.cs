@@ -258,4 +258,54 @@ public sealed class PortalServiceTests
         Assert.Contains("api.example.com", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("/v1", serialized, StringComparison.Ordinal);   // no path, no secret-bearing URL
     }
+
+    // ── Schedule (ADR 0017) ────────────────────────────────────────────────────
+
+    private static PortalService SchedulePortal() =>
+        new(
+            new LoadedPolicy(
+                Grants: [],
+                Bindings:
+                [
+                    new TargetBinding("health-portal", "hp-alice", Admin),
+                    new TargetBinding("static-co", "sc-alice", Admin),
+                ],
+                Recipes:
+                [
+                    new Recipe("health-portal", Description: "Health Portal",
+                        Rotation: new RecipeRotation("external", "a domain MCP keep-warm owns rotation")),
+                    new Recipe("static-co", Description: "Static Co"),
+                ]),
+            new CredentialResolver([], new InMemoryCredentialStore()),
+            [Admin]);
+
+    [Fact]
+    public void Schedule_reports_external_rotation_owner_when_declared()
+    {
+        var s = SchedulePortal().GetSchedule($"health-portal:{Admin}");
+
+        Assert.NotNull(s);
+        Assert.Equal("external", s!.RotationOwner);
+        Assert.True(s.RefreshConfigured);
+        Assert.Contains("keep-warm", s.Detail, StringComparison.Ordinal);
+        Assert.Null(s.LastRotatedAt);    // Tessera does not track external rotation
+        Assert.Null(s.NextRotationAt);
+    }
+
+    [Fact]
+    public void Schedule_reports_none_for_a_static_session()
+    {
+        var s = SchedulePortal().GetSchedule($"static-co:{Admin}");
+
+        Assert.NotNull(s);
+        Assert.Equal("none", s!.RotationOwner);
+        Assert.False(s.RefreshConfigured);
+    }
+
+    [Fact]
+    public void Schedule_is_null_for_an_unknown_or_malformed_connection()
+    {
+        Assert.Null(SchedulePortal().GetSchedule("health-portal:nobody@example.com"));
+        Assert.Null(SchedulePortal().GetSchedule("garbage-no-colon"));
+    }
 }
