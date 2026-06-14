@@ -155,13 +155,19 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
 
 ## Cross-cutting (thread through, not a final bolt-on)
 
-- [ ] Consent receipts (per ownership mode) — [ADR 0020](../adr/0020-credential-ownership.md).
+- [x] Consent receipts (per ownership mode) — `ConsentReceipt` (Core): per
+  `(principal, target, data class)`, calendar consent never satisfies mail. +3 tests.
 - [ ] Reveal path for `owner: user` (owner-only · step-up · auto-redact · audit ·
-  never to an agent) — **only if needed**; off by default.
-- [ ] Dependent/guardian relationship model (guardian may seed + act-as a named
-  dependent) — minimal v1.
-- [ ] Step-up / sudo re-auth UX in the portal (ADR 0016 cross-cutting) — gates the
-  admin surface + every `manage:` / destructive / medical action.
+  never to an agent) — **deliberately not built**, off by default; add only if needed.
+- [x] Dependent/guardian relationship model — `GuardianRelationships` (Core): a
+  guardian who seeded an `owner: dependent` binding may act-as that dependent;
+  derived from bindings, no new store. +4 tests.
+- [ ] **🛑 operator: step-up / sudo re-auth UX** in the portal + chat (ADR 0016
+  cross-cutting) — the PDP already returns `StepUp`; the UI re-auth prompt is the one
+  remaining build before destructive / medical / `manage:` actions are click-safe.
+
+> **Operator cutovers:** every 🛑 step above + each phase's `3.4`/`2.4`/etc. live in
+> the [operator cutover checklist](operator-cutover-checklist.md) — the morning to-do.
 
 ---
 
@@ -186,4 +192,8 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
   (ResultEnvelope/ResultHandle/MutationReceipt), Gmail + Graph mail/calendar
   connectors example (owner: user, metadata-first, send step-up, separate consent).
   257 .NET green. 4.4 (consent + real tokens + egress) stays operator.
-  **All autonomous phases done; remaining items are operator cutovers + cross-cutting.**
+- 2026-06-14 (overnight): **Cross-cutting** — ConsentReceipt + GuardianRelationships
+  (Core, +7 tests, 264 .NET green); [operator cutover checklist](operator-cutover-checklist.md)
+  written. **All autonomous tessera-repo work is done.** Remaining = operator
+  cutovers (real secrets / live egress / medical / noVNC worker) + the step-up UX
+  build, all captured in the checklist.
