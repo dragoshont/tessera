@@ -70,3 +70,30 @@ public sealed record DelegationView(
     IReadOnlyList<string> StepUpActions,
     bool IsAutomation,
     string? OnBehalfOf);
+
+/// <summary>
+/// One module (connector/recipe) as the awareness dashboard sees it (ADR 0017) — a
+/// projection of a loaded <c>recipe</c> plus the broker's egress posture and how
+/// many connections use it. Answers "what modules are loaded, and what can they
+/// do?" Secret-free: it surfaces the upstream <em>host</em> only (never a path,
+/// query, or credential), and a count (never owners).
+/// </summary>
+/// <param name="Target">The recipe target (the module id, e.g. <c>health-portal</c>).</param>
+/// <param name="DisplayName">A human label (recipe description, else the target).</param>
+/// <param name="Driver">The harvest driver (<c>browser</c> today).</param>
+/// <param name="Egress"><c>none</c> (status-only) or <c>http</c> (injectable upstream).</param>
+/// <param name="EgressEnabled">True only when this module is HTTP <b>and</b> the broker's global egress gate is on — i.e. it can actually reach upstream right now.</param>
+/// <param name="Actions">The action verbs this module exposes.</param>
+/// <param name="ToolCount">How many callable HTTP operations the recipe defines.</param>
+/// <param name="ConnectionCount">How many connections (bindings) use this module.</param>
+/// <param name="UpstreamHost">The upstream host (host only, never a path/secret), or null for status-only modules.</param>
+public sealed record ModuleView(
+    string Target,
+    string DisplayName,
+    string Driver,
+    string Egress,
+    bool EgressEnabled,
+    IReadOnlyList<string> Actions,
+    int ToolCount,
+    int ConnectionCount,
+    string? UpstreamHost);

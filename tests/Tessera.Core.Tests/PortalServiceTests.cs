@@ -195,4 +195,67 @@ public sealed class PortalServiceTests
     {
         Assert.Empty(DelegationPortal().ListDelegations("carol@example.com"));
     }
+
+    // ── Modules (ADR 0017) ────────────────────────────────────────────────────
+
+    private static PortalService ModulePortal() =>
+        new(
+            new LoadedPolicy(
+                Grants: [],
+                Bindings:
+                [
+                    new TargetBinding("health-portal", "hp-alice", Admin),
+                    new TargetBinding("health-portal", "hp-bob", Member),
+                ],
+                Recipes:
+                [
+                    new Recipe("health-portal", Description: "Health Portal"),
+                    new Recipe(
+                        "market",
+                        Egress: EgressMode.Http,
+                        UpstreamBaseUrl: "https://api.example.com/v1",
+                        Actions: ["read:listings"],
+                        Tools: [new RecipeTool("list", "GET", "/listings", "read:listings")],
+                        Description: "Marketplace"),
+                ]),
+            new CredentialResolver([], new InMemoryCredentialStore()),
+            [Admin]);
+
+    [Fact]
+    public void Modules_project_egress_posture_and_usage_counts()
+    {
+        var modules = ModulePortal().ListModules(egressGloballyEnabled: true);
+
+        var hp = modules.Single(m => m.Target == "health-portal");
+        Assert.Equal("none", hp.Egress);
+        Assert.False(hp.EgressEnabled);          // status-only never egresses
+        Assert.Null(hp.UpstreamHost);
+        Assert.Equal(0, hp.ToolCount);
+        Assert.Equal(2, hp.ConnectionCount);     // alice + bob
+
+        var mk = modules.Single(m => m.Target == "market");
+        Assert.Equal("http", mk.Egress);
+        Assert.True(mk.EgressEnabled);           // http AND the global gate is on
+        Assert.Equal("api.example.com", mk.UpstreamHost);
+        Assert.Equal(1, mk.ToolCount);
+        Assert.Equal(0, mk.ConnectionCount);
+    }
+
+    [Fact]
+    public void Modules_are_not_egress_enabled_when_the_global_gate_is_off()
+    {
+        var mk = ModulePortal().ListModules(egressGloballyEnabled: false).Single(m => m.Target == "market");
+
+        Assert.Equal("http", mk.Egress);         // the posture is still http …
+        Assert.False(mk.EgressEnabled);          // … but it cannot egress right now
+    }
+
+    [Fact]
+    public void Modules_surface_the_host_only_never_the_path()
+    {
+        var serialized = System.Text.Json.JsonSerializer.Serialize(ModulePortal().ListModules(egressGloballyEnabled: true));
+
+        Assert.Contains("api.example.com", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("/v1", serialized, StringComparison.Ordinal);   // no path, no secret-bearing URL
+    }
 }

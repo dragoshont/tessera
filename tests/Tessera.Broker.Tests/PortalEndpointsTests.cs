@@ -431,6 +431,31 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         Assert.Equal("Health Portal", grant.GetProperty("displayName").GetString());
     }
 
+    // ── Modules (ADR 0017) ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Modules_require_authentication()
+    {
+        var response = await _client.GetAsync(new Uri("/portal/modules", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Modules_list_loaded_connectors_for_any_authenticated_user()
+    {
+        // A member may read the shared catalog.
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Member, HttpMethod.Get, "/portal/modules"))).Content.ReadAsStringAsync());
+        var modules = doc.RootElement.EnumerateArray().ToArray();
+
+        var hp = modules.Single(m => m.GetProperty("target").GetString() == "health-portal");
+        Assert.Equal("Health Portal", hp.GetProperty("displayName").GetString());
+        Assert.Equal("none", hp.GetProperty("egress").GetString());
+        // egress.enabled is unset (false) in the test config → never egress-enabled.
+        Assert.False(hp.GetProperty("egressEnabled").GetBoolean());
+        // alice + bob both have a health-portal binding.
+        Assert.Equal(2, hp.GetProperty("connectionCount").GetInt32());
+    }
+
     private static HttpRequestMessage AsJson(string principal, HttpMethod method, string path, object body)
     {
         var req = new HttpRequestMessage(method, new Uri(path, UriKind.Relative));

@@ -200,6 +200,24 @@ internal static class PortalEndpoints
             return Results.Json(delegations.Select(ToDelegationDto).ToArray());
         });
 
+        // Modules (ADR 0017) — "what connectors are loaded". The catalog of recipes
+        // plus the broker's egress posture and a per-module connection count. Any
+        // authenticated user may read it (the catalog is shared, like /portal/recipes);
+        // the count is a non-sensitive aggregate (no owners). Secret-free: the upstream
+        // host only, never a path or credential.
+        app.MapGet("/portal/modules", async (
+            HttpContext ctx, ITokenValidator validator, PortalService portal, TesseraConfig config) =>
+        {
+            var principal = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
+            if (principal is null)
+            {
+                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+            }
+
+            var modules = portal.ListModules(config.Egress.Enabled);
+            return Results.Json(modules.Select(ToModuleDto).ToArray());
+        });
+
         // Add (or re-point) a connection — the connect wizard's write. An admin may
         // add for anyone; a member may add only for themselves. Writes a binding
         // (the person + connection appear); authorizing a consumer is a separate
@@ -368,6 +386,9 @@ internal static class PortalEndpoints
     private static DelegationDto ToDelegationDto(DelegationView d) =>
         new(d.Caller, d.Target, d.DisplayName, d.Actions, d.StepUpActions, d.IsAutomation, d.OnBehalfOf);
 
+    private static ModuleDto ToModuleDto(ModuleView m) =>
+        new(m.Target, m.DisplayName, m.Driver, m.Egress, m.EgressEnabled, m.Actions, m.ToolCount, m.ConnectionCount, m.UpstreamHost);
+
     private static ConnectionDto ToDto(PortalConnection c) =>
         new(c.ConnectionId, c.OwnerPrincipal, c.Provider, c.DisplayName, c.Status,
             c.HasCookies, c.HasRefreshToken, c.HasAccessToken, c.ExpiresAt, c.ExpiryIsEstimated);
@@ -400,6 +421,18 @@ internal sealed record DelegationDto(
     IReadOnlyList<string> StepUpActions,
     bool IsAutomation,
     string? OnBehalfOf);
+
+/// <summary>A module row (ADR 0017): a loaded connector + its egress posture + usage count.</summary>
+internal sealed record ModuleDto(
+    string Target,
+    string DisplayName,
+    string Driver,
+    string Egress,
+    bool EgressEnabled,
+    IReadOnlyList<string> Actions,
+    int ToolCount,
+    int ConnectionCount,
+    string? UpstreamHost);
 
 /// <summary>A connection row — presence flags + health only, never a secret value.</summary>
 internal sealed record ConnectionDto(

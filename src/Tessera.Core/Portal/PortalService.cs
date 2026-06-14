@@ -113,6 +113,54 @@ public sealed class PortalService
     }
 
     /// <summary>
+    /// Lists the modules (connectors) loaded into the broker (ADR 0017) — a projection
+    /// of the recipes plus the egress posture and a per-module connection count. It
+    /// answers "what's loaded, and what can it do?" Secret-free: it surfaces the
+    /// upstream <em>host</em> only (never a path or credential) and a count (never the
+    /// owners). <paramref name="egressGloballyEnabled"/> is the broker's
+    /// <c>egress.enabled</c> gate: a module's <see cref="ModuleView.EgressEnabled"/>
+    /// is true only when the recipe is HTTP <b>and</b> that global gate is on — i.e.
+    /// it can actually reach upstream right now (otherwise it is status-only).
+    /// </summary>
+    /// <param name="egressGloballyEnabled">The broker's global egress gate (config.Egress.Enabled).</param>
+    public IReadOnlyList<ModuleView> ListModules(bool egressGloballyEnabled)
+    {
+        var policy = Policy;
+
+        // Count connections (bindings) per target so each module shows its usage.
+        var connectionCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var binding in policy.Bindings)
+        {
+            connectionCounts[binding.Target] = connectionCounts.GetValueOrDefault(binding.Target) + 1;
+        }
+
+        var modules = new List<ModuleView>(policy.Recipes.Count);
+        foreach (var recipe in policy.Recipes)
+        {
+            var isHttp = recipe.Egress == EgressMode.Http;
+            connectionCounts.TryGetValue(recipe.Target, out var count);
+            modules.Add(new ModuleView(
+                Target: recipe.Target,
+                DisplayName: recipe.Description ?? recipe.Target,
+                Driver: recipe.Driver,
+                Egress: isHttp ? "http" : "none",
+                EgressEnabled: isHttp && egressGloballyEnabled,
+                Actions: recipe.ExposedActions,
+                ToolCount: recipe.ExposedTools.Count,
+                ConnectionCount: count,
+                UpstreamHost: ExtractHost(recipe.UpstreamBaseUrl)));
+        }
+
+        return modules
+            .OrderBy(m => m.Target, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    /// <summary>Extracts the host from an upstream base URL (host only, never a path/secret); null when absent/invalid.</summary>
+    private static string? ExtractHost(string? upstreamBaseUrl) =>
+        Uri.TryCreate(upstreamBaseUrl, UriKind.Absolute, out var uri) ? uri.Host : null;
+
+    /// <summary>
     /// Lists every person the portal knows about with an attention rollup — the
     /// Users view (admin surface). Resolves each connection's status once.
     /// </summary>
