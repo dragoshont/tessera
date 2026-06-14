@@ -1,5 +1,7 @@
 using Tessera.Core.Configuration;
+using Tessera.Core.Policy;
 using Tessera.Core.Portal;
+using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
 using Tessera.Core.Stores;
 using Xunit;
@@ -137,5 +139,60 @@ public sealed class PortalServiceTests
         Assert.False(result.Issued);
         Assert.Null(result.Handle);
         Assert.Contains("not configured", result.Reason, StringComparison.Ordinal);
+    }
+
+    // ── Delegations (ADR 0017) ────────────────────────────────────────────────
+
+    private static PortalService DelegationPortal() =>
+        new(
+            new LoadedPolicy(
+                Grants:
+                [
+                    new Grant("spiffe://tessera.local/chat", "health-portal", ["read:*"], OnBehalfOf: Admin, StepUpActions: ["write:*"]),
+                    new Grant("spiffe://tessera.local/chat", "health-portal", ["read:appointments"], OnBehalfOf: Member),
+                    new Grant("portal://tessera", "utility-co", ["read:*"]),
+                ],
+                Bindings: [],
+                Recipes: [new Recipe("health-portal", Description: "Health Portal")]),
+            new CredentialResolver([], new InMemoryCredentialStore()),
+            [Admin]);
+
+    [Fact]
+    public void Delegations_filtered_by_principal_returns_only_that_persons_grants()
+    {
+        var mine = DelegationPortal().ListDelegations(Member);
+
+        var grant = Assert.Single(mine);
+        Assert.Equal(Member, grant.OnBehalfOf);
+        Assert.Equal("health-portal", grant.Target);
+        Assert.False(grant.IsAutomation);
+    }
+
+    [Fact]
+    public void Delegations_resolve_recipe_display_name_and_step_up()
+    {
+        var mine = DelegationPortal().ListDelegations(Admin);
+
+        var grant = Assert.Single(mine);
+        Assert.Equal("Health Portal", grant.DisplayName);   // from the recipe description
+        Assert.Contains("read:*", grant.Actions);
+        Assert.Contains("write:*", grant.StepUpActions);
+    }
+
+    [Fact]
+    public void Delegations_null_principal_returns_all_including_automation()
+    {
+        var all = DelegationPortal().ListDelegations(null);
+
+        Assert.Equal(3, all.Count);
+        Assert.Contains(all, d => d.IsAutomation && d.OnBehalfOf is null && d.Target == "utility-co");
+        Assert.Contains(all, d => d.OnBehalfOf == Admin);
+        Assert.Contains(all, d => d.OnBehalfOf == Member);
+    }
+
+    [Fact]
+    public void Delegations_for_a_person_with_no_grants_is_empty()
+    {
+        Assert.Empty(DelegationPortal().ListDelegations("carol@example.com"));
     }
 }

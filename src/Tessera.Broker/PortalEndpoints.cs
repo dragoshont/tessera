@@ -167,6 +167,39 @@ internal static class PortalEndpoints
             return Results.Json(new AuditFeedDto(rows, summary));
         });
 
+        // Delegations (ADR 0017) — "who/what may act as me". A projection of the
+        // enforced grants. Self-scoped by default (a member sees only grants that
+        // delegate to them); an operator may pass ?principal= for one person or omit
+        // it to see every grant (including pure automation). Secret-free.
+        app.MapGet("/portal/delegations", async (
+            HttpContext ctx, ITokenValidator validator, PortalService portal, TesseraConfig config, string? principal) =>
+        {
+            var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
+            if (caller is null)
+            {
+                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+            }
+
+            string? scope;
+            if (portal.IsAdmin(caller))
+            {
+                scope = string.IsNullOrWhiteSpace(principal) ? null : principal.Trim();
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(principal)
+                    && !string.Equals(principal.Trim(), caller, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Json(new { error = "forbidden: a member may only see who can act as themselves" }, statusCode: 403);
+                }
+
+                scope = caller;
+            }
+
+            var delegations = portal.ListDelegations(scope);
+            return Results.Json(delegations.Select(ToDelegationDto).ToArray());
+        });
+
         // Add (or re-point) a connection — the connect wizard's write. An admin may
         // add for anyone; a member may add only for themselves. Writes a binding
         // (the person + connection appear); authorizing a consumer is a separate
@@ -332,6 +365,9 @@ internal static class PortalEndpoints
     private static PersonDto ToDto(PersonView p) =>
         new(p.Principal, p.Role.ToString(), p.ConnectionCount, p.NeedsAttentionCount);
 
+    private static DelegationDto ToDelegationDto(DelegationView d) =>
+        new(d.Caller, d.Target, d.DisplayName, d.Actions, d.StepUpActions, d.IsAutomation, d.OnBehalfOf);
+
     private static ConnectionDto ToDto(PortalConnection c) =>
         new(c.ConnectionId, c.OwnerPrincipal, c.Provider, c.DisplayName, c.Status,
             c.HasCookies, c.HasRefreshToken, c.HasAccessToken, c.ExpiresAt, c.ExpiryIsEstimated);
@@ -354,6 +390,16 @@ internal sealed record AddConnectionRequest(string Provider, string Principal, s
 
 /// <summary>A Users-view row (camelCase over the wire matches the web client contract).</summary>
 internal sealed record PersonDto(string Principal, string Role, int ConnectionCount, int NeedsAttentionCount);
+
+/// <summary>A delegation row (ADR 0017): who/what may act as a person, on what, and what needs step-up.</summary>
+internal sealed record DelegationDto(
+    string Caller,
+    string Target,
+    string DisplayName,
+    IReadOnlyList<string> Actions,
+    IReadOnlyList<string> StepUpActions,
+    bool IsAutomation,
+    string? OnBehalfOf);
 
 /// <summary>A connection row — presence flags + health only, never a secret value.</summary>
 internal sealed record ConnectionDto(

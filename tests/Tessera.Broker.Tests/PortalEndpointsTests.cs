@@ -48,7 +48,11 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         var grantsPath = Path.Combine(_dir, "grants.json");
         File.WriteAllText(grantsPath, """
             {
-              "grants": [],
+              "grants": [
+                { "caller": "spiffe://tessera.local/chat", "onBehalfOf": "alice@example.com", "target": "health-portal", "actions": ["read:*"], "stepUpActions": ["write:*"] },
+                { "caller": "spiffe://tessera.local/chat", "onBehalfOf": "bob@example.com",   "target": "health-portal", "actions": ["read:appointments"] },
+                { "caller": "portal://tessera", "target": "utility-co", "actions": ["read:*"] }
+              ],
               "bindings": [
                 { "target": "health-portal", "onBehalfOf": "alice@example.com", "credential": "hp-alice" },
                 { "target": "utility-co",    "onBehalfOf": "alice@example.com", "credential": "uc-alice" },
@@ -363,6 +367,68 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
 
         Assert.DoesNotContain("RT", body, StringComparison.Ordinal);
         Assert.DoesNotContain("\"C\"", body, StringComparison.Ordinal);
+    }
+
+    // ── Delegations (ADR 0017) ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Delegations_require_authentication()
+    {
+        var response = await _client.GetAsync(new Uri("/portal/delegations", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delegations_are_self_scoped_for_a_member()
+    {
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Member, HttpMethod.Get, "/portal/delegations"))).Content.ReadAsStringAsync());
+        var delegations = doc.RootElement.EnumerateArray().ToArray();
+
+        // bob sees only the grant that delegates to him — not alice's, not automation.
+        Assert.Single(delegations);
+        Assert.Equal(Member, delegations[0].GetProperty("onBehalfOf").GetString());
+        Assert.Equal("health-portal", delegations[0].GetProperty("target").GetString());
+        Assert.False(delegations[0].GetProperty("isAutomation").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Delegations_forbid_a_member_reading_another_person()
+    {
+        var response = await _client.SendAsync(As(Member, HttpMethod.Get, $"/portal/delegations?principal={Admin}"));
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delegations_surface_step_up_actions_for_the_owner()
+    {
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/delegations?principal={Admin}"))).Content.ReadAsStringAsync());
+        var grant = doc.RootElement.EnumerateArray().Single();
+
+        Assert.Contains("read:*", grant.GetProperty("actions").EnumerateArray().Select(a => a.GetString()));
+        Assert.Contains("write:*", grant.GetProperty("stepUpActions").EnumerateArray().Select(a => a.GetString()));
+    }
+
+    [Fact]
+    public async Task Delegations_let_an_operator_see_everyone_including_automation()
+    {
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/delegations"))).Content.ReadAsStringAsync());
+        var delegations = doc.RootElement.EnumerateArray().ToArray();
+
+        // All three grants: alice's, bob's, and the pure-automation utility-co grant.
+        Assert.Equal(3, delegations.Length);
+        Assert.Contains(delegations, d => d.GetProperty("isAutomation").GetBoolean() && d.GetProperty("onBehalfOf").ValueKind == JsonValueKind.Null);
+        Assert.Contains(delegations, d => d.GetProperty("onBehalfOf").GetString() == Admin);
+        Assert.Contains(delegations, d => d.GetProperty("onBehalfOf").GetString() == Member);
+    }
+
+    [Fact]
+    public async Task Delegations_resolve_the_recipe_display_name()
+    {
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/delegations?principal={Admin}"))).Content.ReadAsStringAsync());
+        var grant = doc.RootElement.EnumerateArray().Single();
+
+        // health-portal has a recipe → its description is the display name.
+        Assert.Equal("Health Portal", grant.GetProperty("displayName").GetString());
     }
 
     private static HttpRequestMessage AsJson(string principal, HttpMethod method, string path, object body)

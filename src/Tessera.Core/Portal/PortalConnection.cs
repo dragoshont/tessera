@@ -47,3 +47,26 @@ public sealed record PersonView(
 /// <param name="Provider">The recipe target (e.g. <c>health-portal</c>).</param>
 /// <param name="DisplayName">The human label (the recipe description, else the target).</param>
 public sealed record RecipeSummary(string Provider, string DisplayName);
+
+/// <summary>
+/// One delegation as the awareness dashboard sees it (ADR 0017) — a projection of a
+/// single <c>grant</c>: <em>who</em> (a caller workload) may act <em>as whom</em>
+/// (<see cref="OnBehalfOf"/>) on <em>what</em> (<see cref="Target"/>), with which
+/// <see cref="Actions"/>, and which of those need a human step-up. It answers
+/// "who/what may act as me?" — the consent/transparency view. Secret-free.
+/// </summary>
+/// <param name="Caller">The caller workload the grant authorizes (e.g. a SPIFFE id or MCP id).</param>
+/// <param name="Target">The target/provider the grant applies to.</param>
+/// <param name="DisplayName">A human label (recipe description, else the target).</param>
+/// <param name="Actions">The action globs the caller may perform.</param>
+/// <param name="StepUpActions">The action globs that require a human step-up first.</param>
+/// <param name="IsAutomation">True when the grant is pure automation (no delegated human).</param>
+/// <param name="OnBehalfOf">The delegated principal, or <c>null</c> for automation.</param>
+public sealed record DelegationView(
+    string Caller,
+    string Target,
+    string DisplayName,
+    IReadOnlyList<string> Actions,
+    IReadOnlyList<string> StepUpActions,
+    bool IsAutomation,
+    string? OnBehalfOf);

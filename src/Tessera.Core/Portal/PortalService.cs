@@ -72,6 +72,47 @@ public sealed class PortalService
             .ToArray();
 
     /// <summary>
+    /// Lists the delegations the awareness dashboard shows (ADR 0017) — a projection
+    /// of the <em>enforced</em> grants (the same in-memory policy the PDP decides on,
+    /// so it can never diverge from what is actually enforced). When
+    /// <paramref name="principal"/> is non-null, only grants that delegate to that
+    /// exact person are returned ("who/what may act as me"); when null, every grant is
+    /// returned including pure automation (the operator's "who is using auth" view).
+    /// Pure projection, no I/O, secret-free.
+    /// </summary>
+    /// <param name="principal">The delegated person to scope to, or null for all grants (operator).</param>
+    public IReadOnlyList<DelegationView> ListDelegations(string? principal)
+    {
+        var policy = Policy;
+        var delegations = new List<DelegationView>();
+        foreach (var grant in policy.Grants)
+        {
+            if (principal is not null
+                && (grant.OnBehalfOf is null
+                    || !string.Equals(grant.OnBehalfOf, principal, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var recipe = FindRecipe(policy, grant.Target);
+            delegations.Add(new DelegationView(
+                Caller: grant.Caller,
+                Target: grant.Target,
+                DisplayName: recipe?.Description ?? grant.Target,
+                Actions: grant.Actions,
+                StepUpActions: grant.StepUpActions ?? [],
+                IsAutomation: grant.OnBehalfOf is null,
+                OnBehalfOf: grant.OnBehalfOf));
+        }
+
+        // Stable order: by target, then by caller — independent of policy-file order.
+        return delegations
+            .OrderBy(d => d.Target, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(d => d.Caller, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    /// <summary>
     /// Lists every person the portal knows about with an attention rollup — the
     /// Users view (admin surface). Resolves each connection's status once.
     /// </summary>
