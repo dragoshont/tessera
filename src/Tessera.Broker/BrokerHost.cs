@@ -8,6 +8,7 @@ using Tessera.Core.Audit;
 using Tessera.Core.Broker;
 using Tessera.Core.Configuration;
 using Tessera.Core.Policy;
+using Tessera.Core.Portal;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
 using Tessera.Core.Stores;
@@ -123,8 +124,16 @@ public static class BrokerHost
             config, pdp, resolver, policy.Recipes, sp.GetRequiredService<Tessera.Providers.IHttpTransport>()));
         services.AddTesseraMcp(mcpOptions);
 
+        // Admin-portal read-model (ADR 0016): people + connection health projected
+        // over the policy + store status, plus a fail-closed live-view provider for
+        // the captcha hand-off. Both are secret-free; the live-view provider opens no
+        // remote browser until a worker adapter is wired.
+        services.AddSingleton(new PortalService(policy, resolver, config.Portal.Admins));
+        services.AddSingleton<Tessera.Core.Portal.ILiveViewProvider>(Tessera.Core.Portal.DisabledLiveViewProvider.Instance);
+
         var app = builder.Build();
         MapEndpoints(app);
+        app.MapPortalEndpoints();
         app.MapMcp("/mcp");
 
         // Startup self-test (read-only) — proves the authorize+resolve spine against

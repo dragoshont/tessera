@@ -109,6 +109,16 @@ public static class ConfigLoader
             };
         }
 
+        var portal = config.Portal;
+        var portalAdmins = Get(env, "PORTAL_ADMINS");
+        if (portalAdmins is not null)
+        {
+            portal = new PortalOptions
+            {
+                Admins = portalAdmins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            };
+        }
+
         return new TesseraConfig
         {
             Server = server,
@@ -116,6 +126,7 @@ public static class ConfigLoader
             Policy = policy,
             Audit = config.Audit,
             Egress = egress,
+            Portal = portal,
         };
     }
 

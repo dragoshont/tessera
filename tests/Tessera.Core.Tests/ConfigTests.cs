@@ -105,6 +105,51 @@ public sealed class ConfigTests
     }
 
     [Fact]
+    public void Portal_admins_load_from_json_and_survive_env_overrides()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, """
+                {
+                  "server": { "host": "127.0.0.1", "port": 8080 },
+                  "portal": { "admins": ["alice@example.com"] }
+                }
+                """);
+
+            // An UNRELATED env override forces ApplyEnvironmentOverrides to rebuild the
+            // config — the portal section must NOT be dropped (regression guard).
+            var env = new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["TESSERA_SERVER_PORT"] = "9090",
+            };
+
+            var config = ConfigLoader.LoadConfig(path, env);
+
+            Assert.Equal(9090, config.Server.Port);
+            Assert.Contains("alice@example.com", config.Portal.Admins);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Portal_admins_can_be_set_by_env()
+    {
+        var env = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["TESSERA_PORTAL_ADMINS"] = "alice@example.com, bob@example.com",
+        };
+
+        var config = ConfigLoader.LoadConfig(null, env);
+
+        Assert.Equal(2, config.Portal.Admins.Count);
+        Assert.Contains("bob@example.com", config.Portal.Admins);
+    }
+
+    [Fact]
     public void LoadPolicy_reads_grants_bindings_and_recipes()
     {
         var path = Path.GetTempFileName();

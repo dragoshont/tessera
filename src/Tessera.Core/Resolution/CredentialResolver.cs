@@ -84,6 +84,36 @@ public sealed class CredentialResolver
         return bundle.IsEmpty ? null : bundle;
     }
 
+    /// <summary>
+    /// Assesses a binding's stored bundle for the admin portal: its
+    /// <see cref="CredentialStatus"/> plus the non-secret <em>presence</em> flags
+    /// (which kinds of material exist — never the values). This is the data behind
+    /// a connection's health badge and the "has cookies ✓ / has refresh token ✓"
+    /// drawer line; it returns no secret bytes (ADR 0016 / the secretless contract).
+    /// </summary>
+    public async Task<BindingHealth> AssessBindingAsync(TargetBinding binding, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
+
+        CredentialBundle bundle;
+        try
+        {
+            bundle = await _store.GetBundleAsync(binding.Credential, cancellationToken).ConfigureAwait(false);
+        }
+        catch (StoreException exc)
+        {
+            return new BindingHealth(CredentialStatus.Error, false, false, false, exc.Message);
+        }
+
+        var (status, detail) = Assess(bundle);
+        return new BindingHealth(
+            status,
+            bundle.HasAccessToken,
+            bundle.HasRefreshToken,
+            bundle.HasCookies,
+            detail);
+    }
+
     /// <summary>Classifies a bundle into a status + secret-free detail.</summary>
     internal static (CredentialStatus Status, string Detail) Assess(CredentialBundle bundle)
     {
