@@ -1,16 +1,24 @@
 import type {
+  AuditFeed,
+  AuditRow,
   Connection,
   CreateConnectionInput,
+  Delegation,
   LiveViewHandle,
   LiveViewResult,
+  Module,
   Person,
   PortalConfig,
   Recipe,
   Role,
+  Schedule,
 } from '../data/types'
 import {
+  auditRows as fixtureAuditRows,
   connections as fixtureConnections,
   currentUserPrincipal as fixtureCurrentUserPrincipal,
+  delegations as fixtureDelegations,
+  modules as fixtureModules,
   people as fixturePeople,
   portalConfigDev,
   recipes as fixtureRecipes,
@@ -38,6 +46,21 @@ export interface TesseraClient {
    * shows a calm "not set up yet" explainer, never an error spinner.
    */
   requestLiveView(connectionId: string): Promise<LiveViewResult>
+  /**
+   * The secret-free activity feed (`GET /portal/audit`) — newest-first rows + a
+   * window summary. Self-scoped by default; an operator may pass a principal, or
+   * omit it for everyone. `limit` caps the rows (the summary still spans the window).
+   */
+  getActivity(principal?: string, limit?: number): Promise<AuditFeed>
+  /**
+   * Who/what may act as a person (`GET /portal/delegations`). Self by default; an
+   * operator may pass a principal, or omit it for every grant (incl. automation).
+   */
+  listDelegations(principal?: string): Promise<Delegation[]>
+  /** The loaded connector catalog + egress posture (`GET /portal/modules`). */
+  listModules(): Promise<Module[]>
+  /** One connection's rotation schedule (`GET /portal/connections/{id}/schedule`). */
+  getSchedule(connectionId: string): Promise<Schedule>
 }
 
 export interface InMemorySeed {
@@ -48,6 +71,12 @@ export interface InMemorySeed {
   currentUserPrincipal?: string
   /** Drive the Live hand-off in stories/tests. Defaults to fail-closed Unavailable. */
   liveView?: (connectionId: string) => LiveViewResult
+  /** Awareness-feed rows (ADR 0017); the in-memory client scopes + summarizes them. */
+  auditRows?: AuditRow[]
+  delegations?: Delegation[]
+  modules?: Module[]
+  /** Per-connection schedule override; defaults to a synthesized "none" schedule. */
+  schedules?: Record<string, Schedule>
 }
 
 const adminsFirst = (a: Person, b: Person): number => {
@@ -56,6 +85,27 @@ const adminsFirst = (a: Person, b: Person): number => {
 }
 
 const FAIL_CLOSED_REASON = 'live hand-off is not configured (fail-closed)'
+
+/** Builds the activity-feed summary over a set of rows (mirrors the broker rollup). */
+function summarizeAudit(rows: AuditRow[]): AuditFeed['summary'] {
+  const byTarget: Record<string, number> = {}
+  const byCaller: Record<string, number> = {}
+  let allow = 0
+  let deny = 0
+  let stepUp = 0
+  let since: string | null = null
+  let until: string | null = null
+  for (const row of rows) {
+    if (row.effect === 'allow') allow += 1
+    else if (row.effect === 'step-up') stepUp += 1
+    else deny += 1
+    byTarget[row.target] = (byTarget[row.target] ?? 0) + 1
+    byCaller[row.caller] = (byCaller[row.caller] ?? 0) + 1
+    if (since === null || row.timestamp < since) since = row.timestamp
+    if (until === null || row.timestamp > until) until = row.timestamp
+  }
+  return { total: rows.length, allow, deny, stepUp, byTarget, byCaller, since, until }
+}
 
 /** Build a client over the given seed (defaults to the shipped fixtures). Tests
  *  and stories inject their own seed to exercise empty / mixed states. */
@@ -116,6 +166,38 @@ export function createInMemoryClient(seed: InMemorySeed = {}): TesseraClient {
       // Default is fail-closed: deploying the portal opens no remote browser until a
       // worker adapter is wired. Stories/tests opt into the happy path via `liveView`.
       return seed.liveView?.(connectionId) ?? { unavailable: FAIL_CLOSED_REASON }
+    },
+    async getActivity(principal, limit) {
+      const rows = seed.auditRows ?? fixtureAuditRows
+      // Self-scope when a principal is given (mirrors the broker), newest-first.
+      const scoped = principal
+        ? rows.filter((row) => row.onBehalfOf?.toLowerCase() === principal.toLowerCase())
+        : rows
+      const ordered = [...scoped].sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      const entries = typeof limit === 'number' ? ordered.slice(0, limit) : ordered
+      // The summary spans the whole scoped window, not just the shown rows.
+      return { entries, summary: summarizeAudit(ordered) }
+    },
+    async listDelegations(principal) {
+      const all = seed.delegations ?? fixtureDelegations
+      return principal
+        ? all.filter((d) => d.onBehalfOf?.toLowerCase() === principal.toLowerCase())
+        : [...all]
+    },
+    async listModules() {
+      return [...(seed.modules ?? fixtureModules)]
+    },
+    async getSchedule(connectionId) {
+      return (
+        seed.schedules?.[connectionId] ?? {
+          connectionId,
+          rotationOwner: 'none',
+          refreshConfigured: false,
+          detail: 'No automatic rotation — this session is static and is re-seeded by hand.',
+          lastRotatedAt: null,
+          nextRotationAt: null,
+        }
+      )
     },
   }
 }
@@ -243,6 +325,25 @@ export function createHttpClient({ baseUrl, getAuthHeader }: HttpClientOptions):
       if (!response.ok) throw new HttpError(response.status, await safeText(response))
       const handle = (await response.json()) as LiveViewHandle
       return { handle }
+    },
+    async getActivity(principal, limit) {
+      const params = new URLSearchParams()
+      if (principal) params.set('principal', principal)
+      if (typeof limit === 'number') params.set('limit', String(limit))
+      const query = params.toString()
+      return getJson<AuditFeed>(`/portal/audit${query ? `?${query}` : ''}`)
+    },
+    async listDelegations(principal) {
+      const query = principal ? `?principal=${encodeURIComponent(principal)}` : ''
+      return getJson<Delegation[]>(`/portal/delegations${query}`)
+    },
+    async listModules() {
+      return getJson<Module[]>('/portal/modules')
+    },
+    async getSchedule(connectionId) {
+      return getJson<Schedule>(
+        `/portal/connections/${encodeURIComponent(connectionId)}/schedule`,
+      )
     },
   }
 }

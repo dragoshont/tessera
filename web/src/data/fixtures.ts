@@ -1,5 +1,14 @@
 import { addDays, subDays, subHours } from 'date-fns'
-import type { Connection, LiveViewHandle, Person, PortalConfig, Recipe } from './types'
+import type {
+  AuditRow,
+  Connection,
+  Delegation,
+  LiveViewHandle,
+  Module,
+  Person,
+  PortalConfig,
+  Recipe,
+} from './types'
 
 // Generic identities only — never real names (spec first principles).
 // Timestamps are anchored to "now" so relative phrasing ("12 days ago") stays
@@ -169,3 +178,124 @@ export const portalConfigOidc: PortalConfig = {
   },
 }
 export const portalConfigNone: PortalConfig = { authMode: 'none', devLoopback: false }
+
+// ── Awareness dashboard fixtures (ADR 0017) ─────────────────────────────────
+// Secret-free projections for the Activity & Access (self) and Observability
+// (admin) surfaces. The in-memory client scopes + summarizes these so stories
+// render real behaviour (self-scope, summary, step-up) without a backend.
+
+const chatCaller = 'spiffe://tessera.local/chat'
+
+/** Brokering decisions across alice + bob, newest-first when sorted. */
+export const auditRows: AuditRow[] = [
+  {
+    timestamp: iso(subHours(now, 1)),
+    caller: chatCaller,
+    callerVerified: true,
+    onBehalfOf: 'alice@example.com',
+    target: 'health',
+    action: 'read:appointments',
+    effect: 'allow',
+    reason: 'granted: read:appointments on behalf of alice@example.com',
+    credentialStatus: 'Present',
+  },
+  {
+    timestamp: iso(subHours(now, 3)),
+    caller: chatCaller,
+    callerVerified: true,
+    onBehalfOf: 'alice@example.com',
+    target: 'utility',
+    action: 'write:pay',
+    effect: 'step-up',
+    reason: 'step-up required: write:pay needs human confirmation',
+    credentialStatus: 'Present',
+  },
+  {
+    timestamp: iso(subHours(now, 6)),
+    caller: chatCaller,
+    callerVerified: true,
+    onBehalfOf: 'bob@example.com',
+    target: 'health',
+    action: 'read:appointments',
+    effect: 'allow',
+    reason: 'granted: read:appointments on behalf of bob@example.com',
+    credentialStatus: 'Present',
+  },
+  {
+    timestamp: iso(subDays(now, 1)),
+    caller: chatCaller,
+    callerVerified: true,
+    onBehalfOf: 'alice@example.com',
+    target: 'marketplace',
+    action: 'write:order',
+    effect: 'deny',
+    reason: 'denied: no grant for write:order',
+    credentialStatus: null,
+  },
+]
+
+/** Who/what may act as each person (a projection of grants). */
+export const delegations: Delegation[] = [
+  {
+    caller: chatCaller,
+    target: 'health',
+    displayName: 'Health Portal',
+    actions: ['read:*'],
+    stepUpActions: ['write:*', 'pay:*'],
+    isAutomation: false,
+    onBehalfOf: 'alice@example.com',
+  },
+  {
+    caller: chatCaller,
+    target: 'utility',
+    displayName: 'Utility Co',
+    actions: ['read:*'],
+    stepUpActions: ['write:pay'],
+    isAutomation: false,
+    onBehalfOf: 'alice@example.com',
+  },
+  {
+    caller: chatCaller,
+    target: 'health',
+    displayName: 'Health Portal',
+    actions: ['read:appointments'],
+    stepUpActions: [],
+    isAutomation: false,
+    onBehalfOf: 'bob@example.com',
+  },
+  {
+    caller: 'spiffe://tessera.local/scheduler',
+    target: 'utility',
+    displayName: 'Utility Co',
+    actions: ['read:bill'],
+    stepUpActions: [],
+    isAutomation: true,
+    onBehalfOf: null,
+  },
+]
+
+/** The loaded connector catalog (a projection of recipes + egress posture). */
+export const modules: Module[] = [
+  {
+    target: 'health',
+    displayName: 'Health Portal',
+    driver: 'browser',
+    egress: 'none',
+    egressEnabled: false,
+    actions: ['read:selftest'],
+    toolCount: 0,
+    connectionCount: 2,
+    upstreamHost: null,
+  },
+  {
+    target: 'utility',
+    displayName: 'Utility Co',
+    driver: 'browser',
+    egress: 'http',
+    egressEnabled: true,
+    actions: ['read:bill', 'write:pay'],
+    toolCount: 2,
+    connectionCount: 1,
+    upstreamHost: 'api.utility.example.com',
+  },
+]

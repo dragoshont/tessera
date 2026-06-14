@@ -8,10 +8,12 @@ import { ThemeProvider } from './components/theme/theme-provider'
 import { ToastProvider } from './components/ui/toast'
 import { AccountsPage } from './pages/AccountsPage'
 import { ActionRequiredPage } from './pages/ActionRequiredPage'
+import { ActivityAccessPage } from './pages/ActivityAccessPage'
 import { AllConnectionsPage } from './pages/AllConnectionsPage'
 import { AuthCallbackPage } from './pages/AuthCallbackPage'
 import { ConnectWizardPage } from './pages/ConnectWizardPage'
 import { LiveHandoffPage } from './pages/LiveHandoffPage'
+import { ObservabilityPage } from './pages/ObservabilityPage'
 import { PersonDetailPage } from './pages/PersonDetailPage'
 import { SignInPage } from './pages/SignInPage'
 import { UsersPage } from './pages/UsersPage'
@@ -63,12 +65,14 @@ function AppRoutes() {
           <Route path="/" element={<Navigate to="/accounts" replace />} />
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/accounts/:connectionId" element={<AccountsPage />} />
+          <Route path="/activity" element={<ActivityAccessPage />} />
           <Route path="/connect" element={<ConnectWizardPage />} />
           <Route path="/handoff/:connectionId" element={<LiveHandoffPage />} />
           <Route path="/action-required" element={<ActionRequiredPage />} />
           <Route path="/admin/users" element={<UsersPage />} />
           <Route path="/admin/users/:principal" element={<PersonDetailPage />} />
           <Route path="/admin/connections" element={<AllConnectionsPage />} />
+          <Route path="/admin/observability" element={<ObservabilityPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/accounts" replace />} />

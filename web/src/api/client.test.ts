@@ -182,3 +182,94 @@ describe('createInMemoryClient — createConnection', () => {
     expect(owned.map((connection) => connection.connectionId)).toContain('health:dave@example.com')
   })
 })
+
+describe('createInMemoryClient — awareness dashboard (ADR 0017)', () => {
+  it('getActivity self-scopes to a principal and summarizes the whole window', async () => {
+    const client = createInMemoryClient()
+
+    const self = await client.getActivity('alice@example.com')
+    // Only alice's rows; none of bob's leak in.
+    expect(self.entries.every((row) => row.onBehalfOf === 'alice@example.com')).toBe(true)
+    // The summary spans the scoped window and counts effects.
+    expect(self.summary.total).toBe(self.entries.length)
+    expect(self.summary.allow + self.summary.deny + self.summary.stepUp).toBe(self.summary.total)
+  })
+
+  it('getActivity returns everyone when no principal is given, newest-first, capped by limit', async () => {
+    const client = createInMemoryClient()
+
+    const all = await client.getActivity(undefined, 2)
+    expect(all.entries).toHaveLength(2)
+    // newest-first
+    expect(all.entries[0].timestamp >= all.entries[1].timestamp).toBe(true)
+    // summary still spans the full window (more than the 2 shown)
+    expect(all.summary.total).toBeGreaterThan(2)
+  })
+
+  it('listDelegations self-scopes; the all-view includes pure automation', async () => {
+    const client = createInMemoryClient()
+
+    const mine = await client.listDelegations('bob@example.com')
+    expect(mine.every((d) => d.onBehalfOf === 'bob@example.com')).toBe(true)
+
+    const everyone = await client.listDelegations()
+    expect(everyone.some((d) => d.isAutomation && d.onBehalfOf === null)).toBe(true)
+  })
+
+  it('listModules exposes egress posture without any upstream path', async () => {
+    const client = createInMemoryClient()
+    const modules = await client.listModules()
+
+    const statusOnly = modules.find((m) => m.egress === 'none')
+    expect(statusOnly?.upstreamHost).toBeNull()
+    // host only — never a full URL/path
+    expect(JSON.stringify(modules)).not.toContain('/v1')
+  })
+
+  it('getSchedule defaults to an honest "none" owner with no faked run times', async () => {
+    const client = createInMemoryClient()
+    const schedule = await client.getSchedule('health:carol@example.com')
+
+    expect(schedule.rotationOwner).toBe('none')
+    expect(schedule.refreshConfigured).toBe(false)
+    expect(schedule.lastRotatedAt).toBeNull()
+    expect(schedule.nextRotationAt).toBeNull()
+  })
+})
+
+describe('createHttpClient — awareness dashboard (ADR 0017)', () => {
+  it('GETs /portal/audit with principal + limit query params', async () => {
+    const feed = { entries: [], summary: { total: 0, allow: 0, deny: 0, stepUp: 0, byTarget: {}, byCaller: {}, since: null, until: null } }
+    fetchMock.mockResolvedValueOnce(makeResponse({ status: 200, body: feed }))
+    const client = createHttpClient({ baseUrl: 'http://broker.test/api' })
+
+    await client.getActivity('alice@example.com', 50)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://broker.test/api/portal/audit?principal=alice%40example.com&limit=50',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+
+  it('GETs /portal/delegations (self when no principal)', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse({ status: 200, body: [] }))
+    const client = createHttpClient({ baseUrl: 'http://broker.test/api' })
+
+    await client.listDelegations()
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://broker.test/api/portal/delegations',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+
+  it('GETs the schedule with the connection id URL-encoded', async () => {
+    const schedule = { connectionId: 'health:alice@example.com', rotationOwner: 'external', refreshConfigured: true, detail: '', lastRotatedAt: null, nextRotationAt: null }
+    fetchMock.mockResolvedValueOnce(makeResponse({ status: 200, body: schedule }))
+    const client = createHttpClient({ baseUrl: 'http://broker.test/api' })
+
+    await client.getSchedule('health:alice@example.com')
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://broker.test/api/portal/connections/health%3Aalice%40example.com/schedule',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+})

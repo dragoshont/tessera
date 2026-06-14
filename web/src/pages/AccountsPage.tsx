@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom'
-import { useConnections, useCurrentUser } from '../api/hooks'
+import { useConnections, useCurrentUser, useSchedule } from '../api/hooks'
 import { AccountsTable } from '../components/accounts/AccountsTable'
 import { ConnectionDrawer } from '../components/accounts/ConnectionDrawer'
 
@@ -13,6 +13,9 @@ export function AccountsPage() {
   // Strictly self-scope: never render anyone else's connections (anti-pattern #6).
   const ownedConnections = owner ? connections : []
   const selected = ownedConnections.find((c) => c.connectionId === connectionId) ?? null
+  // The selected connection's rotation schedule (ADR 0017) — "is an automatic job
+  // keeping this session warm?" Fetched only while a connection is open.
+  const { data: schedule } = useSchedule(selected?.connectionId)
 
   // Re-seed / Seed now launch the Live hand-off; the connectionId is encoded since
   // the broker keys it as "{provider}:{principal}".
@@ -37,6 +40,7 @@ export function AccountsPage() {
       <ConnectionDrawer
         connection={selected}
         open={Boolean(connectionId)}
+        schedule={schedule}
         onOpenChange={(open) => {
           if (!open) navigate('/accounts')
         }}

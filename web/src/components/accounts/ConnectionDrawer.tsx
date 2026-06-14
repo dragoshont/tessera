@@ -1,5 +1,5 @@
 import { RotateCw, Trash2 } from 'lucide-react'
-import type { Connection } from '../../data/types'
+import type { Connection, Schedule } from '../../data/types'
 import { formatExpiry, relativeTime } from '../../lib/format'
 import { Alert, AlertDescription } from '../ui/alert'
 import { Button } from '../ui/button'
@@ -24,6 +24,20 @@ export interface ConnectionDrawerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onAction?: (action: ConnectionDrawerAction, connection: Connection) => void
+  /** The connection's rotation schedule (ADR 0017) — shown as the auto-refresh row when present. */
+  schedule?: Schedule
+}
+
+/** Phrases the rotation owner for the auto-refresh detail row (honest about who rotates). */
+function rotationLabel(schedule: Schedule): string {
+  switch (schedule.rotationOwner) {
+    case 'tessera':
+      return 'Automatic · Tessera'
+    case 'external':
+      return 'Automatic · external'
+    default:
+      return 'Manual · re-seed by hand'
+  }
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -68,7 +82,7 @@ function ActivityTimeline({ connection }: { connection: Connection }) {
   )
 }
 
-export function ConnectionDrawer({ connection, open, onOpenChange, onAction }: ConnectionDrawerProps) {
+export function ConnectionDrawer({ connection, open, onOpenChange, onAction, schedule }: ConnectionDrawerProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       {connection ? (
@@ -128,6 +142,7 @@ export function ConnectionDrawer({ connection, open, onOpenChange, onAction }: C
                     value={connection.lastUsedAt ? relativeTime(connection.lastUsedAt) : '—'}
                   />
                   <DetailRow label="expires" value={formatExpiry(connection)} />
+                  {schedule ? <DetailRow label="auto-refresh" value={rotationLabel(schedule)} /> : null}
                   <DetailRow label="acts as" value={connection.ownerPrincipal} />
                 </section>
               </TabsContent>

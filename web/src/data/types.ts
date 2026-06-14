@@ -120,3 +120,89 @@ export interface LiveViewHandle {
 
 /** Either a live hand-off handle, or a calm reason it's unavailable (fail-closed 503). */
 export type LiveViewResult = { handle: LiveViewHandle } | { unavailable: string }
+
+// ── Awareness dashboard (ADR 0017) ──────────────────────────────────────────
+// Read-only, secret-free projections that answer "who/what may act as me, what
+// modules are loaded, is a job running, and what happened?" No secret value
+// appears in any of these — only ids, enums, counts, and timestamps.
+
+/** The decision outcome of one brokering call. */
+export type AuditEffect = 'allow' | 'deny' | 'step-up'
+
+/** One secret-free activity row (`GET /portal/audit`). */
+export interface AuditRow {
+  timestamp: string
+  /** The caller workload (a SPIFFE id / MCP id) — never a human secret. */
+  caller: string
+  callerVerified: boolean
+  /** The person the call acted for, or null for pure automation. */
+  onBehalfOf: string | null
+  target: string
+  action: string
+  effect: AuditEffect
+  reason: string
+  /** The resolved credential *status* (present/absent/…), never a value. */
+  credentialStatus: string | null
+}
+
+/** The rollup over the scoped activity window. */
+export interface AuditSummary {
+  total: number
+  allow: number
+  deny: number
+  stepUp: number
+  byTarget: Record<string, number>
+  byCaller: Record<string, number>
+  since: string | null
+  until: string | null
+}
+
+/** The activity feed: newest-first rows + a window summary (`GET /portal/audit`). */
+export interface AuditFeed {
+  entries: AuditRow[]
+  summary: AuditSummary
+}
+
+/** One delegation — who/what may act as a person (`GET /portal/delegations`). */
+export interface Delegation {
+  /** The caller workload the grant authorizes. */
+  caller: string
+  target: string
+  displayName: string
+  actions: string[]
+  /** Actions that require a human step-up confirmation before proceeding. */
+  stepUpActions: string[]
+  /** True when the grant is pure automation (no delegated human). */
+  isAutomation: boolean
+  onBehalfOf: string | null
+}
+
+/** A loaded connector and what it can do (`GET /portal/modules`). */
+export interface Module {
+  target: string
+  displayName: string
+  driver: string
+  /** "none" (status-only) or "http" (injectable upstream). */
+  egress: 'none' | 'http'
+  /** True only when http AND the broker's global egress gate is on. */
+  egressEnabled: boolean
+  actions: string[]
+  toolCount: number
+  connectionCount: number
+  /** The upstream host (host only, never a path/secret), or null. */
+  upstreamHost: string | null
+}
+
+/** Who owns rotating a connection's session. */
+export type RotationOwner = 'none' | 'external' | 'tessera'
+
+/** One connection's rotation schedule (`GET /portal/connections/{id}/schedule`). */
+export interface Schedule {
+  connectionId: string
+  rotationOwner: RotationOwner
+  refreshConfigured: boolean
+  detail: string
+  /** Populated only once Tessera itself owns + tracks rotation (Mode U). */
+  lastRotatedAt: string | null
+  nextRotationAt: string | null
+}
