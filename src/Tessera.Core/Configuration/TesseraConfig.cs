@@ -92,6 +92,21 @@ public sealed class EgressOptions
     public IReadOnlyList<string> AllowedHosts { get; init; } = [];
 }
 
+/// <summary>Admin-portal settings (ADR 0016). The portal is a thin convenience
+/// layer; the only decision it owns is "who is an operator" — a small allow-list,
+/// never a database (spec §7b).</summary>
+public sealed class PortalOptions
+{
+    /// <summary>
+    /// The admins allow-list: verified principals (<c>oid</c> / <c>preferred_username</c>,
+    /// e.g. an email) who may enter the operator surface. Everyone else is a Member
+    /// who sees only their own connections. Empty = no operator (the portal is then
+    /// self-service-only). This is the <em>only</em> portal authorization datum, and
+    /// it lives in config so it is a reviewable diff like every other rule (ADR 0008).
+    /// </summary>
+    public IReadOnlyList<string> Admins { get; init; } = [];
+}
+
 /// <summary>The full broker configuration, with fail-closed validation.</summary>
 public sealed class TesseraConfig
 {
@@ -109,6 +124,9 @@ public sealed class TesseraConfig
 
     /// <summary>Injection-egress settings.</summary>
     public EgressOptions Egress { get; init; } = new();
+
+    /// <summary>Admin-portal settings (the admins allow-list).</summary>
+    public PortalOptions Portal { get; init; } = new();
 
     /// <summary>
     /// Returns a list of problems. Empty list == valid. These checks encode the
