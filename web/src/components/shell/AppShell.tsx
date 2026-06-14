@@ -92,7 +92,12 @@ function SidebarFooter({ user, onSignOut }: { user: Person | null; onSignOut: ()
       <div className="flex items-center gap-2 rounded-lg px-2 py-2">
         <Avatar name={user?.principal ?? '?'} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{user?.principal ?? 'Signed out'}</div>
+          <div className="flex items-center gap-1 text-sm font-medium">
+            <span className="truncate">{user?.principal ?? 'Signed out'}</span>
+            {user ? (
+              <span className="shrink-0 text-xs font-normal text-muted-foreground">(you)</span>
+            ) : null}
+          </div>
           <div className="text-xs text-muted-foreground">{user?.role ?? ''}</div>
         </div>
       </div>

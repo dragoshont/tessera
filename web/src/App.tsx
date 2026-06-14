@@ -3,11 +3,15 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom
 import { TesseraClientProvider } from './api/hooks'
 import { SessionProvider, useSession } from './app/session'
 import { AppShell } from './components/shell/AppShell'
+import { TesseraMark } from './components/common/TesseraMark'
 import { ThemeProvider } from './components/theme/theme-provider'
+import { ToastProvider } from './components/ui/toast'
 import { AccountsPage } from './pages/AccountsPage'
 import { ActionRequiredPage } from './pages/ActionRequiredPage'
 import { AllConnectionsPage } from './pages/AllConnectionsPage'
+import { AuthCallbackPage } from './pages/AuthCallbackPage'
 import { ConnectWizardPage } from './pages/ConnectWizardPage'
+import { LiveHandoffPage } from './pages/LiveHandoffPage'
 import { PersonDetailPage } from './pages/PersonDetailPage'
 import { SignInPage } from './pages/SignInPage'
 import { UsersPage } from './pages/UsersPage'
@@ -21,9 +25,23 @@ const queryClient = new QueryClient({
   },
 })
 
+function BootSplash() {
+  // Brief, calm bootstrap while /portal/config + /portal/me resolve — not an
+  // infinite spinner; it resolves to either the shell or the sign-in screen.
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-surface" aria-live="polite">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <TesseraMark className="h-10 w-10 animate-pulse text-accent" />
+        <p className="text-sm">Checking your session…</p>
+      </div>
+    </div>
+  )
+}
+
 function RequireAuth() {
-  const { currentUser } = useSession()
-  if (!currentUser) return <Navigate to="/sign-in" replace />
+  const { status } = useSession()
+  if (status === 'loading') return <BootSplash />
+  if (status === 'anonymous') return <Navigate to="/sign-in" replace />
   return <Outlet />
 }
 
@@ -39,12 +57,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/sign-in" element={<SignInPage />} />
+      <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route element={<RequireAuth />}>
         <Route element={<RootLayout />}>
           <Route path="/" element={<Navigate to="/accounts" replace />} />
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/accounts/:connectionId" element={<AccountsPage />} />
           <Route path="/connect" element={<ConnectWizardPage />} />
+          <Route path="/handoff/:connectionId" element={<LiveHandoffPage />} />
           <Route path="/action-required" element={<ActionRequiredPage />} />
           <Route path="/admin/users" element={<UsersPage />} />
           <Route path="/admin/users/:principal" element={<PersonDetailPage />} />
@@ -61,11 +81,13 @@ export function App() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <TesseraClientProvider>
-          <SessionProvider>
-            <BrowserRouter>
-              <AppRoutes />
-            </BrowserRouter>
-          </SessionProvider>
+          <ToastProvider>
+            <SessionProvider>
+              <BrowserRouter>
+                <AppRoutes />
+              </BrowserRouter>
+            </SessionProvider>
+          </ToastProvider>
         </TesseraClientProvider>
       </QueryClientProvider>
     </ThemeProvider>

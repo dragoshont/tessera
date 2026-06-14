@@ -21,11 +21,26 @@ extension microsoftGraphV1_0
 @description('Public hostname of the chat (LibreChat), e.g. chat.example.com')
 param chatDomain string
 
+@description('Public hostname of the Tessera admin portal, e.g. tessera.example.com. Leave empty to register only the loopback redirect (port-forward access).')
+param portalDomain string = ''
+
 @description('OIDC issuer of the Kubernetes cluster for Tessera workload-identity federation. LEAVE EMPTY for a private/homelab cluster Entra cannot reach — Tessera then keeps using its service-principal secret (the deployed, working path) and NO federated credential is created.')
 param clusterOidcIssuer string = ''
 
 @description('Kubernetes namespace:serviceaccount subject for the Tessera broker (only used when clusterOidcIssuer is set).')
 param tesseraServiceAccountSubject string = 'system:serviceaccount:default:tessera'
+
+// The admin-portal SPA (ADR 0016) signs in as a PUBLIC client (Authorization Code
+// + PKCE, no secret) against THIS same app, so its access token's `aud` is this
+// app id — exactly what the broker validates (Flow B shared audience). We register
+// the SPA redirect URIs here. The loopback URL covers `kubectl port-forward`
+// access (the default, cluster-internal posture); the portalDomain URL covers an
+// optional ingress. Adding a redirect URI needs no re-consent.
+var portalSpaRedirectUris = concat(
+  [
+    'http://localhost:8080/auth/callback'
+  ],
+  empty(portalDomain) ? [] : [ 'https://${portalDomain}/auth/callback' ])
 
 // ── 1. Chat OIDC app ─────────────────────────────────────────────────────────
 // signInAudience = AzureADandPersonalMicrosoftAccount so a user who NEVER used
@@ -46,6 +61,11 @@ resource chatApp 'Microsoft.Graph/applications@v1.0' = {
       enableIdTokenIssuance: false
       enableAccessTokenIssuance: false
     }
+  }
+  // The admin-portal SPA reuses this app as its OIDC client (public, PKCE) so its
+  // access token carries this app's `aud` — what the broker validates (ADR 0016).
+  spa: {
+    redirectUris: portalSpaRedirectUris
   }
   // Expose an API + scope so OPENID_REUSE_TOKENS yields an ACCESS token whose
   // `aud` is THIS app id. In iteration 1 (Flow B / shared audience, ADR 0011) the

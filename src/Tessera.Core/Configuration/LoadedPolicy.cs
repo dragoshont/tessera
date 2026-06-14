@@ -114,4 +114,62 @@ public sealed record LoadedPolicy(
         "cookie" or "cookies" => InjectionKind.Cookies,
         _ => InjectionKind.None,
     };
+
+    /// <summary>
+    /// Maps this policy back to its wire DTO (the reverse of <see cref="FromDto"/>)
+    /// so it can be persisted by <c>ConfigLoader.SavePolicy</c>. Used by the admin
+    /// portal's add-connection write — the document round-trips faithfully so a
+    /// UI-added connection stays a reviewable change in the same file (ADR 0008).
+    /// </summary>
+    internal PolicyDocumentDto ToDocument() => new()
+    {
+        Grants = Grants
+            .Select(g => new GrantDto
+            {
+                Caller = g.Caller,
+                Target = g.Target,
+                Actions = [.. g.Actions],
+                OnBehalfOf = g.OnBehalfOf,
+                StepUpActions = g.StepUpActions is { Count: > 0 } ? [.. g.StepUpActions] : null,
+            })
+            .ToList(),
+        Bindings = Bindings
+            .Select(b => new BindingDto
+            {
+                Target = b.Target,
+                Credential = b.Credential,
+                OnBehalfOf = b.Principal,
+            })
+            .ToList(),
+        Recipes = Recipes
+            .Select(r => new RecipeDto
+            {
+                Target = r.Target,
+                Driver = r.Driver,
+                Egress = r.Egress == EgressMode.Http ? "http" : "none",
+                UpstreamBaseUrl = r.UpstreamBaseUrl,
+                Injection = r.Injection switch
+                {
+                    InjectionKind.BearerToken => "bearer",
+                    InjectionKind.Cookies => "cookies",
+                    _ => null,
+                },
+                Actions = r.Actions is { Count: > 0 } ? [.. r.Actions] : null,
+                Tools = r.Tools is { Count: > 0 }
+                    ? r.Tools.Select(t => new RecipeToolDto
+                    {
+                        Name = t.Name,
+                        Method = t.Method,
+                        Path = t.Path,
+                        Action = t.Action,
+                        StepUp = t.StepUp,
+                        Description = t.Description,
+                    }).ToList()
+                    : null,
+                ExtraHeaders = r.ExtraHeaders is { Count: > 0 } ? new Dictionary<string, string>(r.ExtraHeaders) : null,
+                CookieMap = r.CookieMap is { Count: > 0 } ? new Dictionary<string, string>(r.CookieMap) : null,
+                Description = r.Description,
+            })
+            .ToList(),
+    };
 }

@@ -2,7 +2,9 @@ import { expect, test } from '@playwright/test'
 
 async function signIn(page: import('@playwright/test').Page) {
   await page.goto('/')
-  await page.getByRole('button', { name: /sign in with microsoft/i }).click()
+  // Demo/dev loopback: the developer card signs in as a chosen principal.
+  await page.getByLabel('Developer sign-in (local only)').fill('alice@example.com')
+  await page.getByRole('button', { name: /continue/i }).click()
   await expect(page).toHaveURL(/\/accounts$/)
 }
 

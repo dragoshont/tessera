@@ -38,6 +38,16 @@ public sealed class OidcOptions
     /// </summary>
     public IReadOnlyList<string> AllowedTenants { get; init; } = [];
 
+    /// <summary>
+    /// The OAuth scope the admin-portal SPA requests at sign-in (ADR 0016). It must
+    /// yield an access token whose <c>aud</c> equals <see cref="Audience"/> so the
+    /// broker validates it. Default (empty) ⇒ the portal config endpoint derives
+    /// <c>openid profile email &lt;audience&gt;/.default</c>. Override it (e.g. to
+    /// <c>api://&lt;audience&gt;/access</c>) when the app exposes a named scope via
+    /// an Application ID URI. Only consumed by the portal sign-in, never the broker.
+    /// </summary>
+    public string SpaScope { get; init; } = "";
+
     /// <summary>True once an audience is configured (delegation can be enforced).</summary>
     [JsonIgnore]
     public bool DelegationEnabled => !string.IsNullOrWhiteSpace(Audience);
@@ -105,6 +115,13 @@ public sealed class PortalOptions
     /// it lives in config so it is a reviewable diff like every other rule (ADR 0008).
     /// </summary>
     public IReadOnlyList<string> Admins { get; init; } = [];
+
+    /// <summary>
+    /// Optional path to the built SPA (the <c>web/dist</c> output) the host should
+    /// serve. When set and the directory exists, the broker serves the admin portal
+    /// at <c>/</c> alongside its API (same origin → no CORS). Unset = API only.
+    /// </summary>
+    public string? WebRoot { get; init; }
 }
 
 /// <summary>The full broker configuration, with fail-closed validation.</summary>

@@ -24,7 +24,11 @@ set -eu
 
 cd "$(git rev-parse --show-toplevel)"
 
-patterns='alice79|bob84|health-portal|account-[abc]-session|examplekv|hont\.ro|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+# Real homelab identities/secrets. The bare first names use word boundaries (\b) so
+# they catch "alice"/"bob"/"carol" as standalone words but NOT the public
+# GitHub handle "dragoshont" (no boundary inside it). Lesson: an earlier doc slipped
+# in real first names because the gate only matched the numeric-suffixed handles.
+patterns='alice79|bob84|\balice\b|\bbob\b|\bcarol\b|health-portal|account-[abc]-session|examplekv|hont\.ro|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 
 # Exclude this script + SECURITY.md (maintainer contact) + the CI file (which
 # documents the same patterns). Then drop the allowlisted public/placeholder

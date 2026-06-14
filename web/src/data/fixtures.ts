@@ -1,5 +1,5 @@
 import { addDays, subDays, subHours } from 'date-fns'
-import type { Connection, Person } from './types'
+import type { Connection, LiveViewHandle, Person, PortalConfig, Recipe } from './types'
 
 // Generic identities only — never real names (spec first principles).
 // Timestamps are anchored to "now" so relative phrasing ("12 days ago") stays
@@ -128,3 +128,44 @@ export const allExpiringConnections: Connection[] = aliceConnections.map((connec
   expiresAt: iso(addDays(now, 2)),
   expiryIsEstimated: false,
 }))
+
+/**
+ * A demo live-view handle for stories, the page's `?demo=1` affordance, and tests.
+ * `liveViewUrl` points at a local placeholder canvas (`public/handoff-demo.html`),
+ * never a real worker — so the Live stage is fully demoable on fixtures. The real
+ * worker `act()` channel is a labeled backend gap (spec R1); without a backend the
+ * honest default is the fail-closed Unavailable state.
+ */
+export const demoLiveViewHandle: LiveViewHandle = {
+  liveViewUrl: '/handoff-demo.html',
+  mode: 'readwrite',
+  sessionTtlSeconds: 300,
+  // Anchored ahead of "now" so the countdown reads a healthy ~5:00 when rendered.
+  expiresAt: new Date(now.getTime() + 5 * 60_000).toISOString(),
+  targetHostname: 'portal.example-health.com',
+}
+
+/**
+ * The recipes the connect wizard offers (mirrors `GET /portal/recipes`). The
+ * `provider` slug is what the broker keys a connection on ("{provider}:{principal}");
+ * `displayName` is the human label the picker and `ProviderIcon` render.
+ */
+export const recipes: Recipe[] = [
+  { provider: 'health', displayName: 'Health Portal' },
+  { provider: 'utility', displayName: 'Utility Co' },
+  { provider: 'marketplace', displayName: 'Marketplace' },
+  { provider: 'webmail', displayName: 'Webmail' },
+]
+
+/** Sign-in config presets for the three `authMode`s the SignIn surface renders. */
+export const portalConfigDev: PortalConfig = { authMode: 'dev', devLoopback: true }
+export const portalConfigOidc: PortalConfig = {
+  authMode: 'oidc',
+  devLoopback: false,
+  oidc: {
+    authority: 'https://login.microsoftonline.com/common/v2.0',
+    clientId: '00000000-0000-0000-0000-000000000000',
+    scope: 'openid profile email',
+  },
+}
+export const portalConfigNone: PortalConfig = { authMode: 'none', devLoopback: false }

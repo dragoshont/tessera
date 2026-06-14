@@ -127,11 +127,17 @@ public static class BrokerHost
         // Admin-portal read-model (ADR 0016): people + connection health projected
         // over the policy + store status, plus a fail-closed live-view provider for
         // the captcha hand-off. Both are secret-free; the live-view provider opens no
-        // remote browser until a worker adapter is wired.
-        services.AddSingleton(new PortalService(policy, resolver, config.Portal.Admins));
+        // remote browser until a worker adapter is wired. Adding a connection writes
+        // a binding back to the policy document (files stay the source of truth);
+        // on a read-only mount (GitOps) the write is skipped and the add is in-memory.
+        Action<LoadedPolicy>? persist = string.IsNullOrEmpty(policyPath)
+            ? null
+            : updated => ConfigLoader.SavePolicy(policyPath, updated);
+        services.AddSingleton(new PortalService(policy, resolver, config.Portal.Admins, persist));
         services.AddSingleton<Tessera.Core.Portal.ILiveViewProvider>(Tessera.Core.Portal.DisabledLiveViewProvider.Instance);
 
         var app = builder.Build();
+        ServePortalSpa(app, config);
         MapEndpoints(app);
         app.MapPortalEndpoints();
         app.MapMcp("/mcp");
@@ -200,6 +206,30 @@ public static class BrokerHost
         app.MapPost("/v1/broker", () => Results.Json(
             new { error = "broker endpoint is fail-closed: no caller authenticator configured (mTLS/SVID auth plane not enabled). Use the MCP surface at /mcp." },
             statusCode: 503));
+    }
+
+    /// <summary>
+    /// Serves the built admin-portal SPA at <c>/</c> when <c>portal.webRoot</c> points
+    /// at an existing directory (the <c>web/dist</c> output). Same origin as the API,
+    /// so the SPA's fetches need no CORS and no second deployment. The SPA fallback
+    /// (index.html for client-side routes) has the lowest priority, so it never
+    /// shadows <c>/portal</c>, <c>/mcp</c>, or the health endpoints. Unset = API only,
+    /// so existing API-only deployments are unaffected.
+    /// </summary>
+    private static void ServePortalSpa(WebApplication app, TesseraConfig config)
+    {
+        var webRoot = config.Portal.WebRoot;
+        if (string.IsNullOrWhiteSpace(webRoot) || !Directory.Exists(webRoot))
+        {
+            return;
+        }
+
+        var fileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.GetFullPath(webRoot));
+        var staticOptions = new StaticFileOptions { FileProvider = fileProvider };
+        app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
+        app.UseStaticFiles(staticOptions);
+        // Client-side routes (e.g. /accounts, /admin/users) fall back to the SPA shell.
+        app.MapFallbackToFile("index.html", staticOptions);
     }
 
     private static void EmitStartupBanner(TesseraConfig config, BrokerStatus status)

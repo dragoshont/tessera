@@ -41,3 +41,9 @@ public sealed record PersonView(
     PortalRole Role,
     int ConnectionCount,
     int NeedsAttentionCount);
+
+/// <summary>A provider a connection can be created against — the connect wizard's
+/// provider picker. A recipe target + its human label, never any secret.</summary>
+/// <param name="Provider">The recipe target (e.g. <c>health-portal</c>).</param>
+/// <param name="DisplayName">The human label (the recipe description, else the target).</param>
+public sealed record RecipeSummary(string Provider, string DisplayName);

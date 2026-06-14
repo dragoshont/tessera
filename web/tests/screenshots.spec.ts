@@ -7,7 +7,8 @@ import { expect, test, type Page } from '@playwright/test'
 
 async function signIn(page: Page) {
   await page.goto('/')
-  await page.getByRole('button', { name: /sign in with microsoft/i }).click()
+  await page.getByLabel('Developer sign-in (local only)').fill('alice@example.com')
+  await page.getByRole('button', { name: /continue/i }).click()
   await expect(page).toHaveURL(/\/accounts$/)
 }
 
@@ -23,7 +24,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.goto('/')
     await setTheme(page, theme)
     await page.goto('/sign-in')
-    await expect(page.getByRole('button', { name: /sign in with microsoft/i })).toBeVisible()
+    await expect(page.getByText('Developer sign-in (local only)')).toBeVisible()
     await page.screenshot({ path: `test-results/screens/${tag}-sign-in.png`, fullPage: true })
 
     // My accounts (mixed health).
@@ -46,5 +47,10 @@ for (const theme of ['light', 'dark'] as const) {
     await page.getByRole('link', { name: 'Users' }).click()
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
     await page.screenshot({ path: `test-results/screens/${tag}-users.png`, fullPage: true })
+
+    // Connect wizard — provider picker (step 1).
+    await page.goto('/connect')
+    await expect(page.getByRole('heading', { name: 'Which account?' })).toBeVisible()
+    await page.screenshot({ path: `test-results/screens/${tag}-connect-provider.png`, fullPage: true })
   })
 }

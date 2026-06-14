@@ -268,7 +268,7 @@ already exists**, plus two small mutable sets that start in-memory/file-backed:
 | **Job queue** (bulk re-seed) | transient work items | **No** — in-memory first; file/queue later if it must survive restarts. |
 | **Audit** | the broker's existing **append-only secret-free audit** | **No** — already exists; the portal reads it. |
 
-So the "users" the maintainer wants to see (**alice = admin; bob + carol =
+So the "users" an operator sees (**e.g. alice = admin; bob + carol =
 members**) are **not rows in a database** — they are the verified OIDC principals
 that already appear in the policy files, classified by the admins allow-list. A DB
 becomes worth it only at the scale ADR 0008 already names (thousands of tenants /

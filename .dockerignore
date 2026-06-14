@@ -15,3 +15,10 @@ deploy/
 *.md
 .gitignore
 .dockerignore
+# Web build artifacts — the SPA is built fresh inside the image from source +
+# the lockfile, so the local node_modules/dist/test output never enter the context.
+web/node_modules/
+web/dist/
+web/storybook-static/
+web/test-results/
+web/playwright-report/

@@ -176,6 +176,84 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Fact]
+    public async Task Config_reports_loopback_dev_mode()
+    {
+        using var doc = JsonDocument.Parse(await _client.GetStringAsync(new Uri("/portal/config", UriKind.Relative)));
+        Assert.Equal("dev", doc.RootElement.GetProperty("authMode").GetString());
+        Assert.True(doc.RootElement.GetProperty("devLoopback").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Recipes_list_the_providers_for_the_wizard()
+    {
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/recipes"))).Content.ReadAsStringAsync());
+        var providers = doc.RootElement.EnumerateArray().Select(r => r.GetProperty("provider").GetString()).ToArray();
+        Assert.Contains("health-portal", providers);
+    }
+
+    [Fact]
+    public async Task Adding_a_connection_makes_a_new_person_and_connection_appear()
+    {
+        // The "add a person to the portal" path: an operator connects a new person
+        // (carol) to a provider. She wasn't in any grant/binding before.
+        const string newPerson = "carol@example.com";
+        var add = await _client.SendAsync(AsJson(Admin, HttpMethod.Post, "/portal/connections",
+            new { provider = "health-portal", principal = newPerson, credential = "hp-carol" }));
+        Assert.Equal(HttpStatusCode.Created, add.StatusCode);
+
+        using var created = JsonDocument.Parse(await add.Content.ReadAsStringAsync());
+        Assert.Equal($"health-portal:{newPerson}", created.RootElement.GetProperty("connectionId").GetString());
+        // No bundle for hp-carol yet → honestly "absent", not faked live.
+        Assert.Equal("absent", created.RootElement.GetProperty("status").GetString());
+
+        // She now shows up in the Users view …
+        using var people = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/people"))).Content.ReadAsStringAsync());
+        Assert.Contains(people.RootElement.EnumerateArray(), p => p.GetProperty("principal").GetString() == newPerson);
+
+        // … and her connection is listable.
+        using var conns = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/connections?principal={newPerson}"))).Content.ReadAsStringAsync());
+        Assert.Contains(conns.RootElement.EnumerateArray(), c => c.GetProperty("provider").GetString() == "health-portal");
+    }
+
+    [Fact]
+    public async Task Adding_a_connection_persists_to_the_policy_document()
+    {
+        const string newPerson = "dave@example.com";
+        var add = await _client.SendAsync(AsJson(Admin, HttpMethod.Post, "/portal/connections",
+            new { provider = "health-portal", principal = newPerson, credential = "hp-dave" }));
+        Assert.Equal(HttpStatusCode.Created, add.StatusCode);
+
+        // Files stay the source of truth: the binding is written back to grants.json.
+        var doc = await File.ReadAllTextAsync(Path.Combine(_dir, "grants.json"));
+        Assert.Contains("hp-dave", doc, StringComparison.Ordinal);
+        Assert.Contains(newPerson, doc, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_member_cannot_add_a_connection_for_someone_else()
+    {
+        var response = await _client.SendAsync(AsJson(Member, HttpMethod.Post, "/portal/connections",
+            new { provider = "health-portal", principal = Admin, credential = "hp-x" }));
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_member_can_add_their_own_connection()
+    {
+        var response = await _client.SendAsync(AsJson(Member, HttpMethod.Post, "/portal/connections",
+            new { provider = "health-portal", principal = Member, credential = "hp-bob-2" }));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    private static HttpRequestMessage AsJson(string principal, HttpMethod method, string path, object body)
+    {
+        var req = new HttpRequestMessage(method, new Uri(path, UriKind.Relative));
+        req.Headers.Add(DevHeader, principal);
+        req.Content = new StringContent(JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json");
+        return req;
+    }
+
     private static int FreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

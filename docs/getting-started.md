@@ -142,6 +142,68 @@ curl -s localhost:8080/status | jq      # store kind, delegation = fail-closed, 
 
 ---
 
+## 6. The admin portal *(optional, but the friendly way in)*
+
+Tessera ships a small web **admin portal** ([ADR 0016](adr/0016-admin-portal.md))
+so a human can see what's connected and add a person without hand-editing YAML. It
+is a thin, OIDC-authenticated layer over the same model — **files stay the source
+of truth, and it never shows a secret value.** Three surfaces: **My accounts**
+(your connections' health), **Users** (operator view of everyone), and a **connect
+wizard** (pick provider → name the person → seed → done).
+
+The SPA is **baked into the broker image** and served at `/` — there is nothing
+extra to deploy. Turn it on with two settings:
+
+1. **Name the operators** — the only portal authorization datum is an allow-list
+   (config, not a database):
+
+   ```jsonc
+   // in tessera.json
+   "portal": { "admins": ["you@example.com"] }   // verified principals who get the operator view
+   ```
+
+2. **Register the portal's sign-in redirect** — the portal signs in as a **public
+   SPA client** reusing the chat app (so its token's `aud` is what the broker
+   validates). Add a SPA redirect URI to that app (additive; no re-consent):
+
+   ```bash
+   # for kubectl port-forward access (the default):
+   az rest --method PATCH \
+     --uri "https://graph.microsoft.com/v1.0/applications/<chat-app-object-id>" \
+     --body '{"spa":{"redirectUris":["http://localhost:8080/auth/callback"]}}'
+   # …or set portalDomain in main.bicep to also register https://<portal-host>/auth/callback
+   ```
+
+**Reach it** (cluster-internal by default — a credential broker is not put on the
+public edge):
+
+```bash
+kubectl -n default port-forward deploy/tessera 8080:8080
+# open http://localhost:8080 → "Sign in with Microsoft" → you're the operator
+```
+
+**Add a person** in the UI: *Connect account* → pick a provider → enter the
+person's principal (e.g. `them@example.com`) and the **store secret name** that
+will hold their session (e.g. `health-portal-them-session`) → Finish. They now
+appear with their connection's health.
+
+> **Two honest limits of the portal today.**
+> - **Seeding the session (the captcha step) is not yet wired into the portal** —
+>   the *Re-seed / live hand-off* button returns a calm "not configured" until a
+>   browser worker is attached ([spec R1](specs/admin-portal.md#7a-known-risks--open-questions-self-review)).
+>   Until then a connection is created in the portal but its session is seeded by
+>   your harvester / the documented browser flow, after which it shows green.
+> - **A connection added in the portal persists for the pod's lifetime; a durable
+>   add is a git commit** to the ConfigMap (the file stays the source of truth —
+>   [ADR 0008](adr/0008-policy-and-identity-administration.md)). The portal is a
+>   convenience, not a second source of truth.
+
+**Dev / local run** (no Azure, no cluster): bind to loopback in `dev` mode and the
+portal shows a local "developer sign-in" card instead of Microsoft — handy for a
+demo. The broker refuses `dev` mode on any non-loopback bind, so it can't leak.
+
+---
+
 ## What each file is for
 
 | File | Purpose | You change |
@@ -157,5 +219,7 @@ curl -s localhost:8080/status | jq      # store kind, delegation = fail-closed, 
 2. **Mint + vault** the client secret (step 1) — never in git.
 3. **Seed a credential bundle** in the vault (step 2b).
 4. **Sign in once** to capture + verify a real token, then set the audience (step 5).
+5. **(Portal, optional)** name the operators in `portal.admins` + add the SPA
+   redirect URI to the chat app (step 6).
 
 Everything else is declarative YAML you apply with `kubectl`.

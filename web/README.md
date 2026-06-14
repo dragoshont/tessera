@@ -9,10 +9,13 @@ read-mostly window onto that model — never a source of truth.
 > [`docs/specs/admin-portal.md`](../docs/specs/admin-portal.md),
 > [`docs/adr/0016-admin-portal.md`](../docs/adr/0016-admin-portal.md).
 
-## Scope — Phase 0
+## Scope
 
-A runnable shell with **two real views** over a typed, mockable data client (an
-in-memory fixture; no backend yet) plus the design-system primitives:
+A runnable shell wired to the **real .NET broker** over a typed data client.
+The app talks to the broker at the **same origin** that serves the SPA; the
+in-memory fixtures client is used for **Storybook and tests** only (and a
+`VITE_TESSERA_DEMO=1` no-backend preview). The two read views plus the
+design-system primitives:
 
 - **My accounts** (`/accounts`, default landing) — the signed-in person's
   connections: provider · health badge (Live / Expiring soon / Absent / Error) ·
@@ -24,8 +27,15 @@ in-memory fixture; no backend yet) plus the design-system primitives:
 - **Users** (`/admin/users`) — people derived from OIDC principals + the admins
   allow-list: the operator shows as **Admin**, the others as **Members**.
 
-Clean routes/placeholders are left for later phases (live captcha hand-off,
-connect wizard, action-required inbox, all-connections step-up gate).
+**Sign-in** is driven by `GET /portal/config`: a developer loopback card
+(`X-Tessera-Dev-Principal`) for local use, or Microsoft OIDC (Authorization
+Code + PKCE via `oidc-client-ts`) for real deployments. The **connect-account
+wizard** (`/connect`) is functional end-to-end: pick provider → name the person
+→ name the stored credential → attempt seed (the fail-closed live hand-off is the
+honest default right now) → create the binding via `POST /portal/connections`.
+
+Clean routes/placeholders remain for later phases (live captcha hand-off worker,
+action-required inbox, all-connections step-up gate).
 
 ## Stack
 
@@ -37,7 +47,8 @@ Playwright. Light/dark theming. Behavior is kept separate from visual styling.
 
 ```bash
 npm install
-npm run dev              # Vite dev server
+npm run dev              # Vite dev server (set VITE_TESSERA_API_URL to point at a broker,
+                         #   or VITE_TESSERA_DEMO=1 for a no-backend fixtures preview)
 npm run build            # tsc -b && vite build (type-checked production build)
 npm run test             # Vitest unit tests (jsdom)
 npm run build-storybook  # build the Storybook static site
@@ -55,11 +66,12 @@ npx playwright test screenshots   # capture screens at desktop 1280 + phone 390,
 ```
 web/
   src/
-    api/        typed Tessera client (in-memory) + TanStack Query hooks
-    app/        session (static sign-in) provider
+    api/        typed Tessera client (real HTTP + in-memory) + TanStack Query hooks
+    app/        session (real GET /portal/me) + auth holder + OIDC redirect/callback
     components/
       accounts/ AccountsTable, ConnectionDrawer, presence flags, empty state
       badges/   HealthBadge, RoleBadge
+      connect/  ConnectWizard (provider → person → credential → seed → finish)
       shell/    AppShell (sidebar + top bar + mobile nav)
       sign-in/  SignIn
       theme/    theme provider + toggle (light/dark)

@@ -56,6 +56,11 @@ access; you don't think about the rest.
 > manual steps (the human gates) and exactly which YAML to change, with copy-ready
 > manifests in [`deploy/k8s/`](deploy/k8s/).
 
+> **Prefer a UI?** The broker image bakes in a small **[admin portal](docs/adr/0016-admin-portal.md)**
+> (served at `/`): see your connections' health and add a person without editing
+> YAML — OIDC sign-in, and it never shows a secret value. Turn it on in
+> [Getting started §6](docs/getting-started.md#6-the-admin-portal-optional-but-the-friendly-way-in).
+
 ---
 
 ## Why it exists

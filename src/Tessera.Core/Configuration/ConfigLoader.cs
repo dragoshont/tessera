@@ -47,6 +47,32 @@ public static class ConfigLoader
         return dto is null ? LoadedPolicy.Empty : LoadedPolicy.FromDto(dto);
     }
 
+    /// <summary>The write options for a policy document: camelCase to match the
+    /// hand-authored files, indented, and nulls/empties omitted so a round-trip
+    /// stays clean and reviewable as a diff.</summary>
+    private static readonly JsonSerializerOptions PolicyWriteOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = true,
+    };
+
+    /// <summary>
+    /// Persists a policy document back to <paramref name="path"/> as JSON (the
+    /// reverse of <see cref="LoadPolicy"/>). Used by the admin portal's
+    /// add-connection write — the files stay the source of truth (ADR 0008), so a
+    /// connection added in the UI lands as a reviewable change in the same document.
+    /// Throws <see cref="IOException"/> on a read-only mount (the GitOps case), which
+    /// the caller treats as "in-memory only this session" rather than a hard failure.
+    /// </summary>
+    public static void SavePolicy(string path, LoadedPolicy policy)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        ArgumentNullException.ThrowIfNull(policy);
+        var json = JsonSerializer.Serialize(policy.ToDocument(), PolicyWriteOptions);
+        File.WriteAllText(path, json);
+    }
+
     private static TesseraConfig ApplyEnvironmentOverrides(TesseraConfig config, IReadOnlyDictionary<string, string?> env)
     {
         var server = config.Server;
@@ -67,8 +93,9 @@ public static class ConfigLoader
         var audience = Get(env, "OIDC_AUDIENCE");
         var tenantId = Get(env, "OIDC_TENANT_ID");
         var allowedTenants = Get(env, "OIDC_ALLOWED_TENANTS");
+        var spaScope = Get(env, "OIDC_SPA_SCOPE");
         var trustDomain = Get(env, "TRUST_DOMAIN");
-        if (mode is not null || issuer is not null || audience is not null || tenantId is not null || allowedTenants is not null || trustDomain is not null)
+        if (mode is not null || issuer is not null || audience is not null || tenantId is not null || allowedTenants is not null || spaScope is not null || trustDomain is not null)
         {
             identity = new IdentityOptions
             {
@@ -82,6 +109,7 @@ public static class ConfigLoader
                     AllowedTenants = allowedTenants is not null
                         ? allowedTenants.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                         : identity.Oidc.AllowedTenants,
+                    SpaScope = spaScope ?? identity.Oidc.SpaScope,
                 },
             };
         }
@@ -111,11 +139,15 @@ public static class ConfigLoader
 
         var portal = config.Portal;
         var portalAdmins = Get(env, "PORTAL_ADMINS");
-        if (portalAdmins is not null)
+        var portalWebRoot = Get(env, "WEB_ROOT");
+        if (portalAdmins is not null || portalWebRoot is not null)
         {
             portal = new PortalOptions
             {
-                Admins = portalAdmins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                Admins = portalAdmins is not null
+                    ? portalAdmins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    : portal.Admins,
+                WebRoot = portalWebRoot ?? portal.WebRoot,
             };
         }
 

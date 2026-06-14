@@ -1,24 +1,53 @@
-import type { Connection, Person } from '../data/types'
+import type {
+  Connection,
+  CreateConnectionInput,
+  LiveViewHandle,
+  LiveViewResult,
+  Person,
+  PortalConfig,
+  Recipe,
+  Role,
+} from '../data/types'
 import {
   connections as fixtureConnections,
   currentUserPrincipal as fixtureCurrentUserPrincipal,
   people as fixturePeople,
+  portalConfigDev,
+  recipes as fixtureRecipes,
 } from '../data/fixtures'
+import { authHeader } from '../app/auth'
 
-// The portal talks to the broker through this narrow, typed surface only. Phase 0
-// ships an in-memory implementation over fixtures; a later phase swaps in an HTTP
-// client that reads the real .NET `connection` projection — the views never change.
+// The portal talks to the broker through this narrow, typed surface only.
+// `createHttpClient` hits the real .NET broker portal endpoints; the in-memory
+// `createInMemoryClient` runs the same contract over fixtures for Storybook and
+// tests. Which one the running app uses is decided by `tesseraClient` below.
 export interface TesseraClient {
+  /** Sign-in configuration (`GET /portal/config`) — fetched first to pick a flow. */
+  getConfig(): Promise<PortalConfig>
   getCurrentUser(): Promise<Person>
   listPeople(): Promise<Person[]>
   listConnections(ownerPrincipal?: string): Promise<Connection[]>
   getConnection(connectionId: string): Promise<Connection | undefined>
+  /** The connect wizard's provider picker (`GET /portal/recipes`). */
+  listRecipes(): Promise<Recipe[]>
+  /** The connect wizard's write (`POST /portal/connections`) → the new binding. */
+  createConnection(input: CreateConnectionInput): Promise<Connection>
+  /**
+   * Ask the broker to mint a short-TTL Live hand-off handle for one connection.
+   * The fail-closed default (no worker wired) returns `{ unavailable }` — the UI
+   * shows a calm "not set up yet" explainer, never an error spinner.
+   */
+  requestLiveView(connectionId: string): Promise<LiveViewResult>
 }
 
 export interface InMemorySeed {
+  config?: PortalConfig
   people?: Person[]
   connections?: Connection[]
+  recipes?: Recipe[]
   currentUserPrincipal?: string
+  /** Drive the Live hand-off in stories/tests. Defaults to fail-closed Unavailable. */
+  liveView?: (connectionId: string) => LiveViewResult
 }
 
 const adminsFirst = (a: Person, b: Person): number => {
@@ -26,14 +55,23 @@ const adminsFirst = (a: Person, b: Person): number => {
   return a.principal.localeCompare(b.principal)
 }
 
+const FAIL_CLOSED_REASON = 'live hand-off is not configured (fail-closed)'
+
 /** Build a client over the given seed (defaults to the shipped fixtures). Tests
  *  and stories inject their own seed to exercise empty / mixed states. */
 export function createInMemoryClient(seed: InMemorySeed = {}): TesseraClient {
   const people = seed.people ?? fixturePeople
-  const connections = seed.connections ?? fixtureConnections
+  // A mutable copy so createConnection is reflected by later listConnections calls
+  // (the connect wizard can demo end-to-end on fixtures).
+  const connections = [...(seed.connections ?? fixtureConnections)]
+  const recipes = seed.recipes ?? fixtureRecipes
+  const config = seed.config ?? portalConfigDev
   const currentPrincipal = seed.currentUserPrincipal ?? fixtureCurrentUserPrincipal
 
   return {
+    async getConfig() {
+      return config
+    },
     async getCurrentUser() {
       return people.find((person) => person.principal === currentPrincipal) ?? people[0]
     },
@@ -48,7 +86,180 @@ export function createInMemoryClient(seed: InMemorySeed = {}): TesseraClient {
     async getConnection(connectionId) {
       return connections.find((connection) => connection.connectionId === connectionId)
     },
+    async listRecipes() {
+      return [...recipes]
+    },
+    async createConnection({ provider, principal, credential }) {
+      // The broker would return the full projection; here we synthesize an honest
+      // one: a fresh binding is Absent (no session seeded yet). `credential` (the
+      // store secret NAME) is never echoed back — presence only, never the value.
+      void credential
+      const recipe = recipes.find((entry) => entry.provider === provider)
+      const label = recipe?.displayName ?? provider
+      const connection: Connection = {
+        connectionId: `${provider}:${principal}`,
+        ownerPrincipal: principal,
+        provider: label,
+        displayName: label,
+        status: 'absent',
+        expiryIsEstimated: false,
+        hasCookies: false,
+        hasRefreshToken: false,
+        hasAccessToken: false,
+      }
+      const existing = connections.findIndex((c) => c.connectionId === connection.connectionId)
+      if (existing >= 0) connections[existing] = connection
+      else connections.push(connection)
+      return connection
+    },
+    async requestLiveView(connectionId) {
+      // Default is fail-closed: deploying the portal opens no remote browser until a
+      // worker adapter is wired. Stories/tests opt into the happy path via `liveView`.
+      return seed.liveView?.(connectionId) ?? { unavailable: FAIL_CLOSED_REASON }
+    },
   }
 }
 
-export const tesseraClient = createInMemoryClient()
+/** A non-2xx response from the broker (carries the status so callers can branch). */
+export class HttpError extends Error {
+  readonly status: number
+
+  constructor(status: number, message?: string) {
+    super(message && message.length > 0 ? message : `HTTP ${status}`)
+    this.name = 'HttpError'
+    this.status = status
+  }
+}
+
+async function safeText(response: Response): Promise<string> {
+  try {
+    return await response.text()
+  } catch {
+    return ''
+  }
+}
+
+async function safeJson<T>(response: Response): Promise<T | undefined> {
+  try {
+    return (await response.json()) as T
+  } catch {
+    return undefined
+  }
+}
+
+export interface HttpClientOptions {
+  baseUrl: string
+  /** Returns auth headers per request (e.g. a verified `Authorization: Bearer …`,
+   *  or the loopback `X-Tessera-Dev-Principal`). Kept as a callback so tokens are
+   *  never baked into frontend code. */
+  getAuthHeader?: () => Record<string, string>
+}
+
+/**
+ * An HTTP `TesseraClient` over the real .NET broker portal endpoints (camelCase
+ * JSON). Mirrors the in-memory client's contract exactly, so the views are
+ * agnostic to which one is wired.
+ */
+export function createHttpClient({ baseUrl, getAuthHeader }: HttpClientOptions): TesseraClient {
+  const base = baseUrl.replace(/\/+$/, '')
+  const authHeaders = (): Record<string, string> => getAuthHeader?.() ?? {}
+
+  async function getJson<T>(path: string): Promise<T> {
+    const response = await fetch(`${base}${path}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...authHeaders() },
+    })
+    if (!response.ok) throw new HttpError(response.status, await safeText(response))
+    return (await response.json()) as T
+  }
+
+  async function postJson<T>(path: string, body: unknown): Promise<T> {
+    const response = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok) throw new HttpError(response.status, await safeText(response))
+    return (await response.json()) as T
+  }
+
+  // The broker keys a connection as "{provider}:{principal}", so the owner can be
+  // recovered from the id to scope the (list-only) read used by getConnection.
+  function ownerFromConnectionId(connectionId: string): string | undefined {
+    const separator = connectionId.indexOf(':')
+    return separator >= 0 ? connectionId.slice(separator + 1) : undefined
+  }
+
+  async function listConnections(ownerPrincipal?: string): Promise<Connection[]> {
+    const query = ownerPrincipal ? `?principal=${encodeURIComponent(ownerPrincipal)}` : ''
+    return getJson<Connection[]>(`/portal/connections${query}`)
+  }
+
+  return {
+    async getConfig() {
+      return getJson<PortalConfig>('/portal/config')
+    },
+    async getCurrentUser() {
+      // /portal/me carries identity only; the per-person counts are a separate
+      // projection members can't read. Default to 0 — the shell keys off principal
+      // and role (admin-nav gating, identity chip), not these counts.
+      const me = await getJson<{ principal: string; role: Role }>('/portal/me')
+      return { principal: me.principal, role: me.role, connectionCount: 0, needsAttentionCount: 0 }
+    },
+    async listPeople() {
+      try {
+        return await getJson<Person[]>('/portal/people')
+      } catch (error) {
+        // Members get 403 here — keep the UI calm: they simply have no people list.
+        if (error instanceof HttpError && error.status === 403) return []
+        throw error
+      }
+    },
+    listConnections,
+    async getConnection(connectionId) {
+      const owner = ownerFromConnectionId(connectionId)
+      const list = await listConnections(owner)
+      return list.find((connection) => connection.connectionId === connectionId)
+    },
+    async listRecipes() {
+      return getJson<Recipe[]>('/portal/recipes')
+    },
+    async createConnection(input) {
+      // 201 returns the new binding. A 403 (not allowed to add for that person) or
+      // 400 (bad input) throws HttpError so the wizard can branch on .status.
+      return postJson<Connection>('/portal/connections', input)
+    },
+    async requestLiveView(connectionId) {
+      const response = await fetch(
+        `${base}/portal/connections/${encodeURIComponent(connectionId)}/live-view`,
+        { method: 'POST', headers: { Accept: 'application/json', ...authHeaders() } },
+      )
+      // 503 is the fail-closed default (no worker wired) — a calm Unavailable, not
+      // an error. Surface the broker's secret-free reason verbatim.
+      if (response.status === 503) {
+        const body = await safeJson<{ error?: string }>(response)
+        return { unavailable: body?.error ?? FAIL_CLOSED_REASON }
+      }
+      if (!response.ok) throw new HttpError(response.status, await safeText(response))
+      const handle = (await response.json()) as LiveViewHandle
+      return { handle }
+    },
+  }
+}
+
+const apiUrl = import.meta.env.VITE_TESSERA_API_URL
+const demoMode = import.meta.env.VITE_TESSERA_DEMO === '1'
+
+/**
+ * The app's client. By default it talks to the REAL .NET broker over HTTP at the
+ * same origin that serves the SPA (`baseUrl: ''`) — `VITE_TESSERA_API_URL` is an
+ * optional override for `npm run dev` against a separately-running broker (e.g.
+ * http://127.0.0.1:8080). Per-request auth flows through `authHeader()` (the dev
+ * principal header or a verified `Authorization: Bearer …`), never a baked-in token.
+ *
+ * `VITE_TESSERA_DEMO=1` swaps in the in-memory fixtures client for a no-backend
+ * preview. Storybook and tests use `createInMemoryClient` directly, not this export.
+ */
+export const tesseraClient: TesseraClient = demoMode
+  ? createInMemoryClient()
+  : createHttpClient({ baseUrl: apiUrl ?? '', getAuthHeader: authHeader })

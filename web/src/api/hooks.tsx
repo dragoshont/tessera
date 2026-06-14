@@ -1,6 +1,7 @@
 import { createContext, useContext, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { tesseraClient, type TesseraClient } from './client'
+import type { CreateConnectionInput } from '../data/types'
 
 const TesseraClientContext = createContext<TesseraClient>(tesseraClient)
 
@@ -42,5 +43,23 @@ export function useConnection(connectionId?: string) {
     queryKey: ['connection', connectionId],
     queryFn: () => client.getConnection(connectionId as string),
     enabled: Boolean(connectionId),
+  })
+}
+
+export function useRecipes() {
+  const client = useTesseraClient()
+  return useQuery({ queryKey: ['recipes'], queryFn: () => client.listRecipes() })
+}
+
+/** The connect-wizard write. On success the connections list is invalidated so the
+ *  new binding appears in the table without a manual refresh. */
+export function useCreateConnection() {
+  const client = useTesseraClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: CreateConnectionInput) => client.createConnection(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['connections'] })
+    },
   })
 }

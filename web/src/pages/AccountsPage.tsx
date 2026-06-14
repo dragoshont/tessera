@@ -14,6 +14,10 @@ export function AccountsPage() {
   const ownedConnections = owner ? connections : []
   const selected = ownedConnections.find((c) => c.connectionId === connectionId) ?? null
 
+  // Re-seed / Seed now launch the Live hand-off; the connectionId is encoded since
+  // the broker keys it as "{provider}:{principal}".
+  const toHandoff = (id: string) => navigate(`/handoff/${encodeURIComponent(id)}`)
+
   return (
     <>
       <AccountsTable
@@ -26,12 +30,18 @@ export function AccountsPage() {
         }}
         onSelectConnection={(id) => navigate(`/accounts/${id}`)}
         onConnectAccount={() => navigate('/connect')}
+        onRowAction={(action, connection) => {
+          if (action === 'reseed' || action === 'seed') toHandoff(connection.connectionId)
+        }}
       />
       <ConnectionDrawer
         connection={selected}
         open={Boolean(connectionId)}
         onOpenChange={(open) => {
           if (!open) navigate('/accounts')
+        }}
+        onAction={(action, connection) => {
+          if (action === 'reseed' || action === 'seed') toHandoff(connection.connectionId)
         }}
       />
     </>
