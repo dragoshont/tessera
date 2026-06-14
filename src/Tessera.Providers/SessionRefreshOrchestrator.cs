@@ -29,12 +29,19 @@ public sealed record RefreshPassSummary(int Considered, int Rotated, int Dead, i
 /// </summary>
 public sealed class SessionRefreshOrchestrator
 {
-    private readonly LoadedPolicy _policy;
+    private readonly Func<LoadedPolicy> _policy;
     private readonly ICredentialStore _store;
     private readonly SessionRefresher _refresher;
 
-    /// <summary>Creates the orchestrator over the policy, the store (read), and the refresher (write).</summary>
-    public SessionRefreshOrchestrator(LoadedPolicy policy, ICredentialStore store, SessionRefresher refresher)
+    /// <summary>Creates the orchestrator over a live policy source, the store (read), and the refresher (write).</summary>
+    /// <param name="policy">
+    /// A source of the <em>current</em> policy, read fresh on every pass — so a
+    /// connection added through the portal after startup is picked up without a
+    /// restart (no stale snapshot).
+    /// </param>
+    /// <param name="store">The credential store (read).</param>
+    /// <param name="refresher">The session refresher (write-back).</param>
+    public SessionRefreshOrchestrator(Func<LoadedPolicy> policy, ICredentialStore store, SessionRefresher refresher)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(store);
@@ -44,26 +51,34 @@ public sealed class SessionRefreshOrchestrator
         _refresher = refresher;
     }
 
+    /// <summary>Convenience overload over a fixed policy snapshot (tests / static policies).</summary>
+    public SessionRefreshOrchestrator(LoadedPolicy policy, ICredentialStore store, SessionRefresher refresher)
+        : this(() => policy, store, refresher)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+    }
+
     /// <summary>True when at least one recipe is a Tessera-owned, refresh-declaring rotation target.</summary>
-    public bool HasOwnedRotation => _policy.Recipes.Any(IsTesseraOwned);
+    public bool HasOwnedRotation => _policy().Recipes.Any(IsTesseraOwned);
 
     /// <summary>Runs a single rotation pass over every Tessera-owned, refresh-declaring binding.</summary>
     public async Task<RefreshPassSummary> RunPassAsync(CancellationToken cancellationToken = default)
     {
+        var policy = _policy();
         var considered = 0;
         var rotated = 0;
         var dead = 0;
         var errors = 0;
         var skipped = 0;
 
-        foreach (var recipe in _policy.Recipes)
+        foreach (var recipe in policy.Recipes)
         {
             if (!IsTesseraOwned(recipe))
             {
                 continue;
             }
 
-            foreach (var binding in _policy.Bindings)
+            foreach (var binding in policy.Bindings)
             {
                 if (!string.Equals(binding.Target, recipe.Target, StringComparison.Ordinal))
                 {

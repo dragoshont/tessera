@@ -184,6 +184,8 @@ export interface Delegation {
   /** True when the grant is pure automation (no delegated human). */
   isAutomation: boolean
   onBehalfOf: string | null
+  /** Owner (ADR 0020) of the credential backing this delegation: 'user' (own login), 'service' (a shared household key standing in), 'dependent', or null (automation / no binding yet). */
+  owner?: CredentialOwner | null
 }
 
 /** A loaded connector and what it can do (`GET /portal/modules`). */

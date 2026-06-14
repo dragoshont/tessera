@@ -187,6 +187,15 @@ public sealed class RefreshOptions
 
     /// <summary>How often a rotation pass runs (seconds). Default 30 min.</summary>
     public int IntervalSeconds { get; init; } = 1800;
+
+    /// <summary>
+    /// The operator's explicit assertion that the broker runs as <b>exactly one
+    /// replica</b>. The Mode U refresher is the <em>sole session owner</em>: two
+    /// replicas both rotating the same single-use session would corrupt it. There is
+    /// no leader election, so enabling refresh requires consciously acknowledging the
+    /// single-writer invariant here — otherwise refresh stays inert (fail-closed).
+    /// </summary>
+    public bool AcknowledgeSingleWriter { get; init; }
 }
 
 /// <summary>The full broker configuration, with fail-closed validation.</summary>
@@ -287,6 +296,11 @@ public sealed class TesseraConfig
             if (!Egress.Enabled)
             {
                 problems.Add("refresh.enabled is true but egress.enabled is false — the rotation owner cannot reach any upstream (enable egress, or turn refresh off).");
+            }
+
+            if (!Refresh.AcknowledgeSingleWriter)
+            {
+                problems.Add("refresh.enabled is true but refresh.acknowledgeSingleWriter is false — the Mode U refresher is the sole session owner and there is no leader election; set acknowledgeSingleWriter=true to assert the broker runs as exactly one replica.");
             }
         }
 

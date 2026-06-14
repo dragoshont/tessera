@@ -59,6 +59,13 @@ public sealed class PortalService
         get { lock (_gate) { return _policy; } }
     }
 
+    /// <summary>
+    /// The current policy snapshot (the same one the read-model serves), exposed so a
+    /// background consumer like the Mode U refresher reads the <em>live</em> policy
+    /// after a portal add-connection — not a stale copy captured at startup.
+    /// </summary>
+    public LoadedPolicy CurrentPolicy => Policy;
+
     /// <summary>True when <paramref name="principal"/> is in the admins allow-list (case-insensitive).</summary>
     public bool IsAdmin(string? principal) =>
         !string.IsNullOrWhiteSpace(principal)
@@ -103,7 +110,8 @@ public sealed class PortalService
                 StepUpActions: grant.StepUpActions ?? [],
                 Planes: ActionPlanes.TokensOf(grant.Actions),
                 IsAutomation: grant.OnBehalfOf is null,
-                OnBehalfOf: grant.OnBehalfOf));
+                OnBehalfOf: grant.OnBehalfOf,
+                Owner: OwnerForDelegation(policy, grant.Target, grant.OnBehalfOf)));
         }
 
         // Stable order: by target, then by caller — independent of policy-file order.
@@ -384,6 +392,44 @@ public sealed class PortalService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The owner token of the credential that would back a delegation of
+    /// <paramref name="target"/> to <paramref name="principal"/> — mirroring the
+    /// resolver's exact-then-service-fallback (ADR 0020), so the "who/what may act as
+    /// me" view is honest even when a <b>shared service key</b> stands in for the
+    /// person (no per-person binding). Returns null for pure automation or when no
+    /// binding backs it (the grant is then inert until a binding exists).
+    /// </summary>
+    private static string? OwnerForDelegation(LoadedPolicy policy, string target, string? principal)
+    {
+        if (principal is null)
+        {
+            return null; // automation — no per-person credential ownership to show
+        }
+
+        // Exact per-person binding wins.
+        foreach (var binding in policy.Bindings)
+        {
+            if (SameTarget(binding.Target, target) && SamePrincipal(binding.Principal, principal))
+            {
+                return CredentialOwners.ToToken(binding.Owner);
+            }
+        }
+
+        // Else a shared service-owned key for the same target backs it (the fallback).
+        foreach (var binding in policy.Bindings)
+        {
+            if (binding.Principal is null
+                && binding.Owner == CredentialOwner.Service
+                && SameTarget(binding.Target, target))
+            {
+                return CredentialOwners.ToToken(CredentialOwner.Service);
+            }
+        }
+
+        return null; // no binding backs this grant yet
     }
 
     // The store status maps to the UI health vocabulary. expiring_soon / seeding /

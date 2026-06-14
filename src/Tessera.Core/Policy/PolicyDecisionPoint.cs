@@ -77,8 +77,11 @@ public sealed class PolicyDecisionPoint
             }
 
             // The control plane reshapes an integration — default to step-up unless
-            // an operator has deliberately loosened the whole manage plane (ADR 0019).
-            if (_manageRequiresStepUp && ActionPlanes.Of(request.Action) == ActionPlane.Manage)
+            // an operator has deliberately loosened the whole manage plane (ADR 0019)
+            // or exempted this specific action on this grant (the fine-grained hatch).
+            if (_manageRequiresStepUp
+                && ActionPlanes.Of(request.Action) == ActionPlane.Manage
+                && !grant.ExemptsManageStepUp(request.Action))
             {
                 return Decision.StepUp(
                     $"step-up required: {who} may manage {request.Target} ({request.Action}) only after human approval",

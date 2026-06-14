@@ -87,4 +87,39 @@ public sealed class PlaneEnforcementTests
         Assert.Equal(Effect.Allow, pdp.Evaluate(Manage("read:bill")).Effect);
         Assert.Equal(Effect.Allow, pdp.Evaluate(Manage("use:pay")).Effect);
     }
+
+    [Fact]
+    public void A_grant_can_exempt_a_specific_low_risk_manage_action_from_step_up()
+    {
+        // Keep the global manage step-up ON, but exempt one low-risk action on THIS
+        // grant — so manage:label.rename is allowed outright while manage:billing
+        // (not exempted) still steps up. Fine-grained, no whole-plane loosening.
+        var grant = new Grant(
+            "spiffe://tessera.local/chat",
+            "utility-co",
+            ["manage:*"],
+            OnBehalfOf: "alice@example.com",
+            ManageStepUpExempt: ["manage:label.*"]);
+        var pdp = new PolicyDecisionPoint([grant]); // manageRequiresStepUp defaults true
+
+        Assert.Equal(Effect.Allow, pdp.Evaluate(Manage("manage:label.rename")).Effect);
+        Assert.Equal(Effect.StepUp, pdp.Evaluate(Manage("manage:billing")).Effect);
+    }
+
+    [Fact]
+    public void An_explicit_step_up_action_overrides_a_manage_exemption()
+    {
+        // Even if a manage action is exempted, naming it in stepUpActions wins
+        // (explicit step-up always beats the exemption — fail-safe).
+        var grant = new Grant(
+            "spiffe://tessera.local/chat",
+            "utility-co",
+            ["manage:*"],
+            OnBehalfOf: "alice@example.com",
+            StepUpActions: ["manage:label.rename"],
+            ManageStepUpExempt: ["manage:label.*"]);
+        var pdp = new PolicyDecisionPoint([grant]);
+
+        Assert.Equal(Effect.StepUp, pdp.Evaluate(Manage("manage:label.rename")).Effect);
+    }
 }

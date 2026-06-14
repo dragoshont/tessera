@@ -175,7 +175,10 @@ public static class BrokerHost
             // on a different host must be allow-listed too).
             var refreshGuard = new Tessera.Core.Egress.SsrfGuard(config.Egress.AllowedHosts);
             services.AddSingleton(sp => new Tessera.Providers.SessionRefreshOrchestrator(
-                policy,
+                // Read the LIVE policy each pass (via the portal's current snapshot) so a
+                // connection added through the portal after startup is picked up without
+                // a restart — no stale captured snapshot.
+                () => sp.GetRequiredService<PortalService>().CurrentPolicy,
                 store,
                 new Tessera.Providers.SessionRefresher(
                     sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), writer, refreshGuard)));

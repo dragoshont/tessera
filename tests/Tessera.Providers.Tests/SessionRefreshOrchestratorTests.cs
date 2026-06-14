@@ -114,6 +114,31 @@ public sealed class SessionRefreshOrchestratorTests
         Assert.False(none.HasOwnedRotation);
     }
 
+    [Fact]
+    public async Task Reads_the_live_policy_each_pass_so_a_later_binding_is_picked_up()
+    {
+        // Start with no bindings; add one between passes via the live policy source.
+        var store = new InMemoryCredentialStore();
+        store.Put("portal-alice", Live());
+        var writer = new CapturingWriter();
+        var transport = new FakeTransport(200, "{\"access_token\":\"NEW_AT\"}");
+
+        var bindings = new List<TargetBinding>();
+        var current = Policy(bindings, OwnedPortal());
+        var orchestrator = new SessionRefreshOrchestrator(
+            () => current, store, new SessionRefresher(transport, writer));
+
+        var first = await orchestrator.RunPassAsync();
+        Assert.Equal(0, first.Considered); // no binding yet
+
+        // A portal add-connection would swap the policy snapshot — simulate it.
+        current = Policy([new TargetBinding("portal", "portal-alice", "alice@example.com", CredentialOwner.User)], OwnedPortal());
+
+        var second = await orchestrator.RunPassAsync();
+        Assert.Equal(1, second.Considered); // picked up without a restart
+        Assert.Equal(1, second.Rotated);
+    }
+
     private sealed class CapturingWriter : ICredentialWriter
     {
         public string? LastName { get; private set; }

@@ -62,9 +62,21 @@ public sealed class ConfigTests
         var config = new TesseraConfig
         {
             Egress = new EgressOptions { Enabled = true, AllowedHosts = ["api.example.com"] },
-            Refresh = new RefreshOptions { Enabled = true, IntervalSeconds = 900 },
+            Refresh = new RefreshOptions { Enabled = true, IntervalSeconds = 900, AcknowledgeSingleWriter = true },
         };
         Assert.Empty(config.Validate());
+    }
+
+    [Fact]
+    public void Refresh_enabled_requires_acknowledging_the_single_writer_invariant()
+    {
+        // No leader election: enabling rotation must consciously assert single-replica.
+        var config = new TesseraConfig
+        {
+            Egress = new EgressOptions { Enabled = true, AllowedHosts = ["api.example.com"] },
+            Refresh = new RefreshOptions { Enabled = true, IntervalSeconds = 900 }, // ack missing
+        };
+        Assert.Contains(config.Validate(), p => p.Contains("acknowledgeSingleWriter", StringComparison.Ordinal));
     }
 
     [Fact]

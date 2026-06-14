@@ -196,6 +196,34 @@ public sealed class PortalServiceTests
         Assert.Empty(DelegationPortal().ListDelegations("carol@example.com"));
     }
 
+    [Fact]
+    public void Delegations_surface_the_backing_credential_owner_including_a_shared_key()
+    {
+        // bob has a grant on a media target backed only by a shared service key
+        // (no per-person binding) — the "who can act as me" view must still say so.
+        var portal = new PortalService(
+            new LoadedPolicy(
+                Grants:
+                [
+                    new Grant("chat://librechat", "seerr", ["read:*", "use:request"], OnBehalfOf: Member),
+                    new Grant("chat://librechat", "health-portal", ["read:*"], OnBehalfOf: Admin),
+                ],
+                Bindings:
+                [
+                    new TargetBinding("seerr", "seerr-key", Principal: null, Owner: CredentialOwner.Service),
+                    new TargetBinding("health-portal", "hp-alice", Admin, CredentialOwner.User),
+                ],
+                Recipes: []),
+            new CredentialResolver([], new InMemoryCredentialStore()),
+            [Admin]);
+
+        var bob = portal.ListDelegations(Member).Single();
+        Assert.Equal("service", bob.Owner); // a shared household key stands in for bob
+
+        var alice = portal.ListDelegations(Admin).Single();
+        Assert.Equal("user", alice.Owner); // alice's own login
+    }
+
     // ── Modules (ADR 0017) ────────────────────────────────────────────────────
 
     private static PortalService ModulePortal() =>

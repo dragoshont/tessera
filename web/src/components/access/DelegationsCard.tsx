@@ -27,6 +27,7 @@ function DelegationRow({ delegation }: { delegation: Delegation }) {
         <p className="mt-0.5 text-xs text-muted-foreground">
           may act on <span className="font-medium text-foreground">{delegation.displayName}</span>
           {delegation.onBehalfOf ? <> · as {delegation.onBehalfOf}</> : null}
+          {delegation.owner ? <> · {ownerHint(delegation.owner)}</> : null}
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
@@ -55,6 +56,20 @@ function DelegationRow({ delegation }: { delegation: Delegation }) {
 function shortCaller(caller: string): string {
   const slash = caller.lastIndexOf('/')
   return slash >= 0 ? caller.slice(slash + 1) : caller
+}
+
+/** A short hint of whose credential backs the delegation (ADR 0020). */
+function ownerHint(owner: NonNullable<Delegation['owner']>): string {
+  switch (owner) {
+    case 'user':
+      return 'via your login'
+    case 'service':
+      return 'via a household key'
+    case 'dependent':
+      return 'via a dependent’s login'
+    default:
+      return ''
+  }
 }
 
 export interface DelegationsCardProps {

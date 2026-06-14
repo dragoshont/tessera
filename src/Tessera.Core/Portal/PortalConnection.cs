@@ -67,6 +67,7 @@ public sealed record RecipeSummary(string Provider, string DisplayName);
 /// <param name="Planes">The distinct action planes (ADR 0019) these actions touch, ordered read → use → manage.</param>
 /// <param name="IsAutomation">True when the grant is pure automation (no delegated human).</param>
 /// <param name="OnBehalfOf">The delegated principal, or <c>null</c> for automation.</param>
+/// <param name="Owner">The owner (ADR 0020) of the credential that backs this delegation: <c>user</c> (the person's own login) | <c>service</c> (a shared household key standing in for them) | <c>dependent</c>, or null for automation / no backing binding yet.</param>
 public sealed record DelegationView(
     string Caller,
     string Target,
@@ -75,7 +76,8 @@ public sealed record DelegationView(
     IReadOnlyList<string> StepUpActions,
     IReadOnlyList<string> Planes,
     bool IsAutomation,
-    string? OnBehalfOf);
+    string? OnBehalfOf,
+    string? Owner = null);
 
 /// <summary>
 /// One module (connector/recipe) as the awareness dashboard sees it (ADR 0017) — a

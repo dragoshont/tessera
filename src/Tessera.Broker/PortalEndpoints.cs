@@ -414,7 +414,7 @@ internal static class PortalEndpoints
         new(p.Principal, p.Role.ToString(), p.ConnectionCount, p.NeedsAttentionCount);
 
     private static DelegationDto ToDelegationDto(DelegationView d) =>
-        new(d.Caller, d.Target, d.DisplayName, d.Actions, d.StepUpActions, d.Planes, d.IsAutomation, d.OnBehalfOf);
+        new(d.Caller, d.Target, d.DisplayName, d.Actions, d.StepUpActions, d.Planes, d.IsAutomation, d.OnBehalfOf, d.Owner);
 
     private static ModuleDto ToModuleDto(ModuleView m) =>
         new(m.Target, m.DisplayName, m.Driver, m.Egress, m.EgressEnabled, m.Actions, m.Planes, m.ToolCount, m.ConnectionCount, m.UpstreamHost);
@@ -454,7 +454,8 @@ internal sealed record DelegationDto(
     IReadOnlyList<string> StepUpActions,
     IReadOnlyList<string> Planes,
     bool IsAutomation,
-    string? OnBehalfOf);
+    string? OnBehalfOf,
+    string? Owner);
 
 /// <summary>A module row (ADR 0017): a loaded connector + its egress posture + usage count.</summary>
 internal sealed record ModuleDto(

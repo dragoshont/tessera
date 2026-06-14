@@ -250,6 +250,7 @@ export const delegations: Delegation[] = [
     planes: ['read'],
     isAutomation: false,
     onBehalfOf: 'alice@example.com',
+    owner: 'user',
   },
   {
     caller: chatCaller,
@@ -260,6 +261,7 @@ export const delegations: Delegation[] = [
     planes: ['read', 'use'],
     isAutomation: false,
     onBehalfOf: 'alice@example.com',
+    owner: 'service',
   },
   {
     caller: chatCaller,

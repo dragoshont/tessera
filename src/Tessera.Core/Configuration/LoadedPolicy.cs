@@ -20,6 +20,7 @@ internal sealed class GrantDto
     public List<string> Actions { get; init; } = [];
     public string? OnBehalfOf { get; init; }
     public List<string>? StepUpActions { get; init; }
+    public List<string>? ManageStepUpExempt { get; init; }
 }
 
 internal sealed class BindingDto
@@ -98,7 +99,8 @@ public sealed record LoadedPolicy(
                 Target: g.Target,
                 Actions: g.Actions,
                 OnBehalfOf: g.OnBehalfOf,
-                StepUpActions: g.StepUpActions))
+                StepUpActions: g.StepUpActions,
+                ManageStepUpExempt: g.ManageStepUpExempt))
             .ToArray();
 
         var bindings = dto.Bindings
@@ -178,6 +180,7 @@ public sealed record LoadedPolicy(
                 Actions = [.. g.Actions],
                 OnBehalfOf = g.OnBehalfOf,
                 StepUpActions = g.StepUpActions is { Count: > 0 } ? [.. g.StepUpActions] : null,
+                ManageStepUpExempt = g.ManageStepUpExempt is { Count: > 0 } ? [.. g.ManageStepUpExempt] : null,
             })
             .ToList(),
         Bindings = Bindings

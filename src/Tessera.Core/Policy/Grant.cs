@@ -19,12 +19,21 @@ namespace Tessera.Core.Policy;
 /// <param name="Actions">Allowed action globs (e.g. <c>read:*</c>).</param>
 /// <param name="OnBehalfOf">The exact delegated human, or <c>null</c> for automation.</param>
 /// <param name="StepUpActions">Action globs that require human step-up before allowing.</param>
+/// <param name="ManageStepUpExempt">
+/// Control-plane (<c>manage:</c>) action globs this <em>specific</em> grant exempts
+/// from the manage-plane default step-up (ADR 0019) — the fine-grained escape hatch
+/// so a low-risk manage action (e.g. <c>manage:label.rename</c>) can be allowed
+/// outright on one grant without loosening the whole plane (the global
+/// <c>policy.manageRequiresStepUp</c>). An action also named in
+/// <see cref="StepUpActions"/> still steps up (explicit always wins).
+/// </param>
 public sealed record Grant(
     string Caller,
     string Target,
     IReadOnlyList<string> Actions,
     string? OnBehalfOf = null,
-    IReadOnlyList<string>? StepUpActions = null)
+    IReadOnlyList<string>? StepUpActions = null,
+    IReadOnlyList<string>? ManageStepUpExempt = null)
 {
     /// <summary>True when this grant applies to <paramref name="request"/>.</summary>
     public bool Matches(AccessRequest request)
@@ -95,4 +104,12 @@ public sealed record Grant(
     /// <summary>True when the request's action requires step-up under this grant.</summary>
     public bool RequiresStepUp(AccessRequest request) =>
         StepUpActions is { Count: > 0 } && Glob.AnyMatch(StepUpActions, request.Action);
+
+    /// <summary>
+    /// True when this grant exempts <paramref name="action"/> from the manage-plane
+    /// default step-up (it appears in <see cref="ManageStepUpExempt"/>) — the
+    /// per-grant escape hatch for a low-risk control-plane action.
+    /// </summary>
+    public bool ExemptsManageStepUp(string action) =>
+        ManageStepUpExempt is { Count: > 0 } && Glob.AnyMatch(ManageStepUpExempt, action);
 }
