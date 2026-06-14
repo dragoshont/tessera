@@ -125,6 +125,10 @@ plus a small `plane` field on the recipe tool — not a new engine. The detailed
 per-service mapping for the deployed media and home-automation stack is in the
 [service-access spec](../specs/service-access-adversarial-design.md#action-planes-read--use--manage).
 
+A fourth, orthogonal axis — **who owns the credential** (user / service /
+dependent) — drives seeding, reveal, revocation, and consent, and is decided in
+[ADR 0020](0020-credential-ownership.md).
+
 **Multi-semantic endpoints** (one upstream call, many meanings — e.g. Home
 Assistant `POST /api/services/{domain}/{service}`, or qBittorrent's command API)
 do not fit per-path classification. Two resolutions: (a) **curate** distinct,

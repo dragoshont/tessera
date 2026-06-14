@@ -610,6 +610,50 @@ download path.)
 A grant of `use:*` never implies `manage:*` (control plane is default-deny), and
 `manage:*` is step-up unless a deployment explicitly loosens a specific capability.
 
+## Credential ownership
+
+Orthogonal to actor, plane, and risk is **who owns the upstream credential**
+(decision: [ADR 0020](../adr/0020-credential-ownership.md)). It is the difference
+between *"Tessera holds my own login so agents needn't"* and *"Tessera wields a key
+I never hold."* Every connection declares an `owner`:
+
+| `owner` | The secret belongs to | Examples | Seeding | Reveal | Revoke |
+|---|---|---|---|---|---|
+| **user** | the signed-in person (they configured + know it) | RM, Gmail, Apple iCloud | the user (Job A live hand-off) | owner-only · step-up · auto-redact · **never to an agent** | the user |
+| **service** | the deployment/operator only | Seerr/Sonarr/Radarr/qBittorrent admin keys, shared SMTP, shared Plex token | operator config / GitOps | **never, to anyone** | operator only |
+| **dependent** | a person who cannot self-seed (guardian seeds) | a child's RM/health/school account | the guardian | guardian-only if ever; default never | guardian or operator |
+
+**Mapping to the model** (no new store concept — it sharpens `onBehalfOf`):
+
+- `owner: user` ⇒ binding `onBehalfOf = <person>` (delegation / auth-code shape).
+  One binding per person — Dragoș, wife, son each own their RM.
+- `owner: service` ⇒ binding `onBehalfOf = null` (automation / client-credentials
+  shape); a separate grant authorizes which users/tools may *use* it.
+- `owner: dependent` ⇒ binding `onBehalfOf = <dependent>` **plus** a guardian
+  relationship (the RM MCP's `act_as_dependent`). Owner-of-seeding ≠ owner-of-data.
+
+**Invariant across all three:** the secret never reaches an agent/MCP/tool, every
+action is policy-gated + default-deny, everything is audited, and cross-user
+isolation holds. **Default ownership is `service`** (never-reveal) so a mislabeled
+connection fails *safe*, not open.
+
+### Applying ownership to the deployed stack
+
+| Connection | owner | Why |
+|---|---|---|
+| RM (Dragoș / wife / son) | **user** (one each) | each configured + knows their own login; Tessera holds the session so the chat needn't, and keeps the three isolated |
+| RM for a child | **dependent** | guardian seeds + may `act_as_dependent`; the appointments belong to the child |
+| Gmail / Apple (per person) | **user** | personal accounts the person owns |
+| Seerr / Sonarr / Radarr / Prowlarr / Bazarr / Tdarr API keys | **service** | one deployment key; no household member knows or should; users get the *action*, never the key |
+| qBittorrent (when brokered for "pause") | **service** | the operator's client key |
+| Plex token | **service** | high-sensitivity shared account/session credential (§Plex) |
+| Home Assistant long-lived token | **service** | the operator's HA token; users get `use:`/`manage:` actions, never the token |
+
+This is why the same provider can appear under two owners (my RM = user; my child's
+RM = dependent) and why a media key is never user-revealable even to the operator
+through the portal — it is service-owned and the portal never reveals a secret
+value to anyone.
+
 ## Request lifecycle
 
 Every service action should follow this path:
