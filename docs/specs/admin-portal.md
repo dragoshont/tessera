@@ -367,3 +367,132 @@ When this plan is greenlit, the following prompt drives the **Sideport UI Design
 > medical/cross-person action; two separate surfaces — "My accounts" (self) vs
 > "Admin / All connections" (operator, extra-audited, stricter for medical).
 > Deliver as Storybook stories (calm light/dark) + Playwright happy-path flows.
+
+## 12. Awareness dashboard (Phase 0+) — [ADR 0017](../adr/0017-awareness-dashboard.md)
+
+> Status: **Accepted / building**. A read-only, secret-free transparency layer that
+> answers *"who is using auth, what modules are loaded, who/what can act as me, is a
+> job running, and what happened?"* — for a member (self) and an operator (all). It
+> is a projection over the **enforced** policy + the existing secret-free audit; it
+> mutates nothing, reveals no secret value, and adds no database. Independent of the
+> deferred browser worker, so it ships value with the cluster exactly as it is.
+
+### 12.1 Why this, now
+
+Job A (captcha hand-off) is the crown jewel but waits on a browser worker (R1). The
+maintainer's awareness questions are **orthogonal** and need none of that — they are
+projections over data the broker already produces (`grants`, `bindings`, `recipes`,
+`AuditEntry`). So Phase 0+ ships *between* Phase 0 and Job A: the same headless-first
+window, widened from *"what is connected"* to *"who may act as me, and what have they
+done."* It also makes the [ADR 0015](../adr/0015-mcp-egress-through-tessera.md)
+**Mode U** end-state legible *before* it is built.
+
+### 12.2 Information architecture (two surfaces, additive)
+
+```
+My account ▸ Activity & Access      ← self scope (every signed-in person)
+│   ├── My modules        (the connectors I can use + what they may do)
+│   ├── Who can act as me (delegations: caller → as me → target → actions, step-up?)
+│   ├── My automatic jobs (per connection: rotation owner + schedule, honest)
+│   └── My activity       (secret-free audit: terminal feed + plain-language summary)
+│
+Admin ▸ Observability               ← operator only (portal.admins), extra-audited
+    ├── Who is using auth   (delegations across everyone + recent activity)
+    ├── Loaded modules      (every recipe + egress posture + per-module usage)
+    └── Activity explorer   (the full secret-free audit feed + summary)
+```
+
+Two **separate routes** (self vs operator), never one view with a role flag —
+consistent with §2/§6.
+
+### 12.3 Data contracts (additive read-models; all secret-free)
+
+**`GET /portal/audit?principal=&limit=&since=`** — the activity feed. A bounded
+in-memory tail of `AuditEntry` (newest-first), self-scoped by default; an operator
+may pass `?principal=` (cross-person) or omit it for everyone. The endpoint returns
+both the raw rows (terminal mode) and a small rollup (summary mode):
+```
+AuditFeed {
+  entries: AuditRow[]            // newest-first, ≤ limit (capped at ring capacity)
+  summary: {
+    total: int, allow: int, deny: int, stepUp: int,
+    byTarget: { target: count }, byCaller: { caller: count },
+    since: timestamp, until: timestamp
+  }
+}
+AuditRow { timestamp, caller, callerVerified, onBehalfOf?, target, action,
+           effect: "allow"|"deny"|"step-up", reason, credentialStatus? }
+```
+*No secret value, by construction — `AuditEntry` is already ids + enums only.*
+
+**`GET /portal/delegations?principal=`** — *who/what may act as me*. A projection of
+`grants[]` whose `onBehalfOf` matches the (self or, for an operator, requested)
+principal:
+```
+Delegation { caller, target, displayName, actions: string[],
+             stepUpActions: string[], isAutomation: bool /* onBehalfOf==null */ }
+```
+Self by default; cross-person operator-only. Honest small case is fine (e.g. only a
+`selftest` caller) — that *is* the transparency: nothing is silently impersonating
+you.
+
+**`GET /portal/modules`** — *what connectors are loaded*. A projection of `recipes[]`
++ the broker's egress posture + how many connections use each:
+```
+Module { target, displayName, driver, egress: "none"|"http",
+         egressEnabled: bool /* the broker's egress.enabled gate */,
+         actions: string[], toolCount: int, connectionCount: int,
+         upstreamHost?: string /* host only, never a path/secret */ }
+```
+Any authenticated user may read the catalog (the wizard already exposes
+`/portal/recipes`); `connectionCount` is global and non-sensitive (a count, no
+owners). The per-person "which of these are mine" stays on `/portal/connections`.
+
+**`GET /portal/connections/{id}/schedule`** — *is an automatic job running for this
+session?* Honest about ownership:
+```
+Schedule { connectionId, rotationOwner: "none"|"external"|"tessera",
+           refreshConfigured: bool, detail: string,
+           lastRotatedAt?: timestamp /* only when tessera owns it */,
+           nextRotationAt?: timestamp /* only when tessera owns it */ }
+```
+- `none` — no refresh spec; the session is static (re-seed by hand).
+- `external` — a domain MCP owns rotation (today's Mode P domain-MCP keep-warm).
+  Tessera does **not** schedule it; it says so.
+- `tessera` — the Mode U / [ADR 0014](../adr/0014-http-injectable-provider-egress.md)
+  refresher owns it (only when actually wired). `lastRotatedAt`/`nextRotationAt`
+  populate only here.
+
+Authorized exactly like `/portal/connections/{id}/live-view` (owner or operator).
+
+### 12.4 Security (Phase 0+)
+
+Inherits every §7 invariant. Additions specific to the awareness reads:
+
+1. **Self-scope by default, operator-only cross-person** — applied **server-side**
+   in each projection (never a client filter). A member's `/portal/audit` and
+   `/portal/delegations` return only their own rows; a test asserts this.
+2. **Secret-free, tested per endpoint** — each new endpoint has a value-leak
+   assertion (a planted secret never appears in any response).
+3. **Bounded by construction** — the audit ring is fixed-capacity (newest-wins); the
+   endpoint caps `limit`. No disk scan, no unbounded query, no amplification.
+4. **The ring never weakens the durable audit** — it is a decorator that calls the
+   inner JSONL sink **first**, then records to the ring in a non-throwing path; a
+   test asserts the inner sink still receives every entry.
+5. **Honest thin-data** — `expiryIsEstimated`, `rotationOwner`, `egressEnabled`
+   state the real posture rather than inventing numbers; the dashboard shows Mode P's
+   split-credential reality and lets the operator watch the Mode U cutover.
+
+### 12.5 Phase 0+ build plan (tasks — each independently committed, tested, deployed)
+
+| Sub-phase | Backend | Tests | Ships |
+|---|---|---|---|
+| **A · Activity feed** | `RingBufferAuditSink` decorator (tees off the JSONL sink, bounded ring) + `IAuditTail` read port + `GET /portal/audit` (self/operator scope, summary rollup) | ring bounds + order; inner-sink-still-receives; member-sees-only-own; secret-free | a terminal-like + summarized activity log |
+| **B · Delegations** | `PortalService.ListDelegationsAsync` (grants projection) + `GET /portal/delegations` | self/operator scope; automation vs delegated; step-up surfaced; secret-free | "who/what may act as me" |
+| **C · Modules** | `PortalService.ListModulesAsync` (recipes + egress posture + counts) + `GET /portal/modules` | egress posture mapped; counts correct; secret-free (no upstream path) | "what connectors are loaded" |
+| **D · Schedule** | `PortalService.GetScheduleAsync` (honest rotation owner) + `GET /portal/connections/{id}/schedule` | none/external/tessera mapping; owner/operator scope | "is a job running, who owns rotation" |
+| **E · SPA** | `Activity & Access` (self) + `Observability` (admin) views over A–D; Storybook stories; Playwright happy paths | component + flow tests | the two surfaces above |
+
+Each sub-phase: implement with real logic (no stubs) → adversarial self-review →
+`dotnet test` green → commit → deploy (CI image + homelab bump) → verify → next.
+

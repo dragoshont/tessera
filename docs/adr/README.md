@@ -23,6 +23,7 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0014](0014-http-injectable-provider-egress.md) | **HTTP-injectable provider egress + single session-owner** (one MCP injects creds by identity; read + step-up-gated write; phased cutover, no double-refresh) | Accepted |
 | [0015](0015-mcp-egress-through-tessera.md) | **Domain MCPs egress through Tessera** (the credential-proxy target: domain MCPs keep their tools but hold no secret; Tessera is the single custodian — inject, SSRF, rotate, audit) | Proposed |
 | [0016](0016-admin-portal.md) | **Admin portal: headless-first convenience layer** (three surfaces — captcha live hand-off, connect wizard, accounts inventory; OIDC auth; files stay source of truth; secret values never shown) | Proposed |
+| [0017](0017-awareness-dashboard.md) | **Awareness dashboard: read-only transparency surface** (who may act as me, what modules are loaded, is a job running, a secret-free audit feed; self + operator views; projections only — no mutation, no egress, no DB) | Accepted |
 
 ## Format
 
