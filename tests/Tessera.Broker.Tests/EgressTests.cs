@@ -75,6 +75,42 @@ public sealed class EgressTests
         Assert.Equal(EgressDisposition.Forwarded, egress.Evaluate("https://api.example.com/", recipe, new CredentialBundle(AccessToken: "AT")));
     }
 
+    // ── Connect-time SSRF (the DNS-rebind / metadata defense) ─────────────────
+    // The host allow-list runs earlier; the transport adds the last-line defense by
+    // validating the *resolved* IP at connect time and pinning it. These literal-IP
+    // targets are blocked before any socket is opened (no network in the test).
+
+    [Fact]
+    public async Task Transport_blocks_a_connect_to_the_cloud_metadata_ip()
+    {
+        using var transport = new HttpClientTransport();
+        var error = await Assert.ThrowsAnyAsync<Exception>(() => transport.SendAsync(
+            "GET", "http://169.254.169.254/latest/meta-data/", EmptyHeaders, null, CancellationToken.None));
+        Assert.Contains("SSRF address guard", AllMessages(error), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Transport_blocks_a_connect_to_loopback_by_default()
+    {
+        using var transport = new HttpClientTransport();
+        var error = await Assert.ThrowsAnyAsync<Exception>(() => transport.SendAsync(
+            "GET", "http://127.0.0.1:9/", EmptyHeaders, null, CancellationToken.None));
+        Assert.Contains("SSRF address guard", AllMessages(error), StringComparison.Ordinal);
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> EmptyHeaders = new Dictionary<string, string>();
+
+    private static string AllMessages(Exception exception)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (Exception? e = exception; e is not null; e = e.InnerException)
+        {
+            sb.Append(e.Message).Append(" | ");
+        }
+
+        return sb.ToString();
+    }
+
     private sealed class ThrowingForwarder : Yarp.ReverseProxy.Forwarder.IHttpForwarder
     {
         public ValueTask<Yarp.ReverseProxy.Forwarder.ForwarderError> SendAsync(

@@ -349,14 +349,20 @@ revocable; workload-identity federation removes the stored client secret entirel
 The egress path is an SSRF-sensitive control point. Tessera applies the
 allow-list-plus-hardening posture both specs recommend:
 
-- `SsrfGuard`: an **explicit host allow-list** (empty ⇒ nothing allowed) and an
-  **HTTPS requirement** by default — no raw IPs unless listed.
+- `SsrfGuard`: an **explicit host allow-list** (empty ⇒ nothing allowed) and a
+  **scheme gate** — HTTPS by default; plain `http://` only to allow-listed hosts
+  when `egress.allowPlainHttp` is set (the deliberate opt-in for internal services
+  that don't speak TLS, per the MCP BP "reject http except internal").
+- `AddressGuard` + `HttpClientTransport.ConnectCallback`: the connection resolves
+  the host once, **rejects link-local/metadata (`169.254.0.0/16`, incl.
+  `169.254.169.254`), loopback (default), multicast, broadcast, unspecified**, and
+  connects to the **pinned** resolved IP — so a DNS rebind can't swap in an internal
+  address between check and connect (the TOCTOU both specs name). Private ranges
+  (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`) stay reachable — a homelab
+  ClusterIP is legitimate; the host allow-list gates *which* host.
 - `HttpClientTransport`: **no auto-redirect** (an upstream can't 302 the broker off
   the allow-listed host to a metadata endpoint), **no proxy**, **no ambient
   cookies** (every cookie is injected explicitly), short timeouts.
-- **Hardening in progress** (from the adversarial review): pin the resolved IP for
-  the connection and reject link-local/metadata ranges (`169.254.0.0/16`, private
-  ranges) to close DNS-rebinding/TOCTOU — the residual gap both specs name.
 
 ### 9.6 PDP/PEP separation, per-request — NIST SP 800-207 Zero Trust
 

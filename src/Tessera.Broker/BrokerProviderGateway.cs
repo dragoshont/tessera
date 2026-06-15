@@ -45,7 +45,7 @@ public sealed class BrokerProviderGateway : IProviderGateway
             return DisabledProviderGateway.Instance;
         }
 
-        var guard = new SsrfGuard(config.Egress.AllowedHosts);
+        var guard = new SsrfGuard(config.Egress.AllowedHosts, config.Egress.AllowPlainHttp);
         var egress = new ProviderEgress(
             new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, recipes, guard, transport, audit: audit);
         return new BrokerProviderGateway(egress, pdp, recipes);

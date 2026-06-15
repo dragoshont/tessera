@@ -53,7 +53,7 @@ public sealed class InjectionEgress : IDisposable
     public InjectionEgress(EgressOptions options, IHttpForwarder forwarder)
     {
         _options = options;
-        _guard = new SsrfGuard(options.AllowedHosts);
+        _guard = new SsrfGuard(options.AllowedHosts, options.AllowPlainHttp);
         _forwarder = forwarder;
         _invoker = new HttpMessageInvoker(new SocketsHttpHandler
         {

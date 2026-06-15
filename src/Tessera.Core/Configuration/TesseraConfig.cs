@@ -118,6 +118,15 @@ public sealed class EgressOptions
     /// when <see cref="Enabled"/> is true.
     /// </summary>
     public IReadOnlyList<string> AllowedHosts { get; init; } = [];
+
+    /// <summary>
+    /// When true, plain <c>http://</c> is permitted to allow-listed hosts (the
+    /// deliberate opt-in for internal services that don't speak TLS — a homelab
+    /// ClusterIP). Default false: HTTPS only. The host allow-list still applies; this
+    /// only relaxes the scheme, never the host (MCP Security BP "reject http except
+    /// internal").
+    /// </summary>
+    public bool AllowPlainHttp { get; init; }
 }
 
 /// <summary>Admin-portal settings (ADR 0016). The portal is a thin convenience

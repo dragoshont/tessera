@@ -181,7 +181,7 @@ public static class BrokerHost
             // The refresher egresses to the recipe's refresh/token endpoint, so it is
             // bound by the same SSRF allow-list as the data egress (an OAuth token URL
             // on a different host must be allow-listed too).
-            var refreshGuard = new Tessera.Core.Egress.SsrfGuard(config.Egress.AllowedHosts);
+            var refreshGuard = new Tessera.Core.Egress.SsrfGuard(config.Egress.AllowedHosts, config.Egress.AllowPlainHttp);
             services.AddSingleton(sp => new Tessera.Providers.SessionRefreshOrchestrator(
                 // Read the LIVE policy each pass (via the portal's current snapshot) so a
                 // connection added through the portal after startup is picked up without
