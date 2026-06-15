@@ -40,3 +40,4 @@ artifacts/
 .DS_Store
 .idea/
 .vscode/
+scripts/.pii-local

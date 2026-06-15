@@ -1,46 +1,38 @@
 #!/usr/bin/env bash
 #
-# Blocking PII / secret gate for this PUBLIC, generic-broker repo.
+# Structural PII / secret gate for this PUBLIC, generic-broker repo. BLOCKING in
+# the pre-commit hook and the CI `hygiene` job (exit 1 on the first match).
 #
-# Runs in two places, both BLOCKING (non-zero exit stops the action):
-#   - the pre-commit hook (.pre-commit-config.yaml)  -> stops the commit
-#   - the `hygiene` job in .github/workflows/ci.yml   -> fails the build
+# Tessera is a GENERIC credential broker. This public repo must never contain a
+# real secret, a real (non-example) identity, a private domain, an internal
+# resource name, or a live tenant/app GUID. Generic example data (example.com,
+# alice/bob/carol, health-portal, placeholder GUIDs) is fine.
 #
-# Lesson learned the hard way: a scan chained with `&&` after `echo` is NOT a
-# gate (echo always succeeds, so the chain continues). This script `exit 1`s on
-# the first surviving match so it can never be a silent pass.
+# Blocks (structural, always): private keys, GitHub/Slack/AWS tokens, Azure
+# connection-string keys, and any GUID that is not an obvious placeholder / the
+# public Microsoft tenant.
 #
-# Tessera is a GENERIC credential broker. It must not name any specific homelab
-# user, the specific medical provider it happened to be tested against, internal
-# secret names, the private domain, or live Entra tenant/app GUIDs. Generic
-# example data (example.com, alice/bob, portal-mcp) is fine.
-#
-# ALLOWED (intentional public constants / placeholders):
-#   - SECURITY.md maintainer contact
-#   - the documented PUBLIC Microsoft consumer-tenant GUID
-#     9188040d-6c67-4c5b-b112-36a304b66dad
-#   - obvious placeholder GUIDs (00000000-…, 11111111-…, 1111-1111-1111, …)
+# Maintainer's private list (optional): real names / domains / resource ids are
+# kept in `scripts/.pii-local` (gitignored — never in this public repo). If
+# present, each non-comment line is added to the block set.
 set -eu
 
 cd "$(git rev-parse --show-toplevel)"
 
-# Real homelab identities/secrets. Bare first names are matched WITHOUT \b (git
-# grep's word-boundary support differs between macOS and Linux — \b silently
-# no-matched on macOS, so a real name once slipped past the local gate and only CI
-# caught it). Instead we match the bare name and allowlist the public GitHub handle
-# "dragoshont" below — identical behaviour on both engines.
-patterns='alice|bob|carol|health-portal|account-[abc]-session|examplekv|hont\.ro|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+structural='-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{20,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AccountKey=[A-Za-z0-9+/=]{20,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 
-# Exclude this script + SECURITY.md (maintainer contact) + the CI file (which
-# documents the same patterns). Then drop the allowlisted values: the public GitHub
-# handle/namespace "dragoshont", the documented Microsoft consumer-tenant GUID, and
-# obvious placeholder GUIDs.
-if git grep -nIE "$patterns" -- . ':!SECURITY.md' ':!scripts/check-pii.sh' ':!.github/workflows/ci.yml' \
-     | grep -vE 'dragoshont' \
-     | grep -vE '9188040d-6c67-4c5b-b112-36a304b66dad' \
+pattern="$structural"
+if [ -f scripts/.pii-local ]; then
+  extra="$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' scripts/.pii-local | paste -sd'|' - || true)"
+  [ -n "$extra" ] && pattern="$structural|$extra"
+fi
+
+# Allowlist: placeholder GUIDs (first 8 hex a single repeated char) + the public
+# Microsoft consumer-tenant GUID.
+if git grep -nIE -e "$pattern" -- . ':!SECURITY.md' ':!scripts/check-pii.sh' \
      | grep -viE '\b([0-9a-f])\1{7}-' \
-     | grep -vE '1111-1111-1111|2222-3333-4444'; then
-  echo "::error::check-pii: private identity / secret pattern found above. Genericize before committing." >&2
+     | grep -vE '9188040d-6c67-4c5b-b112-36a304b66dad'; then
+  echo "::error::check-pii: structural PII / secret pattern found above. Genericize before committing." >&2
   exit 1
 fi
-echo "check-pii: clean — no private identities/secrets found."
+echo "check-pii: clean — no structural PII/secrets found."
