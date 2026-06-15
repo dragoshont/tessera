@@ -197,3 +197,25 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
   written. **All autonomous tessera-repo work is done.** Remaining = operator
   cutovers (real secrets / live egress / medical / noVNC worker) + the step-up UX
   build, all captured in the checklist.
+- 2026-06-15: **Adversarial hardening pass (F1–F10)** — turned "modelled but
+  unwired" into enforced behaviour and fixed real gaps found by self-review:
+  - F1: result classes are now **enforced** in `ProviderEgress` — `{handle}`/
+    `{placeholder}` path templating, full-body/attachment require a target-scoped
+    handle (no bulk spill), metadata capped, `BadRequest` status.
+  - F3: OAuth refresh uses an absolute `RefreshSpec.TokenUrl` + is SSRF-guarded
+    (cookie-portal refresh on the base URL still works).
+  - F5: removed the display-only plane override — plane always derives from the
+    enforced verb, so the surface can't lie.
+  - F4: per-grant `ManageStepUpExempt` escape hatch (loosen one named `manage:`
+    action without flipping the plane).
+  - F6: Mode U `refresh.acknowledgeSingleWriter` guard (rotation arms only on an
+    explicit single-replica ack).
+  - F7: the refresher reads the **live** policy each pass (no stale snapshot).
+  - F8: delegations surface the backing credential **owner** (shared service keys
+    are visible in "who can act as me").
+  - F2: consent + guardian wired to real endpoints (`/portal/consents`,
+    `/portal/dependents`); portal-added connections default to `owner: user`.
+  - F10: e2e test proves the shared-key fallback is PDP-gated (granted user reaches
+    it; ungranted user denied before resolve).
+  - F9: ADR 0019 migration note (the `*`-grant → `manage:` behaviour change).
+  286 .NET green. Operator cutovers + step-up UX still the only remaining work.

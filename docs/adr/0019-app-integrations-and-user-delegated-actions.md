@@ -109,21 +109,36 @@ separately, not collapsed into one "write = dangerous" bit.
    gives a coarse, legible boundary: *"this assistant may operate my home, but
    never reconfigure it."*
 3. **Management defaults to step-up** (`manageRequiresStepUp: true`), loosened
-   only per-deployment and per-capability, never globally by default.
+   only per-deployment (the global flag) **or** per-grant for a single named
+   capability (`Grant.ManageStepUpExempt`, e.g. a low-risk `manage:theme`), never
+   globally by default.
 4. A capability is step-up-gated when **either** the recipe tool declares
-   `stepUp` **or** the grant lists it in `stepUpActions`. The plane drives the
-   *default*; the recipe flag and the grant decide *enforcement*.
-5. The plane is surfaced in the **consent receipt** and the **awareness
-   dashboard** ([ADR 0017](0017-awareness-dashboard.md)) so a person can see
-   "may use, not manage" at a glance.
+   `stepUp` **or** the grant lists it in `stepUpActions` **or** it is a `manage:`
+   action and step-up was not exempted. The plane drives the *default*; the recipe
+   flag, the grant, and the exemption decide *enforcement*.
+5. The plane is **always derived from the verb's namespace** — the same value the
+   PDP enforces — and surfaced in the **consent receipt** and the **awareness
+   dashboard** ([ADR 0017](0017-awareness-dashboard.md)) so a person can see "may
+   use, not manage" at a glance. There is deliberately **no** separate display-only
+   plane field on a tool: a surfaced plane can never diverge from what is enforced.
 
 This composes with [ADR 0013](0013-per-user-access-tiers.md) (per-user tiers,
 default-deny for sensitive) and reuses the [ADR 0014](0014-http-injectable-provider-egress.md)
 step-up decision already in `ProviderEgress`. It is a **naming + default
-convention** over the existing `Grant.Actions` ⊕ `Grant.StepUpActions` mechanism,
-plus a small `plane` field on the recipe tool — not a new engine. The detailed
+convention** over the existing `Grant.Actions` ⊕ `Grant.StepUpActions` mechanism
+(plus an optional output-class tag per tool) — not a new engine. The detailed
 per-service mapping for the deployed media and home-automation stack is in the
 [service-access spec](../specs/service-access-adversarial-design.md#action-planes-read--use--manage).
+
+**Output classes (read-plane spill control).** A read verb can still return a lot
+(a whole mailbox). So a recipe tool may declare an `outputClass`
+(`metadata`/`preview`/`fullBody`/`attachment`/`receipt`): `ProviderEgress` then
+enforces that a search/list returns **metadata + opaque, target-scoped handles**
+(capped tighter than a body), and a full-body/attachment tool **must** be called
+by a `{handle}` from a prior search — never as a bulk-readable bare path. A handle
+minted for one provider is rejected against another. This is the spill control for
+`read:` on personal data (Gmail/Graph), enforced in the egress path, not just
+modelled.
 
 A fourth, orthogonal axis — **who owns the credential** (user / service /
 dependent) — drives seeding, reveal, revocation, and consent, and is decided in
@@ -159,7 +174,16 @@ pre-classified recipe tools (`ha_light_on` = `use:light`; `ha_lock_unlock` =
 - If an upstream action can be performed both by an app and by Tessera, policy and
   naming must make the actor explicit.
 
-## Rejected alternatives
+**Migration (behaviour change)**
+
+- Introducing the manage plane changes one existing behaviour: a broad grant
+  (`*`, or `use:*`) **no longer reaches `manage:` verbs** — the control plane is
+  default-deny and must be granted with a `manage:`-scoped pattern. Any grant that
+  relied on `*` to authorize a (newly-named) `manage:` action must add an explicit
+  `manage:<resource>`. Existing `read:`/`use:`/`write:`/`pay:` and bare verbs are
+  unaffected (they classify as their own plane or `Unspecified`), so deployments
+  that use no `manage:` verbs see no change. This is a *safer* default; it is
+  called out here because it is the one non-additive part of the change.
 
 - **Route all Sonarr/Radarr/qBittorrent/Seerr traffic through Tessera.** Rejected.
   It turns Tessera into a service mesh/API bus and weakens reliability.
