@@ -40,6 +40,31 @@ Tessera opened for it, under policy, for one specific action.
 
 ---
 
+## Prerequisites
+
+Tessera is small to run but it sits between identities and real accounts, so it
+needs a few things around it:
+
+| Need | What | Why |
+|---|---|---|
+| **Runtime** | .NET 10 SDK/runtime (a container image is published to GHCR). | The broker is .NET 10 ([ADR 0001](docs/adr/0001-language-and-runtime.md)). |
+| **A credential store** | Azure Key Vault (default), HashiCorp Vault, or a file store. Reached via Managed Identity / Workload Identity Federation — no client secret to leak. | Secrets live here, never in Tessera or git ([ADR 0003](docs/adr/0003-credential-store-pluggable.md)). |
+| **An OIDC identity provider** | Microsoft Entra **or** Authentik (which can federate Entra/Google/passkeys). The caller forwards a signed token; Tessera validates `iss`/`aud`/`exp`/signature, fail-closed. | This is *who* acts and *for whom* ([ADR 0005](docs/adr/0005-identity-first-fail-closed.md), [ADR 0011](docs/adr/0011-identity-provider-sso.md)). |
+| **A reverse proxy** (for the portal/UI) | Traefik (or any ingress) for TLS + routing; optionally an access gateway (Authentik / oauth2-proxy) in front of web apps. | The browser front door is separate from the action broker ([ADR 0018](docs/adr/0018-access-gateway-and-action-broker.md)). |
+| **An MCP host** (optional) | A chat/assistant that forwards the user's OIDC token to Tessera's `/mcp` surface. | How an assistant acts for a person ([ADR 0015](docs/adr/0015-mcp-egress-through-tessera.md)). |
+| **A harvest worker** (only for un-API'd providers) | The bundled browser worker (noVNC) for the one-time human login/captcha. | Seeds sessions for services with no OAuth/API ([ADR 0002](docs/adr/0002-broker-worker-topology.md), [ADR 0006](docs/adr/0006-harvest-drivers.md)). |
+
+Minimum to try it locally: the .NET SDK + a file/in-memory store + the dev
+loopback identity mode — see **[Getting started](docs/getting-started.md)**. For the
+full picture of how it sits with Traefik / Authentik / MCP, see
+[How Tessera fits your stack](#how-tessera-fits-your-stack-traefik--authentik--mcp).
+
+> **Just want to see the UI?** A no-backend demo of the admin portal is published
+> to [GitHub Pages](https://dragoshont.github.io/tessera/) (in-memory fixtures —
+> no broker, no secrets). Walk the design without deploying anything.
+
+---
+
 ## What you run
 
 One service. Two setups cover almost everything:
