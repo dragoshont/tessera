@@ -35,6 +35,12 @@ internal static class ProviderHeaders
                 headers["Authorization"] = $"Bearer {bundle.AccessToken}";
                 return headers;
 
+            case InjectionKind.ApiKeyHeader when bundle.HasAccessToken:
+                // The Servarr/Seerr class: the access token is the API key, injected
+                // into a named header (X-Api-Key by default) rather than as a bearer.
+                headers[recipe.EffectiveInjectionHeader] = bundle.AccessToken!;
+                return headers;
+
             case InjectionKind.Cookies:
                 var cookie = BuildCookieHeader(recipe, bundle);
                 if (cookie is null)
@@ -46,6 +52,7 @@ internal static class ProviderHeaders
 
             case InjectionKind.None:
             case InjectionKind.BearerToken:
+            case InjectionKind.ApiKeyHeader:
             default:
                 return null; // missing the required credential material
         }

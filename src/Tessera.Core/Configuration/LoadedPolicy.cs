@@ -39,6 +39,7 @@ internal sealed class RecipeDto
     public string Egress { get; init; } = "none";
     public string? UpstreamBaseUrl { get; init; }
     public string? Injection { get; init; }
+    public string? InjectionHeader { get; init; }
     public List<string>? Actions { get; init; }
     public List<RecipeToolDto>? Tools { get; init; }
     public Dictionary<string, string>? ExtraHeaders { get; init; }
@@ -121,6 +122,7 @@ public sealed record LoadedPolicy(
                     .ToArray(),
                 ExtraHeaders: r.ExtraHeaders,
                 CookieMap: r.CookieMap,
+                InjectionHeader: r.InjectionHeader,
                 Description: r.Description,
                 Rotation: r.Rotation is null ? null : new RecipeRotation(r.Rotation.Owner, r.Rotation.Detail),
                 Refresh: r.RefreshSpec is null
@@ -140,6 +142,7 @@ public sealed record LoadedPolicy(
     {
         "bearer" or "bearertoken" => InjectionKind.BearerToken,
         "cookie" or "cookies" => InjectionKind.Cookies,
+        "apikey" or "apikeyheader" => InjectionKind.ApiKeyHeader,
         _ => InjectionKind.None,
     };
 
@@ -207,6 +210,7 @@ public sealed record LoadedPolicy(
                 {
                     InjectionKind.BearerToken => "bearer",
                     InjectionKind.Cookies => "cookies",
+                    InjectionKind.ApiKeyHeader => "apikey",
                     _ => null,
                 },
                 Actions = r.Actions is { Count: > 0 } ? [.. r.Actions] : null,
@@ -227,6 +231,11 @@ public sealed record LoadedPolicy(
                     : null,
                 ExtraHeaders = r.ExtraHeaders is { Count: > 0 } ? new Dictionary<string, string>(r.ExtraHeaders) : null,
                 CookieMap = r.CookieMap is { Count: > 0 } ? new Dictionary<string, string>(r.CookieMap) : null,
+                // Only persist a non-default API-key header (X-Api-Key is the default).
+                InjectionHeader = r.Injection == InjectionKind.ApiKeyHeader
+                    && !string.Equals(r.EffectiveInjectionHeader, "X-Api-Key", StringComparison.Ordinal)
+                    ? r.InjectionHeader
+                    : null,
                 Description = r.Description,
                 Rotation = r.Rotation is null ? null : new RecipeRotationDto { Owner = r.Rotation.Owner, Detail = r.Rotation.Detail },
                 RefreshSpec = r.Refresh is null

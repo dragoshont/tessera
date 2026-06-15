@@ -27,6 +27,14 @@ public enum InjectionKind
 
     /// <summary>Inject the stored cookies as a <c>Cookie</c> header.</summary>
     Cookies,
+
+    /// <summary>
+    /// Inject the access token into a named API-key header (default <c>X-Api-Key</c>)
+    /// — the Servarr / Seerr / *arr provider class, which authenticates with a key
+    /// header rather than an OAuth bearer. The header name is the recipe's
+    /// <see cref="Recipe.InjectionHeader"/>.
+    /// </summary>
+    ApiKeyHeader,
 }
 
 /// <summary>
@@ -54,6 +62,7 @@ public sealed record RecipeRotation(string Owner, string? Detail = null);
 /// <param name="Tools">The callable HTTP operations this recipe exposes (ADR 0014).</param>
 /// <param name="ExtraHeaders">Static non-secret headers every call needs (values may use <c>{extra:key}</c> from the bundle or <c>{env:NAME}</c> from the process env).</param>
 /// <param name="CookieMap">For cookie injection: cookie name → bundle source (<c>access_token</c> / <c>refresh_token</c> / <c>cookie:&lt;name&gt;</c>). When set, the <c>Cookie</c> header is built from this map instead of the raw cookie dict.</param>
+/// <param name="InjectionHeader">For <see cref="InjectionKind.ApiKeyHeader"/>: the header name the access token is injected into (default <c>X-Api-Key</c>).</param>
 /// <param name="Description">A human-readable description.</param>
 /// <param name="Rotation">Who owns rotating this provider's session (awareness dashboard, ADR 0017); null ⇒ no rotation declared (static).</param>
 /// <param name="Refresh">How Tessera rotates this session when it is the owner (Mode U, ADR 0015); null ⇒ no Tessera-owned refresh (static or external).</param>
@@ -67,6 +76,7 @@ public sealed record Recipe(
     IReadOnlyList<RecipeTool>? Tools = null,
     IReadOnlyDictionary<string, string>? ExtraHeaders = null,
     IReadOnlyDictionary<string, string>? CookieMap = null,
+    string? InjectionHeader = null,
     string? Description = null,
     RecipeRotation? Rotation = null,
     RefreshSpec? Refresh = null)
@@ -82,6 +92,10 @@ public sealed record Recipe(
 
     /// <summary>Cookie-name → bundle-source mapping for cookie injection (never null).</summary>
     public IReadOnlyDictionary<string, string> CookieSources => CookieMap ?? EmptyHeaders;
+
+    /// <summary>The API-key header name for <see cref="InjectionKind.ApiKeyHeader"/> (default <c>X-Api-Key</c>).</summary>
+    public string EffectiveInjectionHeader =>
+        string.IsNullOrWhiteSpace(InjectionHeader) ? "X-Api-Key" : InjectionHeader;
 
     private static readonly IReadOnlyDictionary<string, string> EmptyHeaders = new Dictionary<string, string>();
 }

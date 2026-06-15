@@ -411,6 +411,65 @@ public sealed class ProviderEgressTests
         Assert.Equal(ProviderCallStatus.Completed, result.Status);
         Assert.Equal($"https://{Host}/api/v3/wanted/missing", transport.LastUrl); // no trailing '?'
     }
+
+    // ── API-key-header injection (the Servarr / Seerr provider class) ──────────
+
+    private static (ProviderEgress Egress, FakeTransport Transport) BuildApiKeyRecipe(string header = "X-Api-Key", string? injection = "apikey")
+    {
+        var store = new InMemoryCredentialStore();
+        store.Put("sonarr-key", new CredentialBundle(AccessToken: "THE-API-KEY"));
+        var pdp = new PolicyDecisionPoint([new Grant(Caller, "sonarr", ["read:*"], User)]);
+        var resolver = new CredentialResolver([new TargetBinding("sonarr", "sonarr-key", User)], store);
+        var transport = new FakeTransport();
+        var recipe = new Recipe("sonarr", Egress: EgressMode.Http, UpstreamBaseUrl: $"https://{Host}/api/v3",
+            Injection: injection == "apikey" ? InjectionKind.ApiKeyHeader : InjectionKind.None,
+            InjectionHeader: header == "X-Api-Key" ? null : header,
+            Tools: [new RecipeTool("sonarr_series", "GET", "series", "read:series")]);
+        var egress = new ProviderEgress(new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, [recipe], new SsrfGuard([Host]), transport);
+        return (egress, transport);
+    }
+
+    [Fact]
+    public async Task Api_key_header_injects_the_access_token_into_x_api_key()
+    {
+        var (egress, transport) = BuildApiKeyRecipe();
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "sonarr", "sonarr_series", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        // The key goes in X-Api-Key (NOT Authorization: Bearer) — the Servarr shape.
+        Assert.Equal("THE-API-KEY", transport.LastHeaders!["X-Api-Key"]);
+        Assert.False(transport.LastHeaders!.ContainsKey("Authorization"));
+        // …and is never returned to the caller.
+        Assert.DoesNotContain("THE-API-KEY", result.Body ?? "", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Api_key_header_uses_the_recipe_header_name()
+    {
+        var (egress, transport) = BuildApiKeyRecipe(header: "X-Plex-Token");
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "sonarr", "sonarr_series", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal("THE-API-KEY", transport.LastHeaders!["X-Plex-Token"]);
+    }
+
+    [Fact]
+    public async Task Api_key_header_refuses_when_no_key_is_stored()
+    {
+        var store = new InMemoryCredentialStore(); // no bundle
+        var pdp = new PolicyDecisionPoint([new Grant(Caller, "sonarr", ["read:*"], User)]);
+        var resolver = new CredentialResolver([new TargetBinding("sonarr", "sonarr-key", User)], store);
+        var transport = new FakeTransport();
+        var recipe = new Recipe("sonarr", Egress: EgressMode.Http, UpstreamBaseUrl: $"https://{Host}/api/v3",
+            Injection: InjectionKind.ApiKeyHeader,
+            Tools: [new RecipeTool("sonarr_series", "GET", "series", "read:series")]);
+        var egress = new ProviderEgress(new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, [recipe], new SsrfGuard([Host]), transport);
+
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "sonarr", "sonarr_series", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.NoCredential, result.Status); // fail-safe: no unauthenticated call
+        Assert.Equal(0, transport.Calls);
+    }
 }
 
 
