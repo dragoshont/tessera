@@ -195,4 +195,38 @@ public sealed class CallerBrokerService
             .CallAsync(identity.Caller!, identity.OnBehalfOf, target, tool, argsJson, confirmed, cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Performs a provider call addressed by its HTTP shape <c>(method, path)</c> — the
+    /// way a domain MCP invokes a tool it already knows by URL, without duplicating the
+    /// recipe's name map (ADR 0015). Resolves the exact-path tool, then runs the same
+    /// authorize → inject → audit path as <see cref="CallAsync"/>. A <c>(method, path)</c>
+    /// that matches no declared tool is refused (the recipe stays the allow-list).
+    /// </summary>
+    public async Task<ProviderCallToolResult> InvokeAsync(
+        CallerResolution identity,
+        string target,
+        string method,
+        string path,
+        string? argsJson,
+        bool confirmed,
+        CancellationToken cancellationToken = default)
+    {
+        if (!identity.Authenticated)
+        {
+            return new ProviderCallToolResult("unauthenticated", null, null, identity.Detail);
+        }
+
+        var tool = _providers.ResolveToolByHttp(target, method, path);
+        if (tool is null)
+        {
+            return new ProviderCallToolResult(
+                "notallowed", null, null,
+                $"no tool matches {method.ToUpperInvariant()} {path} on '{target}' (declare it in the recipe, or invoke by name)");
+        }
+
+        return await _providers
+            .CallAsync(identity.Caller!, identity.OnBehalfOf, target, tool, argsJson, confirmed, cancellationToken)
+            .ConfigureAwait(false);
+    }
 }

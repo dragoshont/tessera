@@ -86,6 +86,41 @@ public sealed class BrokerProviderGateway : IProviderGateway
     }
 
     /// <inheritdoc/>
+    public string? ResolveToolByHttp(string target, string method, string path)
+    {
+        var wantPath = NormalizePath(path);
+        foreach (var recipe in _recipes)
+        {
+            if (recipe.Egress != EgressMode.Http || !string.Equals(recipe.Target, target, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (var tool in recipe.ExposedTools)
+            {
+                // Exact-path only: a parameterized tool (a {placeholder} in its path)
+                // can't be addressed by a concrete HTTP path, so it must be invoked by
+                // name — never guess a template from a filled-in path.
+                if (tool.Path.Contains('{', StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (string.Equals(tool.Method, method, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(NormalizePath(tool.Path), wantPath, StringComparison.Ordinal))
+                {
+                    return tool.Name;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Trims surrounding slashes so a recipe's <c>wanted/missing</c> matches a caller's <c>/wanted/missing</c>.</summary>
+    private static string NormalizePath(string path) => path.Trim('/');
+
+    /// <inheritdoc/>
     public async Task<ProviderCallToolResult> CallAsync(
         CallerIdentity caller,
         EndUserAssertion? onBehalfOf,

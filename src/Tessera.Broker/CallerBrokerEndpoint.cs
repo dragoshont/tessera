@@ -92,9 +92,23 @@ internal static class CallerBrokerEndpoint
                     .ConfigureAwait(false);
                 return Results.Json(result, statusCode: StatusForCall(result.Status));
 
+            case "invoke":
+                if (string.IsNullOrWhiteSpace(body.Method) || string.IsNullOrWhiteSpace(body.Path))
+                {
+                    return Results.Json(new { error = "op 'invoke' requires 'method' and 'path'" }, statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                var invokeArgs = body.Args is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } ia
+                    ? ia.GetRawText()
+                    : null;
+                var invoked = await svc
+                    .InvokeAsync(identity, body.Target, body.Method, body.Path, invokeArgs, body.Confirm, cancellationToken)
+                    .ConfigureAwait(false);
+                return Results.Json(invoked, statusCode: StatusForCall(invoked.Status));
+
             default:
                 return Results.Json(
-                    new { error = $"unknown op '{op}' (expected call|list-tools|check)" },
+                    new { error = $"unknown op '{op}' (expected call|invoke|list-tools|check)" },
                     statusCode: StatusCodes.Status400BadRequest);
         }
     }
@@ -128,16 +142,20 @@ internal static class CallerBrokerEndpoint
 }
 
 /// <summary>The <c>POST /v1/broker</c> request body.</summary>
-/// <param name="Op">The operation: <c>call</c> (default) / <c>list-tools</c> / <c>check</c>.</param>
+/// <param name="Op">The operation: <c>call</c> (default) / <c>invoke</c> / <c>list-tools</c> / <c>check</c>.</param>
 /// <param name="Target">The provider/target (required).</param>
 /// <param name="Tool">The tool name (required for <c>call</c>).</param>
 /// <param name="Action">The action verb (required for <c>check</c>).</param>
-/// <param name="Args">The call arguments as a JSON object (filled into the tool's path/body).</param>
+/// <param name="Method">The HTTP method (required for <c>invoke</c> — addresses a tool by its HTTP shape).</param>
+/// <param name="Path">The tool's path (required for <c>invoke</c>; matched against the recipe, exact-path only).</param>
+/// <param name="Args">The call arguments as a JSON object (filled into the tool's path/query/body).</param>
 /// <param name="Confirm">True to run a write/booking tool (step-up).</param>
 public sealed record BrokerCallRequest(
     string? Op,
     string? Target,
     string? Tool,
     string? Action,
+    string? Method,
+    string? Path,
     JsonElement? Args,
     bool Confirm);

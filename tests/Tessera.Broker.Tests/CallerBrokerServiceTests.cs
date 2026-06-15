@@ -237,6 +237,76 @@ public sealed class CallerBrokerServiceTests
         Assert.Equal(0, transport.Calls);
     }
 
+    // ── op=invoke: address a tool by its HTTP (method, path) ──────────────────
+
+    [Fact]
+    public async Task Invoke_resolves_a_tool_by_method_and_path()
+    {
+        var (svc, transport, _) = BuildDispatch();
+        var id = await svc.AuthenticateAsync(CallerApp, UserAlice);
+
+        // The MCP knows the URL it was going to call; Tessera maps it to sonarr_series.
+        var result = await svc.InvokeAsync(id, "sonarr", "GET", "/series", argsJson: null, confirmed: false);
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal(1, transport.Calls);
+        Assert.Equal("https://sonarr.example/api/v3/series", transport.LastUrl);
+    }
+
+    [Fact]
+    public async Task Invoke_normalises_the_leading_slash()
+    {
+        var (svc, _, _) = BuildDispatch();
+        var id = await svc.AuthenticateAsync(CallerApp, UserAlice);
+
+        // Recipe path is "series" (no slash); the caller sends "/series" — they match.
+        var withSlash = await svc.InvokeAsync(id, "sonarr", "GET", "/series", null, confirmed: false);
+        var without = await svc.InvokeAsync(id, "sonarr", "GET", "series", null, confirmed: false);
+
+        Assert.Equal("completed", withSlash.Status);
+        Assert.Equal("completed", without.Status);
+    }
+
+    [Fact]
+    public async Task Invoke_refuses_an_unknown_method_path()
+    {
+        var (svc, transport, _) = BuildDispatch();
+        var id = await svc.AuthenticateAsync(CallerApp, UserAlice);
+
+        var result = await svc.InvokeAsync(id, "sonarr", "DELETE", "/series/42", null, confirmed: false);
+
+        Assert.Equal("notallowed", result.Status); // no declared tool matches → the recipe is the allow-list
+        Assert.Equal(0, transport.Calls);
+    }
+
+    [Fact]
+    public async Task Invoke_honours_step_up_on_a_write_tool()
+    {
+        var (svc, transport, _) = BuildDispatch();
+        var id = await svc.AuthenticateAsync(CallerApp, UserAlice);
+
+        // POST /command is the write tool (sonarr_search) — needs confirmation.
+        var unconfirmed = await svc.InvokeAsync(id, "sonarr", "POST", "/command", "{}", confirmed: false);
+        Assert.Equal("stepup", unconfirmed.Status);
+        Assert.Equal(0, transport.Calls);
+
+        var confirmed = await svc.InvokeAsync(id, "sonarr", "POST", "/command", "{}", confirmed: true);
+        Assert.Equal("completed", confirmed.Status);
+        Assert.Equal(1, transport.Calls);
+    }
+
+    [Fact]
+    public async Task Invoke_is_unauthenticated_without_a_caller()
+    {
+        var (svc, transport, _) = BuildDispatch();
+        var anonymous = CallerResolution.Fail("no caller token");
+
+        var result = await svc.InvokeAsync(anonymous, "sonarr", "GET", "/series", null, confirmed: false);
+
+        Assert.Equal("unauthenticated", result.Status);
+        Assert.Equal(0, transport.Calls);
+    }
+
     // ── Fixtures ──────────────────────────────────────────────────────────────
 
     private static CallerBrokerService AuthOnlyService()

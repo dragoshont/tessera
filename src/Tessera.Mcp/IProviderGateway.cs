@@ -13,6 +13,17 @@ public interface IProviderGateway
     IReadOnlyList<ProviderToolInfo> ListTools(CallerIdentity caller, EndUserAssertion? onBehalfOf);
 
     /// <summary>
+    /// Resolves the tool <em>name</em> for an exact <c>(method, path)</c> on a target
+    /// — the structural address a domain MCP uses to invoke a tool by the HTTP shape
+    /// it already knows (ADR 0015), without duplicating the recipe's name map. Only
+    /// matches a tool whose path is a fixed template (no <c>{placeholder}</c>): a
+    /// parameterized tool must be invoked by name. Returns <c>null</c> when nothing
+    /// matches (or egress is disabled). This is structural only — authorization still
+    /// happens in <see cref="CallAsync"/>.
+    /// </summary>
+    string? ResolveToolByHttp(string target, string method, string path);
+
+    /// <summary>
     /// Performs a provider call for the identity. <paramref name="confirmed"/> must
     /// be true to run a write/booking tool.
     /// </summary>
@@ -34,6 +45,9 @@ public sealed class DisabledProviderGateway : IProviderGateway
 
     /// <inheritdoc/>
     public IReadOnlyList<ProviderToolInfo> ListTools(CallerIdentity caller, EndUserAssertion? onBehalfOf) => [];
+
+    /// <inheritdoc/>
+    public string? ResolveToolByHttp(string target, string method, string path) => null;
 
     /// <inheritdoc/>
     public Task<ProviderCallToolResult> CallAsync(

@@ -107,12 +107,31 @@ end-user token in `X-Tessera-On-Behalf-Of`, and a JSON body:
 
 | Field | Meaning |
 |---|---|
-| `op` | `call` (default) · `list-tools` · `check` |
+| `op` | `call` (default) · `invoke` · `list-tools` · `check` |
 | `target` | the provider/target (required) |
 | `tool` | the tool name (required for `call`) |
+| `method` + `path` | the tool's HTTP shape (required for `invoke` — see below) |
 | `action` | the action verb (required for `check`) |
-| `args` | a JSON object filled into the tool's path/body |
+| `args` | a JSON object filled into the tool's path/query/body |
 | `confirm` | `true` to run a write/booking (step-up) tool |
+
+### Two ways to address a tool: `call` (by name) vs `invoke` (by HTTP shape)
+
+A domain MCP usually already calls an upstream by **method + path** (e.g.
+`GET /series`). Rather than maintain a second name map, it can address the tool by
+that same shape with **`op: "invoke"`** — Tessera resolves it to the declared recipe
+tool, so the recipe stays the single source of truth:
+
+```bash
+# invoke — the MCP forwards the URL shape it already knows
+curl -sS https://tessera.internal/v1/broker \
+  -H "Authorization: Bearer $CALLER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{ "op": "invoke", "target": "sonarr", "method": "GET", "path": "/series" }'
+```
+
+`invoke` matches **exact-path** tools only (no `{placeholder}` in the recipe path); a
+parameterized tool must be addressed by name with `op: "call"`. A `(method, path)`
+that matches no declared tool is refused — the recipe is the allow-list either way.
 
 **Discover what you may call** (dry — no upstream call):
 
