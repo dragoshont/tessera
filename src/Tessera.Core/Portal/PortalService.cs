@@ -2,6 +2,7 @@ using Tessera.Core.Configuration;
 using Tessera.Core.Policy;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
+using Tessera.Core.Results;
 
 namespace Tessera.Core.Portal;
 
@@ -26,6 +27,12 @@ public sealed class PortalService
     private readonly CredentialResolver _resolver;
     private readonly IReadOnlyList<string> _admins;
     private readonly Action<LoadedPolicy>? _persist;
+    // The consent ledger (ADR 0020): a receipt is appended when a person seeds a
+    // user/dependent-owned connection (the consent act). It is per-(principal,
+    // target, data class) so calendar consent never satisfies mail. In-memory +
+    // bounded like the audit tail — durable consent is the binding itself; this is
+    // the "what/when did I consent" surface, lost on restart, never faked.
+    private readonly List<ConsentReceipt> _consents = [];
     // The caller id recorded on a portal-authored grant. A binding alone makes a
     // person + connection appear (the read-model keys on bindings); a grant is what
     // authorizes a *consumer* to use it, so portal-added grants name this principal
@@ -77,6 +84,38 @@ public sealed class PortalService
             .Select(r => new RecipeSummary(r.Target, r.Description ?? r.Target))
             .OrderBy(r => r.Provider, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+    /// <summary>
+    /// The dependents <paramref name="guardian"/> may act as (ADR 0020) — derived
+    /// from the live policy's <c>owner: dependent</c> bindings whose <c>guardian</c>
+    /// is this person. Answers "whose accounts do I manage?" Read-only, secret-free;
+    /// it confers no authority on its own (the PDP grants still gate every action),
+    /// it only surfaces the relationship the bindings already encode.
+    /// </summary>
+    public IReadOnlyList<string> ListDependents(string guardian) =>
+        new GuardianRelationships(Policy.Bindings).DependentsOf(guardian);
+
+    /// <summary>True when <paramref name="guardian"/> may act as <paramref name="dependent"/> (a seeded dependent binding exists).</summary>
+    public bool MayActAs(string guardian, string dependent) =>
+        new GuardianRelationships(Policy.Bindings).MayActAs(guardian, dependent);
+
+    /// <summary>
+    /// The consent receipts recorded for <paramref name="principal"/> (ADR 0020) —
+    /// "what data classes did I consent to, and when?". Captured at the moment a
+    /// person seeds a user/dependent-owned connection; newest-first. Bounded +
+    /// in-memory (lost on restart, never faked); the durable consent is the binding.
+    /// </summary>
+    public IReadOnlyList<ConsentReceipt> ListConsents(string principal)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
+        lock (_gate)
+        {
+            return _consents
+                .Where(c => string.Equals(c.Principal, principal, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(c => c.GrantedAt)
+                .ToArray();
+        }
+    }
 
     /// <summary>
     /// Lists the delegations the awareness dashboard shows (ADR 0017) — a projection
@@ -320,17 +359,26 @@ public sealed class PortalService
     /// <param name="provider">The recipe target (e.g. <c>health-portal</c>).</param>
     /// <param name="principal">The person the connection acts for.</param>
     /// <param name="credential">The store secret name holding the session bundle.</param>
+    /// <param name="owner">
+    /// Whose credential this is (ADR 0020). Defaults to <see cref="CredentialOwner.User"/>:
+    /// the connect wizard seeds a <em>person's own</em> login, so a portal-added
+    /// connection is user-owned (not the service-owned fail-safe default a hand-
+    /// authored shared key uses).
+    /// </param>
+    /// <param name="guardian">For an <see cref="CredentialOwner.Dependent"/> connection, the guardian who seeds it.</param>
     public async Task<PortalConnection> AddConnectionAsync(
         string provider,
         string principal,
         string credential,
+        CredentialOwner owner = CredentialOwner.User,
+        string? guardian = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(provider);
         ArgumentException.ThrowIfNullOrWhiteSpace(principal);
         ArgumentException.ThrowIfNullOrWhiteSpace(credential);
 
-        var binding = new TargetBinding(provider, credential, principal);
+        var binding = new TargetBinding(provider, credential, principal, owner, guardian);
         LoadedPolicy updated;
         lock (_gate)
         {
@@ -359,13 +407,31 @@ public sealed class PortalService
             // read-only policy document — in-memory only.
         }
 
-        var recipe = FindRecipe(updated, provider);
+        // Record the consent act: seeding a person's own (or a dependent's) login is
+        // the consent. One receipt per (principal, target) — the data class is the
+        // provider target, so two providers (e.g. calendar vs mail) get separate
+        // receipts (calendar consent never satisfies mail), and Covers() can match
+        // it. The provider's exposed action verbs ride along as Scopes (informational).
+        if (owner is CredentialOwner.User or CredentialOwner.Dependent)
+        {
+            var recipe = FindRecipe(updated, provider);
+            var scopes = recipe?.ExposedActions is { Count: > 0 } acts ? acts.ToArray() : null;
+            var receipt = new ConsentReceipt(principal, provider, provider, owner, DateTimeOffset.UtcNow, guardian, scopes);
+            lock (_gate)
+            {
+                // Replace any prior consent for the same (principal, target).
+                _consents.RemoveAll(c => c.Covers(principal, provider, provider));
+                _consents.Add(receipt);
+            }
+        }
+
+        var resolvedRecipe = FindRecipe(updated, provider);
         var health = await _resolver.AssessBindingAsync(binding, cancellationToken).ConfigureAwait(false);
         return new PortalConnection(
             ConnectionId: $"{provider}:{principal}",
             OwnerPrincipal: principal,
             Provider: provider,
-            DisplayName: recipe?.Description ?? provider,
+            DisplayName: resolvedRecipe?.Description ?? provider,
             Status: MapStatus(health.Status),
             HasCookies: health.HasCookies,
             HasRefreshToken: health.HasRefreshToken,

@@ -336,4 +336,80 @@ public sealed class PortalServiceTests
         Assert.Null(SchedulePortal().GetSchedule("health-portal:nobody@example.com"));
         Assert.Null(SchedulePortal().GetSchedule("garbage-no-colon"));
     }
+
+    // ── Consent + dependents (ADR 0020, F2) ───────────────────────────────────
+
+    [Fact]
+    public async Task Adding_a_connection_is_user_owned_by_default_and_records_consent()
+    {
+        var policy = new LoadedPolicy([], [], [new Recipe("graph-mail", Description: "Mail", Actions: ["read:mail.metadata", "use:mail.send"])]);
+        var portal = Build(new InMemoryCredentialStore(), policy, Admin);
+
+        var conn = await portal.AddConnectionAsync("graph-mail", Member, "gmail-bob");
+        Assert.Equal("user", conn.Owner); // the connect wizard seeds a person's OWN login
+
+        var consents = portal.ListConsents(Member);
+        var receipt = Assert.Single(consents);
+        Assert.Equal("graph-mail", receipt.Target);
+        Assert.Equal("graph-mail", receipt.DataClass); // matchable target-level data class
+        Assert.Equal(CredentialOwner.User, receipt.Owner);
+        Assert.Contains("read:mail.metadata", receipt.CoveredScopes);
+        // The receipt Covers() the (principal, target) it recorded — the gate is usable.
+        Assert.True(receipt.Covers(Member, "graph-mail", "graph-mail"));
+    }
+
+    [Fact]
+    public async Task Separate_providers_get_separate_consents_calendar_is_not_mail()
+    {
+        var policy = new LoadedPolicy([], [],
+        [
+            new Recipe("graph-calendar", Description: "Calendar", Actions: ["read:calendar"]),
+            new Recipe("graph-mail", Description: "Mail", Actions: ["read:mail.metadata"]),
+        ]);
+        var portal = Build(new InMemoryCredentialStore(), policy, Admin);
+
+        await portal.AddConnectionAsync("graph-calendar", Admin, "cal-alice");
+        var consents = portal.ListConsents(Admin);
+        var cal = Assert.Single(consents);
+        // Consenting to calendar does NOT cover mail (separate targets, the F2 guarantee).
+        Assert.False(cal.Covers(Admin, "graph-mail", "graph-mail"));
+    }
+
+    [Fact]
+    public async Task Re_adding_a_connection_replaces_its_consent_not_duplicates_it()
+    {
+        var policy = new LoadedPolicy([], [], [new Recipe("graph-mail", Description: "Mail", Actions: ["read:mail.metadata"])]);
+        var portal = Build(new InMemoryCredentialStore(), policy, Admin);
+
+        await portal.AddConnectionAsync("graph-mail", Member, "gmail-bob");
+        await portal.AddConnectionAsync("graph-mail", Member, "gmail-bob-2");
+        Assert.Single(portal.ListConsents(Member)); // one receipt, not two
+    }
+
+    [Fact]
+    public void Dependents_are_derived_from_seeded_guardian_bindings()
+    {
+        var policy = Policy(
+            new TargetBinding("health-portal", "hp-kid", "kid@example.com", CredentialOwner.Dependent, Admin),
+            new TargetBinding("health-portal", "hp-alice", Admin, CredentialOwner.User));
+        var portal = Build(new InMemoryCredentialStore(), policy, Admin);
+
+        Assert.Equal(["kid@example.com"], portal.ListDependents(Admin));
+        Assert.Empty(portal.ListDependents(Member));
+        Assert.True(portal.MayActAs(Admin, "kid@example.com"));
+        Assert.False(portal.MayActAs(Member, "kid@example.com"));
+    }
+
+    [Fact]
+    public async Task A_service_owned_add_records_no_consent()
+    {
+        // Only a person's own (user/dependent) login is a consent act; a shared
+        // service key is not "consented to" by a person.
+        var policy = new LoadedPolicy([], [], [new Recipe("seerr", Description: "Seerr", Actions: ["read:requests"])]);
+        var portal = Build(new InMemoryCredentialStore(), policy, Admin);
+
+        await portal.AddConnectionAsync("seerr", Admin, "seerr-key", CredentialOwner.Service);
+        Assert.Empty(portal.ListConsents(Admin));
+    }
 }
+

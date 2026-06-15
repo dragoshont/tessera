@@ -304,5 +304,56 @@ public sealed class ProviderEgressTests
         Assert.Equal(ResultClass.Metadata, result.OutputClass);
         Assert.Equal(16, result.Body!.Length); // capped at metadataMaxBytes, not the 1MB body cap
     }
+
+    // ── Service-owned shared-key fallback end-to-end (ADR 0020, F10) ───────────
+
+    private static (ProviderEgress Egress, FakeTransport Transport) BuildSharedKey()
+    {
+        // A media provider backed by a SHARED service key (principal: null). bob is
+        // granted; mallory is not. The key must reach a granted user via the
+        // fallback and NEVER reach an ungranted one (the PDP gates before resolve).
+        var store = new InMemoryCredentialStore();
+        store.Put("seerr-key", new CredentialBundle(AccessToken: "SHARED-HOUSEHOLD-KEY"));
+        var grants = new[] { new Grant(Caller, "seerr", ["read:*", "use:request"], "bob@example.com") };
+        var pdp = new PolicyDecisionPoint(grants);
+        var resolver = new CredentialResolver(
+            [new TargetBinding("seerr", "seerr-key", Principal: null, Owner: CredentialOwner.Service)], store);
+        var transport = new FakeTransport(200, "{\"ok\":true}");
+        var recipe = new Recipe("seerr", Egress: EgressMode.Http, UpstreamBaseUrl: $"https://{Host}/v1",
+            Injection: InjectionKind.BearerToken,
+            Tools: [new RecipeTool("seerr_requests", "GET", "request", "read:requests")]);
+        var egress = new ProviderEgress(new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, [recipe], new SsrfGuard([Host]), transport);
+        return (egress, transport);
+    }
+
+    [Fact]
+    public async Task A_granted_user_reaches_the_shared_service_key()
+    {
+        var (egress, transport) = BuildSharedKey();
+        var bob = new EndUserAssertion("bob@example.com", "https://issuer/v2.0", VerificationMethod.OidcJwt, "bob@example.com");
+
+        var result = await egress.CallAsync(ChatCaller(), bob, "seerr", "seerr_requests", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal(1, transport.Calls);
+        // The shared key was injected — but never returned to the caller.
+        Assert.Equal("Bearer SHARED-HOUSEHOLD-KEY", transport.LastHeaders!["Authorization"]);
+        Assert.DoesNotContain("SHARED-HOUSEHOLD-KEY", result.Body ?? "", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_ungranted_user_gets_nothing_from_the_shared_service_key()
+    {
+        var (egress, transport) = BuildSharedKey();
+        var mallory = new EndUserAssertion("mallory@example.com", "https://issuer/v2.0", VerificationMethod.OidcJwt, "mallory@example.com");
+
+        var result = await egress.CallAsync(ChatCaller(), mallory, "seerr", "seerr_requests", null, confirmed: false);
+
+        // Denied by the PDP BEFORE the resolver ever touches the shared key.
+        Assert.Equal(ProviderCallStatus.Denied, result.Status);
+        Assert.Equal(0, transport.Calls);
+        Assert.Null(result.Body);
+    }
 }
+
 

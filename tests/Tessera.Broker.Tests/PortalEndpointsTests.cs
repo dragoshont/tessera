@@ -272,6 +272,50 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
+    // ── Consents + dependents (ADR 0020) ──────────────────────────────────────
+
+    [Fact]
+    public async Task Adding_a_connection_records_a_self_scoped_consent()
+    {
+        // The member seeds their own login → a consent receipt is recorded.
+        var add = await _client.SendAsync(AsJson(Member, HttpMethod.Post, "/portal/connections",
+            new { provider = "health-portal", principal = Member, credential = "hp-bob-consent" }));
+        Assert.Equal(HttpStatusCode.Created, add.StatusCode);
+
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Member, HttpMethod.Get, "/portal/consents"))).Content.ReadAsStringAsync());
+        var receipts = doc.RootElement.EnumerateArray().ToArray();
+        Assert.Contains(receipts, c =>
+            c.GetProperty("target").GetString() == "health-portal"
+            && c.GetProperty("owner").GetString() == "user"
+            && c.GetProperty("principal").GetString() == Member);
+    }
+
+    [Fact]
+    public async Task Consents_require_authentication_and_a_member_cannot_read_anothers()
+    {
+        var unauth = await _client.GetAsync(new Uri("/portal/consents", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.Unauthorized, unauth.StatusCode);
+
+        var forbidden = await _client.SendAsync(As(Member, HttpMethod.Get, $"/portal/consents?principal={Admin}"));
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+    }
+
+    [Fact]
+    public async Task Dependents_endpoint_is_authenticated_and_self_scoped()
+    {
+        var unauth = await _client.GetAsync(new Uri("/portal/dependents", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.Unauthorized, unauth.StatusCode);
+
+        // bob has no dependents in the fixture → 200 + empty list, never an error.
+        using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Member, HttpMethod.Get, "/portal/dependents"))).Content.ReadAsStringAsync());
+        Assert.Equal(Member, doc.RootElement.GetProperty("guardian").GetString());
+        Assert.Empty(doc.RootElement.GetProperty("dependents").EnumerateArray());
+
+        // A member may not probe another person's dependents.
+        var forbidden = await _client.SendAsync(As(Member, HttpMethod.Get, $"/portal/dependents?principal={Admin}"));
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+    }
+
     // ── Activity feed (ADR 0017) ──────────────────────────────────────────────
 
     /// <summary>Seeds one brokering decision into the live ring via the registered sink.</summary>

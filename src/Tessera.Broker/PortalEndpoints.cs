@@ -200,6 +200,70 @@ internal static class PortalEndpoints
             return Results.Json(delegations.Select(ToDelegationDto).ToArray());
         });
 
+        // Dependents (ADR 0020) — "whose accounts do I manage?". The dependents the
+        // caller may act as, derived from the owner: dependent bindings they seeded.
+        // Self-scoped; an operator may pass a principal. Secret-free; confers no
+        // authority (the PDP grants still gate every action).
+        app.MapGet("/portal/dependents", async (
+            HttpContext ctx, ITokenValidator validator, PortalService portal, TesseraConfig config, string? principal) =>
+        {
+            var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
+            if (caller is null)
+            {
+                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+            }
+
+            string guardian;
+            if (portal.IsAdmin(caller))
+            {
+                guardian = string.IsNullOrWhiteSpace(principal) ? caller : principal.Trim();
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(principal)
+                    && !string.Equals(principal.Trim(), caller, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Json(new { error = "forbidden: a member may only see their own dependents" }, statusCode: 403);
+                }
+
+                guardian = caller;
+            }
+
+            return Results.Json(new { guardian, dependents = portal.ListDependents(guardian) });
+        });
+
+        // Consents (ADR 0020) — "what data classes did I consent to, and when?". The
+        // receipts captured when a person seeds a user/dependent-owned connection.
+        // Self-scoped; an operator may pass a principal. Secret-free (no value, just
+        // who/what/when/ownership).
+        app.MapGet("/portal/consents", async (
+            HttpContext ctx, ITokenValidator validator, PortalService portal, TesseraConfig config, string? principal) =>
+        {
+            var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
+            if (caller is null)
+            {
+                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+            }
+
+            string subject;
+            if (portal.IsAdmin(caller))
+            {
+                subject = string.IsNullOrWhiteSpace(principal) ? caller : principal.Trim();
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(principal)
+                    && !string.Equals(principal.Trim(), caller, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Json(new { error = "forbidden: a member may only see their own consents" }, statusCode: 403);
+                }
+
+                subject = caller;
+            }
+
+            return Results.Json(portal.ListConsents(subject).Select(ToConsentDto).ToArray());
+        });
+
         // Modules (ADR 0017) — "what connectors are loaded". The catalog of recipes
         // plus the broker's egress posture and a per-module connection count. Any
         // authenticated user may read it (the catalog is shared, like /portal/recipes);
@@ -275,7 +339,7 @@ internal static class PortalEndpoints
                 return Results.Json(new { error = "forbidden: only an operator may add a connection for another person" }, statusCode: 403);
             }
 
-            var created = await portal.AddConnectionAsync(body.Provider.Trim(), body.Principal.Trim(), body.Credential.Trim(), ct).ConfigureAwait(false);
+            var created = await portal.AddConnectionAsync(body.Provider.Trim(), body.Principal.Trim(), body.Credential.Trim(), cancellationToken: ct).ConfigureAwait(false);
             return Results.Json(ToDto(created), statusCode: 201);
         });
 
@@ -425,6 +489,9 @@ internal static class PortalEndpoints
     private static ConnectionDto ToDto(PortalConnection c) =>
         new(c.ConnectionId, c.OwnerPrincipal, c.Provider, c.DisplayName, c.Status,
             c.HasCookies, c.HasRefreshToken, c.HasAccessToken, c.ExpiresAt, c.ExpiryIsEstimated, c.Owner, c.Guardian);
+
+    private static ConsentDto ToConsentDto(Tessera.Core.Results.ConsentReceipt c) =>
+        new(c.Principal, c.Target, c.DataClass, Tessera.Core.Resolution.CredentialOwners.ToToken(c.Owner), c.GrantedAt, c.Guardian, c.CoveredScopes);
 }
 
 /// <summary>The /portal/me payload.</summary>
@@ -441,6 +508,16 @@ internal sealed record RecipeDto(string Provider, string DisplayName);
 
 /// <summary>The connect-wizard write body.</summary>
 internal sealed record AddConnectionRequest(string Provider, string Principal, string Credential);
+
+/// <summary>A consent receipt row (ADR 0020): who consented to what data class, when, under which ownership.</summary>
+internal sealed record ConsentDto(
+    string Principal,
+    string Target,
+    string DataClass,
+    string Owner,
+    DateTimeOffset GrantedAt,
+    string? Guardian,
+    IReadOnlyList<string> Scopes);
 
 /// <summary>A Users-view row (camelCase over the wire matches the web client contract).</summary>
 internal sealed record PersonDto(string Principal, string Role, int ConnectionCount, int NeedsAttentionCount);
