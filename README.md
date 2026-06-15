@@ -10,14 +10,18 @@ ever holding the password, cookie, or token. The secret stays inside Tessera; th
 caller only ever gets the result.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-&nbsp;Status: **design phase — .NET 10 implementation.** A Python spike (v0.0.2)
-proved the model end-to-end and ran live read-only; it is being **replaced** by a
-.NET 10 build (no backwards compatibility). See
+&nbsp;Status: **.NET 10 implementation, actively built.** The broker (identity →
+policy → credential injection → audit), the HTTP-injectable provider egress, the
+MCP tool surface, the action-broker model (action planes + credential ownership),
+the Mode U session refresher, and a baked-in admin portal are implemented and
+covered by tests; live egress to real providers is gated per-deployment and turned
+on by the operator. A Python spike (v0.0.2) proved the model end-to-end; it has
+been **replaced** by this .NET 10 build (no backwards compatibility). See
 [ADR 0001](docs/adr/0001-language-and-runtime.md).
 
-> ⚠️ This repo is currently a **design + spec** repository. Code is being
-> (re)built. Start with the [Architecture](docs/architecture.md) and the
-> [decision records](docs/adr/README.md).
+> Start with the [Architecture](docs/architecture.md), the
+> [decision records](docs/adr/README.md), and — for how Tessera sits next to
+> Traefik, Authentik, and your MCP servers — **[How Tessera fits your stack](#how-tessera-fits-your-stack-traefik--authentik--mcp)** below.
 
 ---
 
@@ -60,6 +64,76 @@ access; you don't think about the rest.
 > (served at `/`): see your connections' health and add a person without editing
 > YAML — OIDC sign-in, and it never shows a secret value. Turn it on in
 > [Getting started §6](docs/getting-started.md#6-the-admin-portal-optional-but-the-friendly-way-in).
+
+---
+
+## How Tessera fits your stack (Traefik · Authentik · MCP)
+
+Tessera is **one layer of a small stack**, not a replacement for your reverse
+proxy or your SSO. It deliberately owns a narrow job — *credential-backed,
+policy-gated, audited **actions*** — and leans on the tools you already run for
+everything around it ([ADR 0018](docs/adr/0018-access-gateway-and-action-broker.md)).
+There are two completely different questions in a homelab/agent setup, and they
+want different tools:
+
+1. **"May this person open this web app?"** (browse Sonarr, Grafana, the Tessera
+   portal) → **Traefik + Authentik** (or oauth2-proxy / Authelia / Pomerium).
+2. **"May this person — or their assistant — perform *this action* with a hidden
+   credential?"** (book an appointment, approve a Seerr request, read a mailbox by
+   handle) → **Tessera.**
+
+```mermaid
+flowchart TB
+    subgraph edge["Edge — browser access (who may open what)"]
+      TR["Traefik<br/>TLS · routing · ForwardAuth"] --> AK["Authentik<br/>login · MFA/passkeys · session"]
+    end
+    subgraph apps["Web apps"]
+      direction LR
+      SON["Sonarr / Grafana / …"]
+      POR["Tessera admin portal"]
+    end
+    AK --> SON
+    AK --> POR
+
+    subgraph agent["Action plane (who may DO what, with which hidden key)"]
+      CHAT["chat / assistant"] --> MCP["MCP server<br/>(domain tools)"]
+      MCP -->|forwarded user OIDC, no secret| TES
+      CLI["CLI · n8n · CI job"] -->|own workload identity| TES
+      TES["Tessera<br/>verify → policy (planes) → inject → audit"] -->|acts on behalf of| UP["upstream API / un-API'd portal"]
+    end
+
+    AK -. "same OIDC token Tessera validates" .-> TES
+```
+
+**Who owns what** (the boundary that keeps the overlap small):
+
+| Layer | Owns | Does **not** own |
+|---|---|---|
+| **Traefik** | TLS, host/path routing, calling ForwardAuth, upstream routing. | Login state, provider action policy. |
+| **Authentik** (or oauth2-proxy / Authelia / Pomerium) | Human login, MFA/passkeys, browser session, *coarse* "may open this app". | Upstream provider API keys, semantic action execution. |
+| **MCP servers** | Domain tool ergonomics ("list my appointments"); they forward the **person's** signed token and hold **no** provider secret. | The credential, the policy decision, the audit. |
+| **Tessera** | Provider connections, hidden credentials, **action-level** authz (read/use/manage planes + step-up), credential ownership, session rotation, secret-free audit, MCP egress. | Being your first browser SSO, an app catalog, MFA lifecycle, or proxying every request. |
+
+**How the identity lines up.** Authentik (or Entra directly) issues the user's
+OIDC token; the MCP server forwards that *same* token to Tessera, which validates
+it (`iss` / `aud` / `exp` / signature) and authorizes the **action** against a
+grant. So the human logs in **once**, and the same proof flows from the browser
+edge down to the action plane — Tessera never invents identity from a header
+([ADR 0005](docs/adr/0005-identity-first-fail-closed.md),
+[ADR 0011](docs/adr/0011-identity-provider-sso.md)).
+
+**Where the MCP boundary sits.** A domain MCP server (e.g. a health-portal tool)
+stays thin: it knows *the domain* and the tool shapes, and it calls Tessera's
+egress with the forwarded user token as the subject — Tessera knows *the
+credential, policy, rotation, and audit*
+([ADR 0015](docs/adr/0015-mcp-egress-through-tessera.md)). The chat can also call
+Tessera's **generic** `tessera_call` MCP surface directly; either way the tool
+surface carries no secret and every call is plane-gated (read/use/manage) with
+step-up on the dangerous ones.
+
+> **TL;DR** — Traefik routes, Authentik says *who you are* and *which apps you may
+> open*, MCP servers give the assistant *domain tools*, and **Tessera is the only
+> thing that holds a provider secret and decides whether a specific action may run.**
 
 ---
 
@@ -120,6 +194,24 @@ in **[docs/architecture.md](docs/architecture.md)**.
 - **Pluggable harvest drivers.** Browser today; **Android emulator** and desktop
   are first-class drivers behind the same contract, built when a provider needs
   them. ([ADR 0006](docs/adr/0006-harvest-drivers.md))
+- **Action planes (read · use · manage).** Every provider verb is namespaced by
+  *plane*: `read:` observes, `use:` operates (the data plane), `manage:` reshapes
+  (the control plane). The control plane is **default-deny even when `use` is
+  granted** and defaults to step-up, so "may operate my home, never reconfigure it"
+  is one legible boundary. ([ADR 0019](docs/adr/0019-app-integrations-and-user-delegated-actions.md))
+- **Credential ownership (user · service · dependent).** An orthogonal axis: a
+  *user*-owned login (your mail) is held for you and never revealed to an agent; a
+  *service*-owned household key (a media API key) is brokered to whoever is granted
+  but held by nobody; a *dependent*'s credential is seeded by a guardian. Drives
+  consent, reveal, and isolation. ([ADR 0020](docs/adr/0020-credential-ownership.md))
+- **Spill control on reads.** Personal-data tools (mail, calendar) return
+  **metadata + opaque, target-scoped handles** by default; the full body is fetched
+  only by a handle from a prior search, and a write returns a *receipt*, never a
+  fresh body — enforced in the egress path, so a search can't drain a mailbox.
+- **Awareness dashboard.** A secret-free, read-only surface answering "who/what may
+  act as me, what's loaded, is a job rotating my session, and what happened?" —
+  including the credential owner behind each delegation.
+  ([ADR 0017](docs/adr/0017-awareness-dashboard.md))
 
 > **Scope note.** There is **one** iteration planned, and it includes the full
 > security hardening, **per-user delegation**, and a **WebRTC-voice** chat surface
