@@ -26,6 +26,14 @@ namespace Tessera.Core.Recipes;
 /// so it can't bulk-spill), or <c>receipt</c>. <c>null</c> ⇒ unclassified (no
 /// result-class enforcement, the legacy behaviour).
 /// </param>
+/// <param name="Query">
+/// The allow-list of query-string parameter names this tool may forward from the
+/// call args (e.g. <c>pageSize</c>, <c>sortKey</c>, <c>start</c>). Only names listed
+/// here are appended to the upstream URL, and only when present in the args — an
+/// agent can't inject an arbitrary query parameter. Values are URL-encoded. <c>null</c>
+/// ⇒ no query forwarding (the path is used verbatim). Path <c>{placeholders}</c> and
+/// query params are independent: a name can be one or the other.
+/// </param>
 public sealed record RecipeTool(
     string Name,
     string Method,
@@ -33,10 +41,14 @@ public sealed record RecipeTool(
     string Action,
     bool StepUp = false,
     string? Description = null,
-    ResultClass? OutputClass = null)
+    ResultClass? OutputClass = null,
+    IReadOnlyList<string>? Query = null)
 {
     /// <summary>True when this is a mutating tool requiring human confirmation.</summary>
     public bool RequiresConfirmation => StepUp;
+
+    /// <summary>The query-parameter names this tool may forward (never null).</summary>
+    public IReadOnlyList<string> AllowedQuery => Query ?? [];
 
     /// <summary>
     /// The plane this tool operates on (ADR 0019), always derived from the

@@ -73,6 +73,7 @@ internal sealed class RecipeToolDto
     public bool StepUp { get; init; }
     public string? Description { get; init; }
     public string? ResultClass { get; init; }
+    public List<string>? Query { get; init; }
 }
 
 /// <summary>
@@ -116,7 +117,7 @@ public sealed record LoadedPolicy(
                 Injection: ParseInjection(r.Injection),
                 Actions: r.Actions,
                 Tools: r.Tools?
-                    .Select(t => new RecipeTool(t.Name, t.Method, t.Path, t.Action, t.StepUp, t.Description, ParseResultClass(t.ResultClass)))
+                    .Select(t => new RecipeTool(t.Name, t.Method, t.Path, t.Action, t.StepUp, t.Description, ParseResultClass(t.ResultClass), t.Query))
                     .ToArray(),
                 ExtraHeaders: r.ExtraHeaders,
                 CookieMap: r.CookieMap,
@@ -221,6 +222,7 @@ public sealed record LoadedPolicy(
                         // Persist the declared output class; an unclassified tool
                         // round-trips back to null (faithful document, ADR 0008).
                         ResultClass = t.OutputClass is { } oc ? ResultClassToken(oc) : null,
+                        Query = t.Query is { Count: > 0 } ? [.. t.Query] : null,
                     }).ToList()
                     : null,
                 ExtraHeaders = r.ExtraHeaders is { Count: > 0 } ? new Dictionary<string, string>(r.ExtraHeaders) : null,

@@ -33,7 +33,7 @@ public sealed class PolicyRoundTripTests
                 {
                   "target": "media", "egress": "http", "upstreamBaseUrl": "https://media.example.com",
                   "tools": [
-                    { "name": "search", "method": "GET", "path": "/search", "action": "read:search", "resultClass": "metadata" },
+                    { "name": "search", "method": "GET", "path": "/search", "action": "read:search", "resultClass": "metadata", "query": ["q", "pageSize"] },
                     { "name": "read", "method": "GET", "path": "/items/{handle}", "action": "read:item", "resultClass": "fullBody" }
                   ]
                 }
@@ -61,6 +61,7 @@ public sealed class PolicyRoundTripTests
             var search = media.ExposedTools.Single(t => t.Name == "search");
             Assert.Equal(Results.ResultClass.Metadata, search.OutputClass);
             Assert.Equal(ActionPlane.Read, search.EffectivePlane);
+            Assert.Equal(["q", "pageSize"], search.AllowedQuery); // query allow-list parsed
 
             // Save + reload: the values survive.
             ConfigLoader.SavePolicy(path, loaded);
@@ -77,6 +78,8 @@ public sealed class PolicyRoundTripTests
             Assert.Contains("\"resultClass\": \"fullBody\"", written, StringComparison.Ordinal);
             Assert.Contains("\"resultClass\": \"metadata\"", written, StringComparison.Ordinal);
             Assert.Contains("\"guardian\": \"alice@example.com\"", written, StringComparison.Ordinal);
+            // The query allow-list survives the round-trip.
+            Assert.Equal(["q", "pageSize"], reloaded.Recipes.Single(r => r.Target == "media").ExposedTools.Single(t => t.Name == "search").AllowedQuery);
         }
         finally
         {

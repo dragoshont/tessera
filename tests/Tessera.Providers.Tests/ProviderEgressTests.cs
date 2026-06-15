@@ -354,6 +354,63 @@ public sealed class ProviderEgressTests
         Assert.Equal(0, transport.Calls);
         Assert.Null(result.Body);
     }
+
+    // ── Query-param forwarding (allow-listed, URL-encoded) ────────────────────
+
+    private static (ProviderEgress Egress, FakeTransport Transport) BuildQueryRecipe()
+    {
+        var store = new InMemoryCredentialStore();
+        store.Put("sonarr-alice", new CredentialBundle(AccessToken: "AT"));
+        var pdp = new PolicyDecisionPoint([new Grant(Caller, "sonarr", ["read:*"], User)]);
+        var resolver = new CredentialResolver([new TargetBinding("sonarr", "sonarr-alice", User)], store);
+        var transport = new FakeTransport();
+        var recipe = new Recipe("sonarr", Egress: EgressMode.Http, UpstreamBaseUrl: $"https://{Host}/api/v3",
+            Injection: InjectionKind.BearerToken,
+            Tools:
+            [
+                // A list tool that forwards an allow-listed set of query params.
+                new RecipeTool("sonarr_missing", "GET", "wanted/missing", "read:missing",
+                    Query: ["pageSize", "sortKey", "sortDirection"]),
+            ]);
+        var egress = new ProviderEgress(new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, [recipe], new SsrfGuard([Host]), transport);
+        return (egress, transport);
+    }
+
+    [Fact]
+    public async Task Allow_listed_query_params_are_forwarded_and_encoded()
+    {
+        var (egress, transport) = BuildQueryRecipe();
+        var args = "{\"pageSize\":50,\"sortKey\":\"air date\",\"sortDirection\":\"descending\"}";
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "sonarr", "sonarr_missing", args, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        // Number forwarded raw, string URL-encoded; only the declared names appear.
+        Assert.Equal($"https://{Host}/api/v3/wanted/missing?pageSize=50&sortKey=air%20date&sortDirection=descending", transport.LastUrl);
+    }
+
+    [Fact]
+    public async Task An_undeclared_query_param_is_not_forwarded()
+    {
+        var (egress, transport) = BuildQueryRecipe();
+        // 'apikey' + 'admin' are NOT in the allow-list — an agent can't smuggle them onto the URL.
+        var args = "{\"pageSize\":10,\"apikey\":\"leak\",\"admin\":true}";
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "sonarr", "sonarr_missing", args, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal($"https://{Host}/api/v3/wanted/missing?pageSize=10", transport.LastUrl);
+        Assert.DoesNotContain("apikey", transport.LastUrl!, StringComparison.Ordinal);
+        Assert.DoesNotContain("admin", transport.LastUrl!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task No_query_string_when_no_declared_args_present()
+    {
+        var (egress, transport) = BuildQueryRecipe();
+        var result = await egress.CallAsync(ChatCaller(), Alice(), "sonarr", "sonarr_missing", "{}", confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal($"https://{Host}/api/v3/wanted/missing", transport.LastUrl); // no trailing '?'
+    }
 }
 
 

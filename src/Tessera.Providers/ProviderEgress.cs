@@ -144,7 +144,13 @@ public sealed class ProviderEgress
             return new ProviderCallResult(ProviderCallStatus.BadRequest, Detail: pathError);
         }
 
-        var url = CombineUrl(recipe.UpstreamBaseUrl, path!);
+        var (query, queryError) = BuildQuery(tool, requestBody);
+        if (queryError is not null)
+        {
+            return new ProviderCallResult(ProviderCallStatus.BadRequest, Detail: queryError);
+        }
+
+        var url = CombineUrl(recipe.UpstreamBaseUrl, path!) + query;
         if (!_guard.IsAllowed(url))
         {
             return new ProviderCallResult(ProviderCallStatus.NotAllowed, Detail: "destination host is not on the SSRF allow-list");
@@ -256,6 +262,61 @@ public sealed class ProviderEgress
         }
 
         return (path, null);
+    }
+
+    /// <summary>
+    /// Builds the upstream query string from the tool's allow-listed query params
+    /// (service-access spec): only names the recipe declared in
+    /// <see cref="RecipeTool.AllowedQuery"/> are forwarded, and only when present in
+    /// the args as a scalar — so an agent can't smuggle an arbitrary query parameter
+    /// onto the upstream call. Names and values are URL-encoded. Returns the leading
+    /// <c>?</c> + joined pairs, or an empty string when there is nothing to forward.
+    /// </summary>
+    private static (string Query, string? Error) BuildQuery(RecipeTool tool, string? argsJson)
+    {
+        if (tool.AllowedQuery.Count == 0 || string.IsNullOrWhiteSpace(argsJson))
+        {
+            return ("", null);
+        }
+
+        JsonElement args;
+        try
+        {
+            using var doc = JsonDocument.Parse(argsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return ("", "arguments must be a JSON object to fill the query parameters");
+            }
+            args = doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return ("", "arguments are not valid JSON");
+        }
+
+        var parts = new List<string>(tool.AllowedQuery.Count);
+        foreach (var name in tool.AllowedQuery)
+        {
+            if (!args.TryGetProperty(name, out var el))
+            {
+                continue;
+            }
+
+            var value = el.ValueKind switch
+            {
+                JsonValueKind.String => el.GetString(),
+                JsonValueKind.Number => el.GetRawText(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                _ => null, // arrays/objects/null are not forwarded as query params
+            };
+            if (value is not null)
+            {
+                parts.Add($"{Uri.EscapeDataString(name)}={Uri.EscapeDataString(value)}");
+            }
+        }
+
+        return parts.Count == 0 ? ("", null) : ("?" + string.Join("&", parts), null);
     }
 
     /// <summary>Extracts the distinct <c>{name}</c> placeholder names from a path, in order.</summary>
