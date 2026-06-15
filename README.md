@@ -135,6 +135,10 @@ step-up on the dangerous ones.
 > open*, MCP servers give the assistant *domain tools*, and **Tessera is the only
 > thing that holds a provider secret and decides whether a specific action may run.**
 
+> **New user?** Walk through [Onboarding with Authentik](docs/onboarding-with-authentik.md)
+> — first sign-in, the portal tour, connecting an account, and how read/use/manage +
+> step-up feel from the chat.
+
 ---
 
 ## Why it exists
