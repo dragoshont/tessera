@@ -185,14 +185,16 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
   (the `/v1/broker` contract + recipe/binding/grant authoring + the gates); linked
   from getting-started + the README non-human-caller section. ADR 0021 written +
   indexed.
-- [ ] **C2 Domain-MCP egress client** (cross-repo, separate GH repo) — a
-  credential-free Tessera egress client in the domain MCP; route the HTTP-injectable
-  tools through `/v1/broker`; drop the upstream secrets; keep tool ergonomics (ADR
-  0015 shape C). SSH-backed + device-paired tools untouched.
+- [x] **C2 Domain-MCP egress client** (cross-repo, `dragoshont/homelab_mcp`) — a
+  credential-free `TesseraHttpClient` (same `.get/.post` surface, routes via
+  `op=invoke`) + a per-service direct-vs-broker factory switch (default off). Drops
+  the upstream secrets for an opted-in service; keeps tool ergonomics (ADR 0015 shape
+  C). SSH-backed + device-paired tools untouched. +17 py tests.
 - [ ] **C3 🛑 STOP — operator: cutover.** Real recipes/grants/bindings (`owner:
   service`) for the actual providers in the private overlay; move the keys into
   Tessera's store; `egress.enabled` + SSRF allow-list + NetworkPolicy. Real secrets +
-  live egress.
+  live egress. **Runbook written:** `dragoshont/homelab`
+  `docs/runbooks/tessera-media-broker-cutover.md`.
 - [ ] **C4 (future) mTLS caller plane** (ADR 0021 phase 2) — a client cert at the
   ingress → `VerificationMethod.Mtls` caller; slots behind the same `/v1/broker`, no
   PDP/egress change.
@@ -276,3 +278,29 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
   [connect-a-domain-mcp.md](../connect-a-domain-mcp.md) onboarding. **302 .NET green.**
   Remaining: C2 (domain-MCP egress client, cross-repo) + C3 (operator cutover, real
   keys/egress) + C4 (mTLS phase 2, future).
+- 2026-06-15 (cont.): **Standards-validated hardening + cutover enablers.** After an
+  adversarial validation against the governing specs (MCP auth spec, RFC 8693, OWASP
+  LLM06/NHI/SSRF, NIST 800-207) — which confirmed the architecture is the de-facto
+  shape (no token passthrough + complete mediation) — shipped the gaps the cutover
+  needs:
+  - **SSRF hardening** (the one real finding): `AddressGuard` blocks the *resolved*
+    IP (link-local/metadata `169.254.169.254`/loopback/multicast); `HttpClientTransport`
+    resolves once + **pins** the IP at connect (closes DNS-rebind/TOCTOU). `SsrfGuard`
+    gains `allowPlainHttp` (internal-host opt-in). +24 tests.
+  - **Query-param egress**: `RecipeTool.Query` allow-list — only declared params are
+    forwarded (URL-encoded); an agent can't smuggle one. +4 tests.
+  - **`op=invoke`**: address a tool by its HTTP `(method, path)` so a domain MCP needs
+    no second name map (`IProviderGateway.ResolveToolByHttp`). +5 tests.
+  - **API-key-header injection** (`InjectionKind.ApiKeyHeader` + `injectionHeader`):
+    the Servarr/Seerr/*arr class (`X-Api-Key`), which `bearer` couldn't express. +3.
+  - **Audit coverage** (relentless audit): endpoint-level `/v1/broker` HTTP tests
+    (auth, op routing, status→HTTP map) + the apikey DTO round-trip. **347 .NET green.**
+  - **C2 done (cross-repo)**: `dragoshont/homelab_mcp` gained a credential-free
+    `TesseraHttpClient` (same `.get/.post` surface, routes via `op=invoke`) + a
+    per-service direct-vs-broker factory switch (default off). +17 py tests.
+  - **Operator runbook**: `dragoshont/homelab` `docs/runbooks/tessera-media-broker-cutover.md`
+    (the C3 activation: KV bundle-shaping, Authentik caller app, recipes/grants/
+    bindings, NetworkPolicy, the two flips). C3 stays the operator step.
+  - **Wiki**: a full Diátaxis wiki (`docs/wiki/`, 28 pages) — tutorial (verified
+    runnable), how-to, reference (code-accurate), explanation. Non-native-English style.
+  Remaining: C3 (operator cutover, real keys/live egress) + C4 (mTLS phase 2, future).

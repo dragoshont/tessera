@@ -127,4 +127,49 @@ public sealed class PolicyRoundTripTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Recipe_apikey_injection_and_a_custom_header_survive_a_save_reload()
+    {
+        var path = WriteTemp("""
+            {
+              "recipes": [
+                {
+                  "target": "sonarr", "egress": "http", "injection": "apikey",
+                  "upstreamBaseUrl": "https://sonarr.example/api/v3",
+                  "tools": [ { "name": "series", "method": "GET", "path": "series", "action": "read:series" } ]
+                },
+                {
+                  "target": "plex", "egress": "http", "injection": "apikey", "injectionHeader": "X-Plex-Token",
+                  "upstreamBaseUrl": "https://plex.example",
+                  "tools": [ { "name": "sessions", "method": "GET", "path": "status/sessions", "action": "read:sessions" } ]
+                }
+              ]
+            }
+            """);
+        try
+        {
+            var loaded = ConfigLoader.LoadPolicy(path);
+            var sonarr = loaded.Recipes.Single(r => r.Target == "sonarr");
+            Assert.Equal(Recipes.InjectionKind.ApiKeyHeader, sonarr.Injection);
+            Assert.Equal("X-Api-Key", sonarr.EffectiveInjectionHeader); // default
+            var plex = loaded.Recipes.Single(r => r.Target == "plex");
+            Assert.Equal("X-Plex-Token", plex.EffectiveInjectionHeader); // custom
+
+            ConfigLoader.SavePolicy(path, loaded);
+            var reloaded = ConfigLoader.LoadPolicy(path);
+            Assert.Equal(Recipes.InjectionKind.ApiKeyHeader, reloaded.Recipes.Single(r => r.Target == "sonarr").Injection);
+            Assert.Equal("X-Plex-Token", reloaded.Recipes.Single(r => r.Target == "plex").EffectiveInjectionHeader);
+
+            var written = File.ReadAllText(path);
+            Assert.Contains("\"injection\": \"apikey\"", written, StringComparison.Ordinal);
+            Assert.Contains("\"injectionHeader\": \"X-Plex-Token\"", written, StringComparison.Ordinal);
+            // The default header is NOT written (a clean, reviewable diff).
+            Assert.DoesNotContain("\"injectionHeader\": \"X-Api-Key\"", written, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
