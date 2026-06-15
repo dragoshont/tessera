@@ -23,6 +23,10 @@ been **replaced** by this .NET 10 build (no backwards compatibility). See
 > [decision records](docs/adr/README.md), and — for how Tessera sits next to
 > Traefik, Authentik, and your MCP servers — **[How Tessera fits your stack](#how-tessera-fits-your-stack-traefik--authentik--mcp)**
 > below, or the visual **[positioning guide](docs/positioning.md)**.
+>
+> 📖 **New to Tessera? The [Wiki](docs/wiki/README.md) is the friendly entry point** —
+> a [Diátaxis](https://diataxis.fr/)-organised set of tutorials, how-to guides,
+> reference, and explanation, written to be clear for non-native English readers.
 
 ---
 
