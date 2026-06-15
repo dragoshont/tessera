@@ -81,13 +81,16 @@ function AppRoutes() {
 }
 
 export function App() {
+  // Compose the router with Vite's base path so a GitHub Pages build under
+  // '/tessera/' routes correctly; '/' (the homelab default) yields a root basename.
+  const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <TesseraClientProvider>
           <ToastProvider>
             <SessionProvider>
-              <BrowserRouter>
+              <BrowserRouter basename={basename}>
                 <AppRoutes />
               </BrowserRouter>
             </SessionProvider>

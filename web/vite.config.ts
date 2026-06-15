@@ -4,6 +4,10 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // The homelab broker serves the SPA at '/' (the default). VITE_BASE lets a
+  // GitHub Pages build set a sub-path base (e.g. '/tessera/') without affecting
+  // the in-cluster build.
+  base: process.env.VITE_BASE || '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     tsconfigPaths: true,
