@@ -279,4 +279,105 @@ no OAuth (and eventually no web) + per-end-user identity.**
   without the cookie crossing into the broker (capability handle vs delegated call).
 - **Vaultwarden viability** as a real store (vs test-only) — validate empirically.
 
+---
+
+## 9. Standards alignment (the de-facto pattern)
+
+Tessera is a concrete implementation of what the governing standards prescribe for
+a non-human caller acting with a credential it must not hold. This section maps each
+**mechanism in the code** to the **authority** that mandates it — so a reviewer can
+trace "is this the right shape?" to a spec, not an opinion. For the visual
+positioning of these mechanisms in a stack, see [positioning.md](positioning.md).
+
+### 9.1 No token passthrough — the load-bearing invariant
+
+The **MCP Authorization specification** (§2.6.2, §3.7) and its Security Best
+Practices forbid *token passthrough* outright: an MCP server **MUST NOT** forward
+the token it received to a downstream API, and **MUST** validate that a presented
+token was issued for *its own* audience. Tessera is built around this:
+
+- `EntraTokenValidator` validates the forwarded token's signature (Entra JWKS),
+  `iss`, `aud` (Tessera's configured audience), `exp`, and `tid` — and **fails
+  closed** when no audience is configured. A token minted for another resource is
+  rejected, not relayed.
+- The upstream call uses a **separate, Tessera-owned credential** (the recipe's
+  injected key/cookie/bearer), resolved just-in-time from the store. The caller's
+  token is **never** placed on the upstream request.
+
+Why it matters (the spec's own reasoning): passthrough breaks audience binding,
+defeats rate-limit/validation controls, and destroys the audit trail (the upstream
+sees a token from "someone else"). Tessera's injection model removes the
+anti-pattern by construction — and, per the spec's "future-compatibility" note,
+starting with audience separation is what lets the security model evolve.
+
+### 9.2 Delegation, not impersonation — RFC 8693 vocabulary
+
+Tessera keeps the **caller (WHO)** and **end-user (FOR WHOM)** as distinct,
+separately-verified identities (`CallerIdentity` + `EndUserAssertion`). That is
+**RFC 8693 §1.1 delegation** semantics — the actor retains its own identity while
+acting for the subject — which the RFC calls out as *safer* than impersonation
+(where the actor becomes indistinguishable from the subject). The secret-free audit
+records the composite (`caller on behalf of user`), mirroring the RFC's `act` claim.
+The deferred grant-bound `actAs` (ADR 0021) maps to the RFC's **`may_act`** claim:
+policy — not the caller — decides who may act for whom.
+
+### 9.3 Complete mediation + least privilege — OWASP LLM06 / Saltzer–Schroeder
+
+**OWASP LLM06 (Excessive Agency)** prescribes: implement authorization in the
+downstream system (not the LLM), minimize permissions, execute in the user's
+context, and require human approval for high-impact actions. Tessera's
+`PolicyDecisionPoint` is the *complete-mediation* point — **every** call is
+re-evaluated against an explicit grant (default-deny), per
+`(caller, end-user, target, action)`:
+
+- **Action planes** (`read` / `use` / `manage`) make least privilege legible; the
+  control plane is default-deny even when `use` is granted (ADR 0019).
+- **Step-up** on writes/booking/pay is the human-in-the-loop gate; the agent can
+  never autonomously invoke a step-up tool.
+- **Result classes** (metadata-first, full body only by a target-scoped handle) are
+  scope-minimization on the *read* path — a search can't drain a mailbox.
+
+### 9.4 Non-human-identity hygiene — OWASP NHI Top 10
+
+The caller proves its **own** workload identity (Entra app-only token / SVID /
+mTLS) and holds **no** long-lived provider secret — directly countering the top NHI
+risks (static secrets, over-privilege, poor offboarding). Grants are per-caller and
+revocable; workload-identity federation removes the stored client secret entirely.
+
+### 9.5 SSRF defense on egress — OWASP SSRF / MCP Security BP
+
+The egress path is an SSRF-sensitive control point. Tessera applies the
+allow-list-plus-hardening posture both specs recommend:
+
+- `SsrfGuard`: an **explicit host allow-list** (empty ⇒ nothing allowed) and an
+  **HTTPS requirement** by default — no raw IPs unless listed.
+- `HttpClientTransport`: **no auto-redirect** (an upstream can't 302 the broker off
+  the allow-listed host to a metadata endpoint), **no proxy**, **no ambient
+  cookies** (every cookie is injected explicitly), short timeouts.
+- **Hardening in progress** (from the adversarial review): pin the resolved IP for
+  the connection and reject link-local/metadata ranges (`169.254.0.0/16`, private
+  ranges) to close DNS-rebinding/TOCTOU — the residual gap both specs name.
+
+### 9.6 PDP/PEP separation, per-request — NIST SP 800-207 Zero Trust
+
+Tessera realizes the Zero-Trust **Policy Decision Point / Policy Enforcement Point**
+split: `PolicyDecisionPoint` decides; the egress layer enforces; the two are
+separate components and **every** request is authorized at the decision point with a
+secret-free audit record. Identity is never inferred from a header — it is the
+verified caller and the validated end-user token.
+
+### 9.7 Where Tessera does *not* apply (honest scope)
+
+Standards alignment includes knowing the boundary. Tessera brokers
+**HTTP-injectable** credentials. It deliberately does **not**:
+
+- act as your browser **SSO / access gateway** — that is Authentik / oauth2-proxy
+  in front of the apps (ADR 0018); the same OIDC identity flows into Tessera.
+- broker **arbitrary shell / SSH** ("run any command") — an explicit non-goal; that
+  credential class stays with its tool, gated by the access plane + network policy.
+- become a **secret store** — secrets rest in Key Vault / Vault; Tessera fetches
+  just-in-time and never persists them.
+
+---
+
 See [roadmap.md](roadmap.md) for the phased plan.

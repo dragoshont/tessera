@@ -21,7 +21,8 @@ been **replaced** by this .NET 10 build (no backwards compatibility). See
 
 > Start with the [Architecture](docs/architecture.md), the
 > [decision records](docs/adr/README.md), and — for how Tessera sits next to
-> Traefik, Authentik, and your MCP servers — **[How Tessera fits your stack](#how-tessera-fits-your-stack-traefik--authentik--mcp)** below.
+> Traefik, Authentik, and your MCP servers — **[How Tessera fits your stack](#how-tessera-fits-your-stack-traefik--authentik--mcp)**
+> below, or the visual **[positioning guide](docs/positioning.md)**.
 
 ---
 
@@ -164,6 +165,11 @@ step-up on the dangerous ones.
 > — first sign-in, the portal tour, connecting an account, and how read/use/manage +
 > step-up feel from the chat.
 
+> **Architecting a stack?** The visual **[positioning guide](docs/positioning.md)**
+> has clean, copy-ready scenario diagrams (assistant-for-a-person, automation,
+> custody shift, two-plane reference architecture, MCP cutover) plus a
+> decision guide for what belongs where.
+
 ---
 
 ## Why it exists
@@ -199,6 +205,67 @@ flowchart LR
 
 Full drawings (system, request lifecycle, deployment topologies, threat model) are
 in **[docs/architecture.md](docs/architecture.md)**.
+
+---
+
+## Standards & alignment (why this is the de-facto shape)
+
+Tessera's design is not a preference — it is what the governing specifications
+prescribe for *this exact problem* (a non-human caller acting with a credential it
+must not hold). Each mechanism maps to an authority:
+
+| Tessera mechanism | Standard / authority | What the standard requires |
+|---|---|---|
+| MCP forwards the user token; Tessera validates it **for its own audience** and injects a **separate** upstream credential — the caller's token is **never** forwarded onward | **MCP Authorization spec** §2.6.2, §3.7 | Validate token audience; **token passthrough is *explicitly forbidden*** — *"the MCP server MUST NOT pass through the token it received… the upstream token is a separate token."* |
+| Caller (**WHO**) + end-user (**FOR WHOM**) kept distinct; the broker acts *for* the subject while keeping its own identity; deferred grant-bound act-as | **RFC 8693** (OAuth Token Exchange) §1.1, §4 | *Delegation* semantics (actor keeps its own identity); the `act` claim records the composite; `may_act` authorizes who may act |
+| Action authorized in the broker — **default-deny**, read/use/manage **planes**, **step-up** on writes, executed in the user's context | **OWASP LLM06 Excessive Agency**; Saltzer–Schroeder | *Complete mediation*, least privilege, run in user's context, **human-in-the-loop for high-impact actions** — *"implement authorization in downstream systems rather than relying on an LLM."* |
+| Caller proves its **own** workload identity (Entra app / SVID / mTLS) and holds **no** long-lived secret | **OWASP Non-Human-Identity Top 10** | No static secrets in the workload, least privilege, attributable, revoke-on-offboard |
+| Egress is **allow-listed**, HTTPS-pinned, **no-redirect**, private/metadata ranges blocked | **OWASP SSRF Prevention**; **MCP Security Best Practices** (SSRF) | Allow-list destinations; block link-local/metadata; pin DNS; don't follow redirects off the allow-list |
+| **PDP** (decision) separate from **egress** (enforcement), evaluated **every** request, secret-free audit of each decision | **NIST SP 800-207 Zero Trust** | Policy Decision Point / Enforcement Point separation; per-request authorization; full auditability |
+
+Two named principles carry the whole design: **no token passthrough** (the MCP-spec
+invariant) and **complete mediation** (every action re-checked at the broker, never
+trusted from the agent). See the mechanism-by-mechanism mapping into the code in
+[architecture.md §9](docs/architecture.md#9-standards-alignment-the-de-facto-pattern).
+
+---
+
+## Positioning scenarios (where Tessera sits)
+
+Five small pictures — one job each — for slotting Tessera into a real stack. The
+full visual guide is **[How to position Tessera in your architecture](docs/positioning.md)**.
+
+**The one-line model** — the caller gets the *result*, never the *key*:
+
+```mermaid
+flowchart LR
+    CALLER["Caller<br/>(agent · CLI · job)"] -->|proves who it is,<br/>carries no secret| TESSERA["Tessera"]
+    TESSERA -->|injects the hidden credential,<br/>acts under policy| UPSTREAM["Upstream<br/>(API or un-API'd portal)"]
+    UPSTREAM -.->|result only| TESSERA -.-> CALLER
+```
+
+**Two planes, two tools** — don't make one tool answer both questions:
+
+```mermaid
+flowchart TB
+    subgraph edge["Access plane — may a person OPEN this app?"]
+      TR["Traefik / ingress"] --> AK["Authentik / oauth2-proxy"]
+    end
+    subgraph action["Action plane — may a caller DO this, with a hidden key?"]
+      MCP["MCP server"] --> T["Tessera"]
+      CLI["CLI · n8n · CI"] --> T
+      T --> UP["upstream API / portal"]
+    end
+    AK -. "same OIDC token Tessera validates" .-> T
+```
+
+| Picture | When to reach for it |
+|---|---|
+| [An assistant acts for a person](docs/positioning.md#scenario-1--an-assistant-acts-for-a-person) | an agent/MCP must act as a *specific human* |
+| [An automation acts as itself](docs/positioning.md#scenario-2--an-automation-acts-as-itself) | a workload acts with no person in the loop |
+| [The custody shift (before/after)](docs/positioning.md#scenario-3--the-custody-shift-before--after) | *always* — the invariant under everything |
+| [Two planes in one stack](docs/positioning.md#scenario-4--two-planes-in-one-stack-the-reference-architecture) | you run web apps *and* agents side by side |
+| [A domain MCP egresses through Tessera](docs/positioning.md#scenario-5--a-domain-mcp-egresses-through-tessera-the-cutover) | retrofitting a key-holding MCP, one service at a time |
 
 ---
 
