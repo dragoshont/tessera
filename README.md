@@ -341,6 +341,15 @@ target  = "marketplace"
 actions = ["read:listings", "read:prices"]   # least privilege; no writes
 ```
 
+### Call it — `POST /v1/broker`
+
+The caller presents its app-only token in `Authorization` and asks the broker to act
+(the caller plane — [ADR 0021](docs/adr/0021-caller-authentication-plane.md)). It
+holds **no** upstream key; Tessera authorizes the `appid` against the grant above,
+injects the credential, and returns only the result. The full request contract,
+the recipe/binding/grant authoring, and the two fail-closed gates are in
+[connect-a-domain-mcp.md](docs/connect-a-domain-mcp.md).
+
 ### If federation truly isn't available
 
 Fall back to a **client secret** only as a last resort (it *is* a long-lived

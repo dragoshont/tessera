@@ -112,7 +112,10 @@ public static class BrokerHost
         var status = new BrokerStatus
         {
             StoreKind = store.Kind,
-            BrokerEndpointEnabled = false, // fail-closed: no mTLS caller-auth plane in iteration 1
+            // ADR 0021: the caller plane authenticates non-human callers once an
+            // authenticator (identity.mode=oidc + audience) is configured; reaching an
+            // upstream is still separately gated by egress.enabled.
+            BrokerEndpointEnabled = validator.DelegationEnabled,
             DelegationEnabled = validator.DelegationEnabled,
         };
 
@@ -146,8 +149,13 @@ public static class BrokerHost
         // refused) until egress.enabled — so deploying never opens an upstream path.
         services.AddSingleton<Tessera.Providers.IHttpTransport>(new Egress.HttpClientTransport());
         services.AddSingleton<Tessera.Mcp.IProviderGateway>(sp => BrokerProviderGateway.Build(
-            config, pdp, resolver, policy.Recipes, sp.GetRequiredService<Tessera.Providers.IHttpTransport>()));
+            config, pdp, resolver, policy.Recipes, sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), audit));
         services.AddTesseraMcp(mcpOptions);
+
+        // The non-human caller plane (ADR 0021): authenticate a workload from its
+        // app-only token (+ an optional forwarded end-user token) into a distinct
+        // verified caller, then dispatch into the broker spine the MCP surface shares.
+        services.AddSingleton<CallerBrokerService>();
 
         // Admin-portal read-model (ADR 0016): people + connection health projected
         // over the policy + store status, plus a fail-closed live-view provider for
@@ -192,6 +200,7 @@ public static class BrokerHost
         ServePortalSpa(app, config);
         MapEndpoints(app);
         app.MapPortalEndpoints();
+        app.MapCallerBroker();
         app.MapMcp("/mcp");
 
         // Startup self-test (read-only) — proves the authorize+resolve spine against
@@ -277,13 +286,6 @@ public static class BrokerHost
             BrokerEndpoint: s.BrokerEndpointEnabled ? "enabled" : "fail-closed",
             Delegation: s.DelegationEnabled ? "enabled" : "fail-closed (no audience configured)",
             SelfTest: s.SelfTest)));
-
-        // The mTLS caller-auth plane (for CLI/n8n callers) is not wired in iteration 1,
-        // so the network brokering endpoint fails closed. The chat reaches the broker
-        // through the MCP surface (/mcp), not this endpoint.
-        app.MapPost("/v1/broker", () => Results.Json(
-            new { error = "broker endpoint is fail-closed: no caller authenticator configured (mTLS/SVID auth plane not enabled). Use the MCP surface at /mcp." },
-            statusCode: 503));
     }
 
     /// <summary>

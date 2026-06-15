@@ -37,7 +37,8 @@ public sealed class BrokerProviderGateway : IProviderGateway
         PolicyDecisionPoint pdp,
         CredentialResolver resolver,
         IReadOnlyList<Recipe> recipes,
-        IHttpTransport transport)
+        IHttpTransport transport,
+        Tessera.Core.Audit.IAuditSink? audit = null)
     {
         if (!config.Egress.Enabled)
         {
@@ -45,7 +46,8 @@ public sealed class BrokerProviderGateway : IProviderGateway
         }
 
         var guard = new SsrfGuard(config.Egress.AllowedHosts);
-        var egress = new ProviderEgress(new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, recipes, guard, transport);
+        var egress = new ProviderEgress(
+            new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, recipes, guard, transport, audit: audit);
         return new BrokerProviderGateway(egress, pdp, recipes);
     }
 

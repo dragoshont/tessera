@@ -123,6 +123,8 @@ kubectl apply -k deploy/k8s
 - **CLI / automation / job:** register a non-human caller with its **own** audience
   (prefer workload-identity federation over a secret). Steps + Bicep:
   the [non-human caller section of the README](../README.md#registering-a-non-human-caller-cli--automation--job).
+  To then **call** the broker (the `/v1/broker` caller plane — ADR 0021) and author
+  the recipe/binding/grant, follow [connect-a-domain-mcp.md](connect-a-domain-mcp.md).
 
 ---
 

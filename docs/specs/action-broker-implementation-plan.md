@@ -153,6 +153,52 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
 
 ---
 
+## Phase C — caller authentication plane (ADR 0021) + domain-MCP cutover
+
+> Closes the verified gap: `/v1/broker` was fail-closed (503) with no caller
+> authenticator, and `/mcp` hardcodes one chat caller — so no non-chat workload
+> could authenticate as a distinct verified caller. This builds the door that
+> unblocks the ADR 0015 domain-MCP credential cutover. Design + adversarial Q3
+> verification + use-case scoping: [caller-plane-and-mcp-cutover.md](caller-plane-and-mcp-cutover.md).
+
+- [x] **C1.1 Caller plane core** — `CallerBrokerService` (Broker): authenticate a
+  caller from its **app-only** token (reusing `ToCallerIdentity` → verified
+  `OidcJwt` caller), plus an OPTIONAL forwarded end-user token
+  (`X-Tessera-On-Behalf-Of`, Mode U) → verified `EndUserAssertion`; Mode P (no
+  end-user) acts under the caller's own service grant. Fail-closed: a missing /
+  invalid / user-token-as-caller is refused; an app-only on-behalf-of is refused.
+- [x] **C1.2 Endpoint** — `POST /v1/broker` (`CallerBrokerEndpoint`) wired to the
+  service with `op = call | list-tools | check`; **two fail-closed gates** (a caller
+  authenticator configured **and** `egress.enabled`); `/status` now reports the
+  endpoint state. The hardcoded 503 is gone (the handler fail-closes when no
+  authenticator).
+- [x] **C1.3 Audit fix** — `ProviderEgress` now authorization-audits **every**
+  brokered call (it didn't before — the MCP path was unaudited too); wired through
+  `BrokerProviderGateway.Build`. So both the MCP surface and the caller plane record
+  a secret-free decision per call.
+- [x] **C1.4 Tests** — `CallerBrokerServiceTests` (+16): auth branches (Mode P/U,
+  user-as-caller rejected, missing/invalid token, app-only on-behalf-of rejected,
+  validator-not-configured), dispatch (list-tools, read, write step-up→confirm,
+  check allow, ungranted deny, Mode P service-binding), the egress-disabled gate, and
+  the audit. **302 .NET green.**
+- [x] **C1.5 Onboarding** — [connect-a-domain-mcp.md](../connect-a-domain-mcp.md)
+  (the `/v1/broker` contract + recipe/binding/grant authoring + the gates); linked
+  from getting-started + the README non-human-caller section. ADR 0021 written +
+  indexed.
+- [ ] **C2 Domain-MCP egress client** (cross-repo, separate GH repo) — a
+  credential-free Tessera egress client in the domain MCP; route the HTTP-injectable
+  tools through `/v1/broker`; drop the upstream secrets; keep tool ergonomics (ADR
+  0015 shape C). SSH-backed + device-paired tools untouched.
+- [ ] **C3 🛑 STOP — operator: cutover.** Real recipes/grants/bindings (`owner:
+  service`) for the actual providers in the private overlay; move the keys into
+  Tessera's store; `egress.enabled` + SSRF allow-list + NetworkPolicy. Real secrets +
+  live egress.
+- [ ] **C4 (future) mTLS caller plane** (ADR 0021 phase 2) — a client cert at the
+  ingress → `VerificationMethod.Mtls` caller; slots behind the same `/v1/broker`, no
+  PDP/egress change.
+
+---
+
 ## Cross-cutting (thread through, not a final bolt-on)
 
 - [x] Consent receipts (per ownership mode) — `ConsentReceipt` (Core): per
@@ -219,3 +265,14 @@ writes, result classes (metadata→preview→full-body). All `owner: user`.
     it; ungranted user denied before resolve).
   - F9: ADR 0019 migration note (the `*`-grant → `manage:` behaviour change).
   286 .NET green. Operator cutovers + step-up UX still the only remaining work.
+- 2026-06-15: **Phase C1 complete — caller authentication plane (ADR 0021).** Built
+  the missing `/v1/broker` door: `CallerBrokerService` + `CallerBrokerEndpoint`
+  (app-only caller token → verified `OidcJwt` caller; optional `X-Tessera-On-Behalf-Of`
+  end-user; Mode P/U), two fail-closed gates (authenticator + `egress.enabled`),
+  `/status` reflects it. Also fixed a real gap: `ProviderEgress` now
+  authorization-audits **every** brokered call (the MCP path was unaudited too).
+  ADR 0021 + the [cutover spec](caller-plane-and-mcp-cutover.md) (Q3 adversarial
+  verification, gap analysis, homelab/UoEO use-case scoping) +
+  [connect-a-domain-mcp.md](../connect-a-domain-mcp.md) onboarding. **302 .NET green.**
+  Remaining: C2 (domain-MCP egress client, cross-repo) + C3 (operator cutover, real
+  keys/egress) + C4 (mTLS phase 2, future).

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Tessera.Core.Audit;
 using Tessera.Core.Broker;
 using Tessera.Core.Egress;
 using Tessera.Core.Identity;
@@ -64,6 +65,7 @@ public sealed class ProviderEgress
     private readonly Dictionary<string, Recipe> _recipes;
     private readonly SsrfGuard _guard;
     private readonly IHttpTransport _transport;
+    private readonly IAuditSink _audit;
     private readonly int _maxBodyBytes;
     private readonly int _metadataMaxBytes;
 
@@ -75,13 +77,15 @@ public sealed class ProviderEgress
         SsrfGuard guard,
         IHttpTransport transport,
         int maxBodyBytes = 1_000_000,
-        int metadataMaxBytes = 65_536)
+        int metadataMaxBytes = 65_536,
+        IAuditSink? audit = null)
     {
         _pdp = pdp;
         _resolver = resolver;
         _recipes = recipes.ToDictionary(r => r.Target, StringComparer.Ordinal);
         _guard = guard;
         _transport = transport;
+        _audit = audit ?? NullAuditSink.Instance;
         _maxBodyBytes = maxBodyBytes;
         _metadataMaxBytes = metadataMaxBytes;
     }
@@ -114,6 +118,10 @@ public sealed class ProviderEgress
         // Authorize the (caller, end-user, target, action) — fail-closed.
         var request = new AccessRequest(caller, target, tool.Action, onBehalfOf);
         var decision = _pdp.Evaluate(request);
+        // Audit the authorization decision (secret-free) for every brokered call, so
+        // the egress path is no less observable than a dry check — the credential
+        // bundle is resolved only after this point and is never recorded.
+        _audit.Record(request, decision, null);
         if (!decision.Allowed && decision.Effect != Effect.StepUp)
         {
             return new ProviderCallResult(ProviderCallStatus.Denied, Detail: decision.Reason);

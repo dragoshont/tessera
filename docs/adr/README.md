@@ -27,6 +27,7 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0018](0018-access-gateway-and-action-broker.md) | **Access gateway outside Tessera; Tessera as privileged action broker** (Authentik/oauth2-proxy/Pomerium handle browser access; Tessera owns hidden credentials, action-level authorization, JIT, and audit) | Accepted |
 | [0019](0019-app-integrations-and-user-delegated-actions.md) | **Keep app-to-app integrations direct; broker user-delegated actions through Tessera** (Sonarr/Radarr/qBittorrent/Prowlarr/Seerr runtime plumbing stays native; users/tools go through Tessera for privileged actions) | Accepted |
 | [0020](0020-credential-ownership.md) | **Credential ownership: user vs service vs dependent** (who owns the secret drives seeding/reveal/revoke/onboarding/consent; user-owned = delegation of your own login, service-owned = brokered authority you never hold, dependent = guardian-seeded; default service = fail-safe) | Accepted |
+| [0021](0021-caller-authentication-plane.md) | **Caller authentication plane for non-human callers** (the missing `/v1/broker` door: phase 1 = service OIDC token reusing the app-only→`CallerIdentity` path, phase 2 = mTLS; two independent fail-closed gates; unblocks the ADR 0015 domain-MCP cutover) | Accepted |
 
 ## Format
 
