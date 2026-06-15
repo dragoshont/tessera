@@ -94,7 +94,7 @@ any upstream.
 |---|---|---|---|
 | `enabled` | bool | `false` | Whether the broker may make injected upstream calls. |
 | `allowedHosts` | string[] | `[]` | The SSRF allow-list: the upstream hosts the broker may reach. **Required (non-empty) when `enabled` is true.** |
-| `allowPlainHttp` | bool | `false` | When true, plain `http://` is permitted **to allow-listed hosts only** — the opt-in for internal services that do not speak TLS (for example a cluster-internal address). The host allow-list still applies; this only relaxes the scheme. |
+| `allowPlainHttp` | bool | `false` | When true, plain `http://` is permitted **to allow-listed hosts only** — the opt-in for internal services that do not speak TLS (for example a cluster-internal address). The host allow-list still applies; this only relaxes the scheme, at the egress SSRF guard, never the host gate. |
 
 See [Enable egress safely](../how-to/enable-egress-safely.md) for the recommended way
 to turn this on.

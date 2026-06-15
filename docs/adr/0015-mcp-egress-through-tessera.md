@@ -1,6 +1,8 @@
 # ADR 0015 — Domain MCPs egress through Tessera (the credential-proxy target)
 
-- **Status:** Proposed (target architecture; not yet cut over for live providers)
+- **Status:** Proposed (the architecture is decided and **built** — caller plane
+  ADR 0021, provider egress ADR 0014, a credential-free domain-MCP client; the
+  operational **cutover to live providers** is the remaining operator step)
 - **Deciders:** maintainer (Dragoș)
 - **Relates to:** [ADR 0003](0003-credential-store-pluggable.md) (store),
   [ADR 0007](0007-worker-transport.md) (broker⇄worker transport),

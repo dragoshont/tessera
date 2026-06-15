@@ -70,7 +70,11 @@ public sealed class BrokerStatus
     /// <summary>A short description of the backing store.</summary>
     public string StoreKind { get; set; } = "unknown";
 
-    /// <summary>Whether the network /v1/broker endpoint is open (it stays fail-closed in iteration 1).</summary>
+    /// <summary>
+    /// Whether the caller plane (<c>/v1/broker</c>) is enabled for this deployment —
+    /// it opens once a caller authenticator is configured (<c>identity.mode=oidc</c> +
+    /// an audience; ADR 0021), and stays fail-closed otherwise.
+    /// </summary>
     public bool BrokerEndpointEnabled { get; set; }
 
     /// <summary>Whether OIDC delegation is enforceable (an audience is configured — gate G2).</summary>

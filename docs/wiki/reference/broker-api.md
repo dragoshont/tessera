@@ -44,7 +44,7 @@ With no on-behalf-of header, the caller acts as itself (Mode P).
 | `tool` | string | `call` | The tool name (from `list-tools`). |
 | `method` + `path` | string | `invoke` | The tool's HTTP shape — addresses a tool by `(method, path)`. |
 | `action` | string | `check` | The action verb to authorise. |
-| `args` | object | `call`, `invoke` | JSON arguments filled into the tool's path / allow-listed query / body. |
+| `args` | object | `call`, `invoke` | JSON arguments filled into the tool's path / allow-listed query (the names the recipe's `query` field declares) / body. |
 | `confirm` | bool | `call`, `invoke` | `true` to run a write/booking (step-up) tool. |
 
 ---
