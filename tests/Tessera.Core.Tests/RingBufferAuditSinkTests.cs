@@ -78,16 +78,28 @@ public sealed class RingBufferAuditSinkTests
     [Fact]
     public void Query_filters_by_since()
     {
-        var ring = new RingBufferAuditSink(NullAuditSink.Instance, capacity: 10);
+        // A deterministic clock — no Thread.Sleep, no flake: old is stamped strictly
+        // before the cut, new strictly after.
+        var clock = new ManualClock(DateTimeOffset.UnixEpoch);
+        var ring = new RingBufferAuditSink(NullAuditSink.Instance, capacity: 10, timeProvider: clock);
+
         Record(ring, "caller", "alice@example.com", "old", "read:x");
-        var cut = DateTimeOffset.UtcNow;
-        Thread.Sleep(5);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        var cut = clock.GetUtcNow();
+        clock.Advance(TimeSpan.FromSeconds(1));
         Record(ring, "caller", "alice@example.com", "new", "read:x");
 
         var afterCut = ring.Query(onBehalfOf: null, since: cut, limit: 100);
 
         Assert.Single(afterCut);
         Assert.Equal("new", afterCut[0].Target);
+    }
+
+    private sealed class ManualClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan by) => _now += by;
     }
 
     [Fact]

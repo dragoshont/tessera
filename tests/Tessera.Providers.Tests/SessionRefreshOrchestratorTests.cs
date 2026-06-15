@@ -25,6 +25,8 @@ public sealed class SessionRefreshOrchestratorTests
     private static LoadedPolicy Policy(IReadOnlyList<TargetBinding> bindings, params Recipe[] recipes) =>
         new([], bindings, recipes);
 
+    private static readonly Tessera.Core.Egress.SsrfGuard Guard = new(["api.example.com"]);
+
     [Fact]
     public async Task Rotates_owned_bindings_and_skips_absent_ones()
     {
@@ -39,7 +41,7 @@ public sealed class SessionRefreshOrchestratorTests
         var writer = new CapturingWriter();
         var transport = new FakeTransport(200, "{\"access_token\":\"NEW_AT\",\"refresh_token\":\"NEW_RT\"}");
         var orchestrator = new SessionRefreshOrchestrator(
-            Policy(bindings, OwnedPortal()), store, new SessionRefresher(transport, writer));
+            Policy(bindings, OwnedPortal()), store, new SessionRefresher(transport, writer, Guard));
 
         var summary = await orchestrator.RunPassAsync();
 
@@ -62,7 +64,7 @@ public sealed class SessionRefreshOrchestratorTests
         store.Put("portal-alice", Live());
         var writer = new CapturingWriter();
         var orchestrator = new SessionRefreshOrchestrator(
-            Policy(bindings, external), store, new SessionRefresher(new FakeTransport(), writer));
+            Policy(bindings, external), store, new SessionRefresher(new FakeTransport(), writer, Guard));
 
         var summary = await orchestrator.RunPassAsync();
 
@@ -79,7 +81,7 @@ public sealed class SessionRefreshOrchestratorTests
         var store = new InMemoryCredentialStore();
         store.Put("portal-alice", Live());
         var orchestrator = new SessionRefreshOrchestrator(
-            Policy(bindings, noRefresh), store, new SessionRefresher(new FakeTransport(), new CapturingWriter()));
+            Policy(bindings, noRefresh), store, new SessionRefresher(new FakeTransport(), new CapturingWriter(), Guard));
 
         Assert.False(orchestrator.HasOwnedRotation);
         Assert.Equal(0, (await orchestrator.RunPassAsync()).Considered);
@@ -93,7 +95,7 @@ public sealed class SessionRefreshOrchestratorTests
         store.Put("portal-alice", Live());
         var writer = new CapturingWriter();
         var orchestrator = new SessionRefreshOrchestrator(
-            Policy(bindings, OwnedPortal()), store, new SessionRefresher(new FakeTransport(401, "unauthorized"), writer));
+            Policy(bindings, OwnedPortal()), store, new SessionRefresher(new FakeTransport(401, "unauthorized"), writer, Guard));
 
         var summary = await orchestrator.RunPassAsync();
 
@@ -106,11 +108,11 @@ public sealed class SessionRefreshOrchestratorTests
     public void HasOwnedRotation_is_true_only_when_a_recipe_is_owned_and_refresh_declaring()
     {
         var owned = new SessionRefreshOrchestrator(
-            Policy([], OwnedPortal()), new InMemoryCredentialStore(), new SessionRefresher(new FakeTransport(), new CapturingWriter()));
+            Policy([], OwnedPortal()), new InMemoryCredentialStore(), new SessionRefresher(new FakeTransport(), new CapturingWriter(), Guard));
         Assert.True(owned.HasOwnedRotation);
 
         var none = new SessionRefreshOrchestrator(
-            Policy([], new Recipe("portal")), new InMemoryCredentialStore(), new SessionRefresher(new FakeTransport(), new CapturingWriter()));
+            Policy([], new Recipe("portal")), new InMemoryCredentialStore(), new SessionRefresher(new FakeTransport(), new CapturingWriter(), Guard));
         Assert.False(none.HasOwnedRotation);
     }
 
@@ -126,7 +128,7 @@ public sealed class SessionRefreshOrchestratorTests
         var bindings = new List<TargetBinding>();
         var current = Policy(bindings, OwnedPortal());
         var orchestrator = new SessionRefreshOrchestrator(
-            () => current, store, new SessionRefresher(transport, writer));
+            () => current, store, new SessionRefresher(transport, writer, Guard));
 
         var first = await orchestrator.RunPassAsync();
         Assert.Equal(0, first.Considered); // no binding yet

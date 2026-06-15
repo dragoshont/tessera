@@ -14,6 +14,9 @@ public sealed class SessionRefresherTests
 
     private static RefreshSpec Spec() => new("refresh", "POST", "access_token", "refresh_token", AbsorbSetCookie: true);
 
+    // The recipe egresses to api.example.com, so the refresher's guard allows it.
+    private static readonly Tessera.Core.Egress.SsrfGuard Guard = new(["api.example.com"]);
+
     private static CredentialBundle Current() => new(
         AccessToken: "OLD_AT",
         RefreshToken: "OLD_RT",
@@ -24,7 +27,7 @@ public sealed class SessionRefresherTests
     {
         var transport = new FakeTransport(200, "{\"access_token\":\"NEW_AT\",\"refresh_token\":\"NEW_RT\"}");
         var writer = new CapturingWriter();
-        var refresher = new SessionRefresher(transport, writer);
+        var refresher = new SessionRefresher(transport, writer, Guard);
 
         var result = await refresher.RefreshAsync(Recipe(), Spec(), "portal-alice", Current());
 
@@ -39,7 +42,7 @@ public sealed class SessionRefresherTests
     {
         var transport = new FakeTransport(401, "unauthorized");
         var writer = new CapturingWriter();
-        var refresher = new SessionRefresher(transport, writer);
+        var refresher = new SessionRefresher(transport, writer, Guard);
 
         var result = await refresher.RefreshAsync(Recipe(), Spec(), "portal-alice", Current());
 
@@ -50,7 +53,7 @@ public sealed class SessionRefresherTests
     [Fact]
     public async Task Not_configured_when_no_spec()
     {
-        var refresher = new SessionRefresher(new FakeTransport(), new CapturingWriter());
+        var refresher = new SessionRefresher(new FakeTransport(), new CapturingWriter(), Guard);
         var result = await refresher.RefreshAsync(Recipe(), spec: null, "portal-alice", Current());
         Assert.Equal(RefreshStatus.NotConfigured, result.Status);
     }
@@ -60,7 +63,7 @@ public sealed class SessionRefresherTests
     {
         var transport = new SetCookieTransport("session=NEW; Path=/; HttpOnly");
         var writer = new CapturingWriter();
-        var refresher = new SessionRefresher(transport, writer);
+        var refresher = new SessionRefresher(transport, writer, Guard);
 
         var result = await refresher.RefreshAsync(Recipe(), Spec(), "portal-alice", Current());
 

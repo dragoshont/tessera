@@ -55,6 +55,7 @@ public sealed class RingBufferAuditSink : IAuditSink, IAuditTail
 {
     private readonly IAuditSink _inner;
     private readonly AuditEntry[] _ring;
+    private readonly TimeProvider _time;
     private readonly Lock _gate = new();
     private int _head;   // index of the next write slot
     private int _count;  // number of entries currently held (≤ capacity)
@@ -62,12 +63,14 @@ public sealed class RingBufferAuditSink : IAuditSink, IAuditTail
     /// <summary>Wraps <paramref name="inner"/> with a tail of at most <paramref name="capacity"/> entries.</summary>
     /// <param name="inner">The durable sink to delegate to (written first, always).</param>
     /// <param name="capacity">The maximum entries to retain (must be &gt; 0).</param>
-    public RingBufferAuditSink(IAuditSink inner, int capacity)
+    /// <param name="timeProvider">Clock for the tail entry timestamp (injected for tests); defaults to the system clock.</param>
+    public RingBufferAuditSink(IAuditSink inner, int capacity, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
         _inner = inner;
         _ring = new AuditEntry[capacity];
+        _time = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc/>
@@ -83,7 +86,9 @@ public sealed class RingBufferAuditSink : IAuditSink, IAuditTail
         // failing is not a reason to fail a brokering decision (Q3).
         try
         {
-            var entry = AuditEntry.From(request, decision, credential);
+            // Stamp the tail entry from the injected clock so the feed's ordering +
+            // since-filter are deterministic (the durable sink keeps its own stamp).
+            var entry = AuditEntry.From(request, decision, credential) with { Timestamp = _time.GetUtcNow() };
             lock (_gate)
             {
                 _ring[_head] = entry;

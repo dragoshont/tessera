@@ -37,19 +37,22 @@ public sealed class SessionRefresher
 {
     private readonly IHttpTransport _transport;
     private readonly ICredentialWriter _writer;
-    private readonly SsrfGuard? _guard;
+    private readonly SsrfGuard _guard;
 
     /// <summary>Creates a refresher over the transport + a store writer.</summary>
     /// <param name="transport">The HTTP transport that performs the refresh call.</param>
     /// <param name="writer">The store writer for the rotated bundle.</param>
     /// <param name="guard">
     /// The SSRF allow-list the refresh URL must pass (the same list the data egress
-    /// uses). When null the refresh URL is <b>not</b> host-checked — only acceptable
-    /// in a unit test; the host always supplies one in production so an OAuth token
-    /// endpoint on a different host can't be used to reach an un-allow-listed URL.
+    /// uses). <b>Required</b> — the refresher egresses, so it can never reach a host
+    /// the data egress couldn't; an OAuth token endpoint on a different host must be
+    /// allow-listed too. There is deliberately no unguarded constructor.
     /// </param>
-    public SessionRefresher(IHttpTransport transport, ICredentialWriter writer, SsrfGuard? guard = null)
+    public SessionRefresher(IHttpTransport transport, ICredentialWriter writer, SsrfGuard guard)
     {
+        ArgumentNullException.ThrowIfNull(transport);
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(guard);
         _transport = transport;
         _writer = writer;
         _guard = guard;
@@ -82,7 +85,7 @@ public sealed class SessionRefresher
             ? spec.TokenUrl!
             : recipe.UpstreamBaseUrl.TrimEnd('/') + "/" + spec.Path.TrimStart('/');
 
-        if (_guard is not null && !_guard.IsAllowed(url))
+        if (!_guard.IsAllowed(url))
         {
             return new RefreshResult(RefreshStatus.Error, "refresh URL host is not on the SSRF allow-list");
         }
