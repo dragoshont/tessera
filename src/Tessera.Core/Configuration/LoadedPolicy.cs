@@ -44,6 +44,7 @@ internal sealed class RecipeDto
     public List<RecipeToolDto>? Tools { get; init; }
     public Dictionary<string, string>? ExtraHeaders { get; init; }
     public Dictionary<string, string>? CookieMap { get; init; }
+    public bool? AbsorbSetCookie { get; init; }
     public string? Description { get; init; }
     public RecipeRotationDto? Rotation { get; init; }
     public RefreshSpecDto? RefreshSpec { get; init; }
@@ -127,7 +128,8 @@ public sealed record LoadedPolicy(
                 Rotation: r.Rotation is null ? null : new RecipeRotation(r.Rotation.Owner, r.Rotation.Detail),
                 Refresh: r.RefreshSpec is null
                     ? null
-                    : new RefreshSpec(r.RefreshSpec.Path, r.RefreshSpec.Method, r.RefreshSpec.AccessTokenField, r.RefreshSpec.RefreshTokenField, r.RefreshSpec.AbsorbSetCookie, r.RefreshSpec.TokenUrl)))
+                    : new RefreshSpec(r.RefreshSpec.Path, r.RefreshSpec.Method, r.RefreshSpec.AccessTokenField, r.RefreshSpec.RefreshTokenField, r.RefreshSpec.AbsorbSetCookie, r.RefreshSpec.TokenUrl),
+                AbsorbSetCookie: r.AbsorbSetCookie ?? false))
             .ToArray();
 
         return new LoadedPolicy(grants, bindings, recipes);    }
@@ -231,6 +233,8 @@ public sealed record LoadedPolicy(
                     : null,
                 ExtraHeaders = r.ExtraHeaders is { Count: > 0 } ? new Dictionary<string, string>(r.ExtraHeaders) : null,
                 CookieMap = r.CookieMap is { Count: > 0 } ? new Dictionary<string, string>(r.CookieMap) : null,
+                // Only persist write-back when it is on (false is the default — keep the document clean).
+                AbsorbSetCookie = r.AbsorbSetCookie ? true : null,
                 // Only persist a non-default API-key header (X-Api-Key is the default).
                 InjectionHeader = r.Injection == InjectionKind.ApiKeyHeader
                     && !string.Equals(r.EffectiveInjectionHeader, "X-Api-Key", StringComparison.Ordinal)

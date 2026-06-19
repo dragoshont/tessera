@@ -173,20 +173,9 @@ public sealed class SessionRefresher
             ? new Dictionary<string, string>(StringComparer.Ordinal)
             : new Dictionary<string, string>(existing, StringComparer.Ordinal);
 
-        foreach (var part in setCookie.Split(','))
+        foreach (var (name, value) in SetCookies.Parse(setCookie))
         {
-            var seg = part.Trim();
-            var eq = seg.IndexOf('=', StringComparison.Ordinal);
-            var semi = seg.IndexOf(';', StringComparison.Ordinal);
-            if (eq > 0)
-            {
-                var name = seg[..eq].Trim();
-                var value = (semi > eq ? seg[(eq + 1)..semi] : seg[(eq + 1)..]).Trim();
-                if (name.Length > 0 && !name.Contains(' ', StringComparison.Ordinal))
-                {
-                    map[name] = value;
-                }
-            }
+            map[name] = value;
         }
 
         return map;

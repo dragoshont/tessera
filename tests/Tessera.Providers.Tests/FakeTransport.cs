@@ -5,11 +5,13 @@ internal sealed class FakeTransport : IHttpTransport
 {
     private readonly int _status;
     private readonly string _body;
+    private readonly IReadOnlyDictionary<string, string> _responseHeaders;
 
-    public FakeTransport(int status = 200, string body = "{\"ok\":true}")
+    public FakeTransport(int status = 200, string body = "{\"ok\":true}", IReadOnlyDictionary<string, string>? responseHeaders = null)
     {
         _status = status;
         _body = body;
+        _responseHeaders = responseHeaders ?? new Dictionary<string, string>();
     }
 
     public string? LastMethod { get; private set; }
@@ -25,6 +27,6 @@ internal sealed class FakeTransport : IHttpTransport
         LastUrl = url;
         LastHeaders = headers;
         LastBody = body;
-        return Task.FromResult(new TransportResponse(_status, new Dictionary<string, string>(), _body));
+        return Task.FromResult(new TransportResponse(_status, _responseHeaders, _body));
     }
 }

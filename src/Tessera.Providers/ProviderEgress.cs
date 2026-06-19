@@ -7,6 +7,7 @@ using Tessera.Core.Model;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
 using Tessera.Core.Results;
+using Tessera.Core.Stores;
 
 namespace Tessera.Providers;
 
@@ -66,6 +67,7 @@ public sealed class ProviderEgress
     private readonly SsrfGuard _guard;
     private readonly IHttpTransport _transport;
     private readonly IAuditSink _audit;
+    private readonly ICredentialWriter? _writer;
     private readonly int _maxBodyBytes;
     private readonly int _metadataMaxBytes;
 
@@ -78,7 +80,8 @@ public sealed class ProviderEgress
         IHttpTransport transport,
         int maxBodyBytes = 1_000_000,
         int metadataMaxBytes = 65_536,
-        IAuditSink? audit = null)
+        IAuditSink? audit = null,
+        ICredentialWriter? writer = null)
     {
         _pdp = pdp;
         _resolver = resolver;
@@ -88,6 +91,7 @@ public sealed class ProviderEgress
         _audit = audit ?? NullAuditSink.Instance;
         _maxBodyBytes = maxBodyBytes;
         _metadataMaxBytes = metadataMaxBytes;
+        _writer = writer;
     }
 
     /// <summary>
@@ -185,6 +189,30 @@ public sealed class ProviderEgress
         catch (Exception ex)
         {
             return new ProviderCallResult(ProviderCallStatus.TransportError, Detail: ex.Message);
+        }
+
+        // Sliding-session write-back (ADR 0014/0015): when the recipe owns it and the
+        // upstream rotated the session on this read (a Set-Cookie on a 2xx), capture the
+        // rotated cookies and merge them back to the store so the next read uses the live
+        // session. Without this, reads stop extending a sliding session and it dies
+        // between the owner's keep-warm passes. Best-effort and out-of-band: a non-2xx is
+        // ignored (so a logout/clearing cookie can't wipe the session), and a write-back
+        // failure never fails the read — the next rotation, or the owner's re-login,
+        // recovers.
+        if (recipe.AbsorbSetCookie
+            && _writer is not null
+            && response.Status is >= 200 and < 300
+            && CookieWriteBack.BuildRotation(recipe, bundle, response.Headers) is { } rotated
+            && _resolver.BindingFor(request) is { } binding)
+        {
+            try
+            {
+                await _writer.PutBundleAsync(binding.Credential, rotated, cancellationToken).ConfigureAwait(false);
+            }
+            catch (StoreException)
+            {
+                // The live session simply isn't persisted this round — never fail the read.
+            }
         }
 
         // A metadata result is capped tighter than a full body, so a list/search

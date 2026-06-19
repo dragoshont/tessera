@@ -470,6 +470,144 @@ public sealed class ProviderEgressTests
         Assert.Equal(ProviderCallStatus.NoCredential, result.Status); // fail-safe: no unauthenticated call
         Assert.Equal(0, transport.Calls);
     }
+
+    // ── Sliding-session write-back (ADR 0014/0015) ────────────────────────────
+
+    private static (ProviderEgress Egress, CapturingWriter Writer) BuildAbsorb(
+        int status = 200,
+        string? setCookie = null,
+        bool absorb = true,
+        bool withWriter = true,
+        CredentialBundle? seed = null)
+    {
+        var store = new InMemoryCredentialStore();
+        store.Put("portal-alice", seed ?? new CredentialBundle(AccessToken: "OLD_AT", RefreshToken: "OLD_RT"));
+        var pdp = new PolicyDecisionPoint([new Grant(Caller, Target, ["read:*"], User)]);
+        var resolver = new CredentialResolver([new TargetBinding(Target, "portal-alice", User)], store);
+        var headers = setCookie is null ? null : new Dictionary<string, string> { ["Set-Cookie"] = setCookie };
+        var transport = new FakeTransport(status, "{\"ok\":true}", headers);
+        var recipe = new Recipe(Target, Egress: EgressMode.Http, UpstreamBaseUrl: $"https://{Host}/v1",
+            Injection: InjectionKind.Cookies,
+            Tools: [new RecipeTool("portal_list_items", "GET", "items", "read:items")],
+            CookieMap: new Dictionary<string, string>
+            {
+                ["TokenSSO"] = "access_token",
+                ["RefreshTokenSSO"] = "refresh_token",
+            },
+            AbsorbSetCookie: absorb);
+        var writer = new CapturingWriter();
+        var egress = new ProviderEgress(
+            new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, [recipe], new SsrfGuard([Host]), transport,
+            writer: withWriter ? writer : null);
+        return (egress, writer);
+    }
+
+    [Fact]
+    public async Task A_rotated_session_is_written_back_after_a_read()
+    {
+        // The upstream rotated BOTH the access + refresh cookie on this read; the broker
+        // reverse-maps them through the cookie map and merges them back to the store.
+        var (egress, writer) = BuildAbsorb(
+            setCookie: "TokenSSO=NEW_AT; Path=/; HttpOnly; Secure, RefreshTokenSSO=NEW_RT; Path=/; HttpOnly; Secure");
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal("portal-alice", writer.LastName);
+        Assert.Equal("NEW_AT", writer.LastBundle!.AccessToken);
+        Assert.Equal("NEW_RT", writer.LastBundle!.RefreshToken);
+    }
+
+    [Fact]
+    public async Task Only_the_rotated_field_is_written_back()
+    {
+        // Only the access cookie rotated; the refresh cookie is unchanged. The delta
+        // carries the new access token and leaves refresh null, so the store's
+        // merge-then-write preserves the existing refresh token rather than clobbering it.
+        var (egress, writer) = BuildAbsorb(
+            setCookie: "TokenSSO=NEW_AT; Path=/, RefreshTokenSSO=OLD_RT; Path=/");
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal("NEW_AT", writer.LastBundle!.AccessToken);
+        Assert.Null(writer.LastBundle!.RefreshToken);
+    }
+
+    [Fact]
+    public async Task A_rotated_session_survives_an_expires_date_comma()
+    {
+        // The transport joins multiple Set-Cookie headers with ", "; each cookie's
+        // Expires date ALSO contains a comma. The parser must skip the date fragments
+        // (their "name" carries spaces) and still recover both rotated tokens — the
+        // real portal shape (two Set-Cookie headers, each with an Expires attribute).
+        var (egress, writer) = BuildAbsorb(
+            setCookie: "TokenSSO=NEW_AT; Expires=Wed, 09 Jun 2027 10:18:14 GMT; Path=/; HttpOnly, "
+                + "RefreshTokenSSO=NEW_RT; Expires=Wed, 09 Jun 2027 10:18:14 GMT; Path=/; HttpOnly");
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Equal("NEW_AT", writer.LastBundle!.AccessToken);
+        Assert.Equal("NEW_RT", writer.LastBundle!.RefreshToken);
+    }
+
+    [Fact]
+    public async Task Write_back_is_skipped_on_a_non_2xx_response()
+    {
+        // A 401 may carry a session-clearing Set-Cookie — absorbing it would wipe the
+        // live session, so the broker never writes back on a non-2xx.
+        var (egress, writer) = BuildAbsorb(status: 401, setCookie: "TokenSSO=; Path=/; Max-Age=0");
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status); // the upstream call completed (a 4xx is still a result)
+        Assert.False(result.Ok);
+        Assert.Null(writer.LastBundle); // never wrote back
+    }
+
+    [Fact]
+    public async Task Write_back_is_skipped_when_the_recipe_does_not_absorb()
+    {
+        var (egress, writer) = BuildAbsorb(absorb: false,
+            setCookie: "TokenSSO=NEW_AT; Path=/, RefreshTokenSSO=NEW_RT; Path=/");
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Null(writer.LastBundle);
+    }
+
+    [Fact]
+    public async Task Write_back_is_skipped_when_the_session_did_not_rotate()
+    {
+        // The upstream echoed the SAME tokens — no write, so a read never churns a store version.
+        var (egress, writer) = BuildAbsorb(
+            setCookie: "TokenSSO=OLD_AT; Path=/, RefreshTokenSSO=OLD_RT; Path=/");
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Null(writer.LastBundle);
+    }
+
+    [Fact]
+    public async Task Absorb_without_a_writable_store_completes_without_error()
+    {
+        // A read-only store ⇒ no writer. The read still succeeds; nothing is persisted.
+        var (egress, writer) = BuildAbsorb(withWriter: false, setCookie: "TokenSSO=NEW_AT; Path=/");
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+        Assert.Null(writer.LastBundle);
+    }
+
+    private sealed class CapturingWriter : ICredentialWriter
+    {
+        public string? LastName { get; private set; }
+        public CredentialBundle? LastBundle { get; private set; }
+
+        public Task PutBundleAsync(string name, CredentialBundle bundle, CancellationToken cancellationToken = default)
+        {
+            LastName = name;
+            LastBundle = bundle;
+            return Task.CompletedTask;
+        }
+    }
 }
 
 

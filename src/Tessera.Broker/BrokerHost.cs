@@ -149,7 +149,10 @@ public static class BrokerHost
         // refused) until egress.enabled — so deploying never opens an upstream path.
         services.AddSingleton<Tessera.Providers.IHttpTransport>(new Egress.HttpClientTransport());
         services.AddSingleton<Tessera.Mcp.IProviderGateway>(sp => BrokerProviderGateway.Build(
-            config, pdp, resolver, policy.Recipes, sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), audit));
+            config, pdp, resolver, policy.Recipes, sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), audit,
+            // A writable store lets a recipe with absorbSetCookie write a rotated
+            // sliding session back on a read; a read-only store leaves it null (read-only).
+            store as ICredentialWriter));
         services.AddTesseraMcp(mcpOptions);
 
         // The non-human caller plane (ADR 0021): authenticate a workload from its

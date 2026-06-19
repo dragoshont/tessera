@@ -66,6 +66,7 @@ public sealed record RecipeRotation(string Owner, string? Detail = null);
 /// <param name="Description">A human-readable description.</param>
 /// <param name="Rotation">Who owns rotating this provider's session (awareness dashboard, ADR 0017); null ⇒ no rotation declared (static).</param>
 /// <param name="Refresh">How Tessera rotates this session when it is the owner (Mode U, ADR 0015); null ⇒ no Tessera-owned refresh (static or external).</param>
+/// <param name="AbsorbSetCookie">For cookie injection: when true, a session the upstream rotates on a tool call (a <c>Set-Cookie</c> on a 2xx response) is captured and written back to the store, so the next read uses the live session instead of a stale one (ADR 0014/0015). The rotated cookies are reverse-mapped through <see cref="CookieMap"/>; requires a writable store. Default false (the broker only reads).</param>
 public sealed record Recipe(
     string Target,
     string Driver = "browser",
@@ -79,7 +80,8 @@ public sealed record Recipe(
     string? InjectionHeader = null,
     string? Description = null,
     RecipeRotation? Rotation = null,
-    RefreshSpec? Refresh = null)
+    RefreshSpec? Refresh = null,
+    bool AbsorbSetCookie = false)
 {
     /// <summary>The action verbs this recipe exposes (never null).</summary>
     public IReadOnlyList<string> ExposedActions => Actions ?? [];
