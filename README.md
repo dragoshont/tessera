@@ -176,6 +176,66 @@ step-up on the dangerous ones.
 
 ---
 
+## Use case: per-user iCloud calendars (Apple CalDAV)
+
+A concrete worked example — and the template for **any per-person credential**.
+
+**The goal.** Each family member, from the same chat assistant, asks *"what's on my
+calendar this week?"* and gets **their own** iCloud calendar (and, later, Reminders
+and Contacts) — never anyone else's. Apple offers no OAuth for a generic self-hosted
+CalDAV client, so the only credential is an **app-specific password** — a *powerful,
+unscoped* secret (full iCloud mail + calendar + contacts). It must therefore **never**
+live inside the chat or the MCP: it lives in Tessera, and the `apple-mcp` that speaks
+CalDAV/CardDAV holds **no** Apple secret at all. The Tessera-side boundary (a hardened
+raw-proxy egress with HTTP-Basic injection) is built and tested; the `apple-mcp` and
+the per-user live wiring are the operator-gated next step
+([ADR 0022](docs/adr/0022-apple-caldav-tessera.md)).
+
+**Where each identity lives** — the part worth holding onto, because three different
+"identities" are in play and they live in three different places:
+
+- **Authentik** authenticates **people**. It's the family member's *login* to the
+  chat (their email). It has no idea Apple exists — it just answers *"who is this
+  human?"*
+- **The Apple ID + app-specific password** is a **secret for reaching iCloud**, not a
+  login. So it lives in the **vault (Key Vault)** as a per-user bundle, and **only
+  Tessera** ever resolves it and injects it into the iCloud call. The `apple-mcp`
+  never sees it; Authentik never sees it.
+- **The `apple-mcp`'s own service identity** — a `client_credentials` token it mints
+  from **Authentik** to authenticate *itself* to Tessera as the caller — carries no
+  Apple secret; it's the MCP's identity, not the user's.
+
+Where the first two meet is the **binding**:
+
+```mermaid
+flowchart LR
+    A["Authentik token<br/>user = alice@…<br/>(who is asking)"] -->|onBehalfOf| B["Tessera binding<br/>(whose credential)"] --> KV[("Key Vault<br/>apple-account-a<br/>(the actual secret)")]
+```
+
+Authentik supplies the **identity** (the email); Tessera uses that identity as the
+**key** to pick which Apple bundle to inject. *Identity from Authentik; secret from
+Key Vault via Tessera* — the two planes are deliberately kept apart. And because the
+binding `(onBehalfOf = alice → apple-account-a)` is the **only** selector of whose
+password is injected, a prompt-injected MCP acting for Alice **cannot** reach Bob's
+calendar even though every user shares one `apple-mcp` — the confused-deputy defense
+(derived only from the cryptographically-verified token, never a header the MCP sets).
+
+**What's per-user vs. one-time.** The operator wires the plumbing **once** (the
+Tessera recipe, the MCP, the netpols). Only the **credential** is per-person: each
+family member generates an app-specific password on **their own** Apple ID once — it
+needs their own two-factor auth, and there's no central/admin way to mint it — and it
+lands in *their own* Key Vault bundle (`apple-account-a`, `-b`, …) with a binding to
+their chat email. A free Apple Account is enough: **no paid Apple Developer account,
+no iCloud+.** (An Apple-password change auto-revokes it, so that's the one event that
+needs a regenerate.)
+
+> **Reused, not bespoke.** The same credential-free egress boundary is what the coming
+> Microsoft Graph (Outlook / 365) MCP will use — build the per-person broker **once**,
+> correctly, and every "act as this specific person against their SaaS" integration
+> inherits it.
+
+---
+
 ## Why it exists
 
 AI agents and automations need to *act on real accounts*. Today people do that by
