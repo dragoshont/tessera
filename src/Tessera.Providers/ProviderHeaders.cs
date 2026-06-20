@@ -50,9 +50,19 @@ internal static class ProviderHeaders
                 headers["Cookie"] = cookie;
                 return headers;
 
+            case InjectionKind.Basic
+                when bundle.HasAccessToken && bundle.Extra is not null
+                    && bundle.Extra.TryGetValue("username", out var basicUser)
+                    && !string.IsNullOrEmpty(basicUser):
+                var basicToken = System.Convert.ToBase64String(
+                    System.Text.Encoding.UTF8.GetBytes($"{basicUser}:{bundle.AccessToken}"));
+                headers["Authorization"] = $"Basic {basicToken}";
+                return headers;
+
             case InjectionKind.None:
             case InjectionKind.BearerToken:
             case InjectionKind.ApiKeyHeader:
+            case InjectionKind.Basic:
             default:
                 return null; // missing the required credential material
         }

@@ -137,6 +137,7 @@ public sealed record LoadedPolicy(
     private static EgressMode ParseEgress(string value) => value.ToLowerInvariant() switch
     {
         "http" => EgressMode.Http,
+        "proxy" => EgressMode.Proxy,
         _ => EgressMode.None,
     };
 
@@ -145,6 +146,7 @@ public sealed record LoadedPolicy(
         "bearer" or "bearertoken" => InjectionKind.BearerToken,
         "cookie" or "cookies" => InjectionKind.Cookies,
         "apikey" or "apikeyheader" => InjectionKind.ApiKeyHeader,
+        "basic" => InjectionKind.Basic,
         _ => InjectionKind.None,
     };
 

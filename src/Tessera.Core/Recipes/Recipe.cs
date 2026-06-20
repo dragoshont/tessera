@@ -14,6 +14,18 @@ public enum EgressMode
     /// request to an allow-listed upstream (YARP). Gated behind an SSRF allow-list.
     /// </summary>
     Http,
+
+    /// <summary>
+    /// Raw reverse-proxy passthrough (YARP <see cref="T:Yarp.ReverseProxy.Forwarder.IHttpForwarder"/>):
+    /// the broker injects the stored credential and forwards the caller's <em>own</em>
+    /// method, path, and body verbatim to an allow-listed upstream — for a protocol
+    /// the recipe-tool map can't express (CalDAV/CardDAV's unbounded object URLs and
+    /// <c>PROPFIND</c>/<c>REPORT</c>/<c>MKCALENDAR</c> verbs). Distinct from
+    /// <see cref="Http"/> (named recipe tools): the caller drives the URL, validated
+    /// against the SSRF allow-list per hop, and reaches only public SaaS
+    /// (public-IP-only connect guard). Gated by <c>egress.enabled</c> like all egress.
+    /// </summary>
+    Proxy,
 }
 
 /// <summary>How a stored credential is injected into an HTTP upstream call.</summary>
@@ -35,6 +47,14 @@ public enum InjectionKind
     /// <see cref="Recipe.InjectionHeader"/>.
     /// </summary>
     ApiKeyHeader,
+
+    /// <summary>
+    /// Inject HTTP Basic auth: <c>Authorization: Basic base64(username:password)</c>.
+    /// The username comes from the bundle's <c>extra.username</c> field and the
+    /// password from the access token — the iCloud CalDAV/CardDAV class, which
+    /// authenticates with an Apple ID + app-specific password (no OAuth).
+    /// </summary>
+    Basic,
 }
 
 /// <summary>

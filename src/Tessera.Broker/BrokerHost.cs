@@ -38,6 +38,9 @@ public sealed record BrokerHostOptions
     /// <summary>Override the live-view provider (tests) — wire a fake browser worker.</summary>
     public Tessera.Core.Portal.ILiveViewProvider? LiveViewProviderOverride { get; init; }
 
+    /// <summary>Override the YARP forwarder (tests) — record or short-circuit the proxy forward.</summary>
+    public IHttpForwarder? ForwarderOverride { get; init; }
+
     /// <summary>Override the environment (tests).</summary>
     public IReadOnlyDictionary<string, string?>? Environment { get; init; }
 }
@@ -143,6 +146,11 @@ public static class BrokerHost
         services.AddSingleton(validator);
         services.AddSingleton(status);
         services.AddHttpForwarder();
+        if (options.ForwarderOverride is not null)
+        {
+            services.AddSingleton<IHttpForwarder>(options.ForwarderOverride);
+        }
+
         services.AddSingleton(sp => new InjectionEgress(config.Egress, sp.GetRequiredService<IHttpForwarder>()));
         // Provider egress (ADR 0014): the real HTTP transport + the gateway the MCP
         // surface uses to inject a credential by identity. Disabled (every call
@@ -204,6 +212,7 @@ public static class BrokerHost
         MapEndpoints(app);
         app.MapPortalEndpoints();
         app.MapCallerBroker();
+        app.MapEgressProxy();
         app.MapMcp("/mcp");
 
         // Startup self-test (read-only) — proves the authorize+resolve spine against

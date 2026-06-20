@@ -185,14 +185,14 @@ public sealed class PortalService
         var modules = new List<ModuleView>(policy.Recipes.Count);
         foreach (var recipe in policy.Recipes)
         {
-            var isHttp = recipe.Egress == EgressMode.Http;
+            var egressCapable = recipe.Egress is EgressMode.Http or EgressMode.Proxy;
             connectionCounts.TryGetValue(recipe.Target, out var count);
             modules.Add(new ModuleView(
                 Target: recipe.Target,
                 DisplayName: recipe.Description ?? recipe.Target,
                 Driver: recipe.Driver,
-                Egress: isHttp ? "http" : "none",
-                EgressEnabled: isHttp && egressGloballyEnabled,
+                Egress: recipe.Egress switch { EgressMode.Http => "http", EgressMode.Proxy => "proxy", _ => "none" },
+                EgressEnabled: egressCapable && egressGloballyEnabled,
                 Actions: recipe.ExposedActions,
                 // Planes span the declared action verbs and every tool's action, so a
                 // module that exposes a manage: tool shows the manage chip (ADR 0019).

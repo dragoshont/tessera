@@ -25,9 +25,21 @@ public static class CredentialInjector
                 var cookie = string.Join("; ", bundle.Cookies!.Select(kv => $"{kv.Key}={kv.Value}"));
                 return [("Cookie", cookie)];
 
+            // HTTP Basic: username from the bundle's extra.username, password from
+            // the access token (the iCloud CalDAV/CardDAV class — Apple ID +
+            // app-specific password). The bytes are used here and never returned.
+            case InjectionKind.Basic when bundle.HasAccessToken
+                && bundle.Extra is not null
+                && bundle.Extra.TryGetValue("username", out var basicUser)
+                && !string.IsNullOrEmpty(basicUser):
+                var basic = System.Convert.ToBase64String(
+                    System.Text.Encoding.UTF8.GetBytes($"{basicUser}:{bundle.AccessToken}"));
+                return [("Authorization", $"Basic {basic}")];
+
             case InjectionKind.None:
             case InjectionKind.BearerToken:
             case InjectionKind.Cookies:
+            case InjectionKind.Basic:
             default:
                 return [];
         }
