@@ -1,8 +1,13 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Tessera.Broker.Egress;
+using Tessera.Core.Audit;
 using Tessera.Core.Broker;
+using Tessera.Core.Configuration;
+using Tessera.Core.Egress;
 using Tessera.Core.Model;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
@@ -38,7 +43,13 @@ internal static class EgressProxyEndpoint
 {
     private const string OnBehalfOfHeader = "X-Tessera-On-Behalf-Of";
     private const string UpstreamHeader = "X-Tessera-Upstream";
-    private const string ConfirmHeader = "X-Tessera-Confirm";
+    private const string WriteSummaryHeader = "X-Tessera-Write-Summary";
+
+    // The held-write body is read in full (to hash + replay it), so it is capped: a CalDAV
+    // object is small; anything larger is refused rather than buffered.
+    private const int MaxConfirmBodyBytes = 256 * 1024;
+    private const int MaxSummaryChars = 200;
+    private const int MaxBodyExcerptChars = 2000;
 
     public static void MapEgressProxy(this WebApplication app)
     {
@@ -56,6 +67,9 @@ internal static class EgressProxyEndpoint
         CredentialResolver resolver,
         IReadOnlyList<Recipe> recipes,
         InjectionEgress egress,
+        IWriteChallengeStore challenges,
+        IAuditSink audit,
+        TesseraConfig config,
         CancellationToken cancellationToken)
     {
         // Gate 1: a caller authenticator must be configured (fail-closed, like /v1/broker).
@@ -150,24 +164,95 @@ internal static class EgressProxyEndpoint
                     statusCode: StatusCodes.Status403Forbidden);
 
             case Effect.StepUp:
-                // Confirmation gate for a write. NOTE (HL-18): X-Tessera-Confirm guards
-                // against an ACCIDENTAL unconfirmed write — it is NOT a security control
-                // against a compromised/prompt-injected caller, which can set the header
-                // itself (the caller IS the agent we distrust, ADR 0022 §5/§6). Before any
-                // manage: write grant ships (Phase 3), this MUST become a Tessera-issued,
-                // single-use challenge delivered to the human OUT-OF-BAND. In Phase 0/1 no
-                // write grant exists, so the PDP denies writes outright and this path is
-                // unreachable — the gate is real only for a non-injected caller's accident.
-                var confirmed = string.Equals(
-                    ctx.Request.Headers[ConfirmHeader].ToString(), "true", StringComparison.OrdinalIgnoreCase);
-                if (!confirmed)
+            {
+                // Out-of-band write confirmation (ADR 0023, resolving HL-18). The forgeable
+                // X-Tessera-Confirm header is GONE: a manage: write completes only once a human
+                // approved THIS exact request OUT-OF-BAND in the portal — a channel the calling
+                // agent cannot drive. The approval is bound to the verified onBehalfOf (never a
+                // caller-set header) and to the request's content hash, and is consumed exactly
+                // once, so a compromised/prompt-injected caller can neither self-approve nor swap
+                // the approved write for a different one.
+                if (identity.OnBehalfOf is not { } endUser)
                 {
                     return Results.Json(
-                        new { error = "step-up required", detail = decision.Reason, confirmWith = ConfirmHeader },
-                        statusCode: StatusCodes.Status409Conflict);
+                        new { error = "a write requires a forwarded end-user identity to approve it" },
+                        statusCode: StatusCodes.Status403Forbidden);
                 }
 
-                break;
+                var principal = endUser.PreferredUsername ?? endUser.Subject;
+                if (string.IsNullOrWhiteSpace(principal))
+                {
+                    return Results.Json(
+                        new { error = "the forwarded end-user has no usable principal to bind an approval to" },
+                        statusCode: StatusCodes.Status403Forbidden);
+                }
+
+                // Buffer the body once so it can be hashed (the approval binding) and still
+                // forwarded verbatim on completion. A CalDAV object is small; over the cap is refused.
+                ctx.Request.EnableBuffering();
+                var body = await ReadBodyCappedAsync(ctx.Request, MaxConfirmBodyBytes, cancellationToken).ConfigureAwait(false);
+                if (body is null)
+                {
+                    return Results.Json(
+                        new { error = $"write body exceeds the {MaxConfirmBodyBytes}-byte confirmation cap" },
+                        statusCode: StatusCodes.Status413PayloadTooLarge);
+                }
+
+                ctx.Request.Body.Position = 0;
+                // Bind the approval to the EXACT resource: the validated upstream URL (the object
+                // being mutated) + the WebDAV control headers (Destination/Overwrite/Depth), so a
+                // compromised caller cannot ride an approval to a different object/host, re-point a
+                // MOVE/COPY, or widen a collection op on the re-request — the inbound
+                // /v1/egress/{target} route is constant and names nothing.
+                var davControl = DavControl(ctx.Request.Headers);
+                var contentHash = WriteChallengeHash.Compute(ctx.Request.Method, upstream, davControl, body);
+                var now = DateTimeOffset.UtcNow;
+
+                // Already approved out-of-band for this exact write? Consume (single-use), audit, forward.
+                var approved = challenges.TryConsumeApproved(principal, target, contentHash, now);
+                if (approved is not null)
+                {
+                    audit.Record(request, Decision.Allow($"write approved out-of-band (challenge {approved.Id})"), null);
+                    break; // fall through to bundle resolve + forward
+                }
+
+                // Otherwise hold the write for the human (idempotent by content) and return the
+                // challenge — the write is NOT forwarded until it is approved + re-requested.
+                var summary = Truncate(ctx.Request.Headers[WriteSummaryHeader].ToString(), MaxSummaryChars);
+                var pending = challenges.IssueOrGet(
+                    new PendingWrite
+                    {
+                        Id = NewChallengeId(),
+                        Caller = identity.Caller!,
+                        OnBehalfOf = endUser,
+                        Principal = principal,
+                        Target = target,
+                        Action = action,
+                        Method = ctx.Request.Method.ToUpperInvariant(),
+                        PathAndQuery = upstream.PathAndQuery,
+                        ContentHash = contentHash,
+                        UpstreamHost = upstream.Host,
+                        Summary = string.IsNullOrWhiteSpace(summary)
+                            ? $"{ctx.Request.Method} {upstream.Host}{upstream.PathAndQuery}"
+                            : summary,
+                        BodyExcerpt = Truncate(Encoding.UTF8.GetString(body), MaxBodyExcerptChars),
+                        CreatedAt = now,
+                        ExpiresAt = now.AddSeconds(Math.Max(1, config.Egress.ChallengeTtlSeconds)),
+                    },
+                    now);
+
+                return Results.Json(
+                    new
+                    {
+                        error = "approval required",
+                        detail = "this write is held for your out-of-band approval in the Tessera portal",
+                        challenge = pending.Id,
+                        summary = pending.Summary,
+                        approveAt = "/portal",
+                        expiresAt = pending.ExpiresAt,
+                    },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
 
             case Effect.Allow:
             default:
@@ -201,6 +286,48 @@ internal static class EgressProxyEndpoint
 
         return Results.Empty; // the response was written by the forwarder
     }
+
+    /// <summary>Reads the request body fully into memory, or returns null if it exceeds
+    /// <paramref name="cap"/> bytes (a write object is small; an oversize body is refused, not buffered).</summary>
+    private static async Task<byte[]?> ReadBodyCappedAsync(HttpRequest request, int cap, CancellationToken ct)
+    {
+        using var ms = new MemoryStream();
+        var buffer = new byte[8192];
+        int read;
+        while ((read = await request.Body.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+        {
+            if (ms.Length + read > cap)
+            {
+                return null;
+            }
+
+            ms.Write(buffer, 0, read);
+        }
+
+        return ms.ToArray();
+    }
+
+    /// <summary>A 128-bit unguessable, URL-safe challenge id (lower-hex).</summary>
+    private static string NewChallengeId() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+
+    /// <summary>Trims + caps a free-text field to <paramref name="max"/> chars (never null).</summary>
+    private static string Truncate(string? value, int max)
+    {
+        value = (value ?? string.Empty).Trim();
+        return value.Length <= max ? value : value[..max];
+    }
+
+    // WebDAV control headers that change WHICH resource a write hits or HOW MUCH it affects
+    // (a MOVE/COPY target, an overwrite flag, a collection depth). The forwarder relays these
+    // verbatim, so they are bound into the approval: a re-request cannot re-point or widen an
+    // approved write. Hashing exactly the relayed control set (vs a denylist) keeps the binding
+    // honest as the header set evolves.
+    private static readonly string[] DavControlHeaders = ["Destination", "Overwrite", "Depth"];
+
+    /// <summary>The canonical newline-joined values of the WebDAV control headers, for the
+    /// approval content hash (case-insensitive lookup; absent header = empty line).</summary>
+    private static string DavControl(IHeaderDictionary headers) =>
+        string.Join('\n', DavControlHeaders.Select(h => headers[h].ToString()));
 
     /// <summary>
     /// Maps an HTTP/WebDAV method to an action plane verb: safe/observational methods

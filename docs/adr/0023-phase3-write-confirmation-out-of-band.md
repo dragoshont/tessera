@@ -1,9 +1,25 @@
 # ADR 0023 — Phase 3 write confirmation: a server-issued, out-of-band approval (resolving HL-18)
 
-> **Status: PROPOSED — operator approval required.** No `manage:dav` write grant and no
-> `apple-mcp` write tool may ship until the Tessera-side mechanism below is built and approved.
-> This supersedes the placeholder `X-Tessera-Confirm` echo (ADR 0022 §6-F5 / **HL-18**), which
-> is **forgeable by the MCP** and must be removed.
+> **Status: ACCEPTED — Tessera backend implemented + adversarial-judge PASS (2026-06-21).** The
+> server-side out-of-band confirmation below is built and verified; the `apple-mcp` write tool, the
+> portal approval UI, and the homelab `manage:dav` grant are the remaining (operator-gated)
+> activation steps. This supersedes the placeholder `X-Tessera-Confirm` echo (ADR 0022 §6-F5 /
+> **HL-18**), which was **forgeable by the MCP** and has been removed.
+
+## Implementation status (2026-06-21)
+
+- **Tessera backend: DONE + judge PASS.** T-1..T-5 implemented — the held-write store
+  (`IWriteChallengeStore` / `InMemoryWriteChallengeStore`), the 409-challenge egress gate, the
+  self-scoped portal approve/deny endpoints, the audit, and the removal of the forgeable
+  `X-Tessera-Confirm`. 423 tests green, strict-analyzer clean. The adversarial judge found and I
+  fixed one **Critical** (the hash must bind the validated **upstream URL**, not the constant
+  `/v1/egress/{target}` route — otherwise an empty-body `DELETE` of object A and B hashed alike,
+  enabling swap-after-approve) and hardened one **Medium** (bind the WebDAV `Depth` too).
+- **Pending activation:** `apple-mcp` `create_event` (flag-gated, challenge-aware); the portal
+  approval UI; the homelab `manage:dav` grant + the Tessera restart window (operator-gated).
+- **Backlog (judge, non-blocking):** per-principal challenge sub-quota (C2); the 256 KiB body cap
+  (C3); authorize on `oid` not `preferred_username` (C4, repo-wide); surface the MOVE/COPY
+  destination in the portal DTO (C1-residual); a forward-header allow-list (C5-full).
 
 ## 1. Context — why the current confirm is not safe
 
@@ -48,13 +64,28 @@ write** so the request cannot be swapped after approval.
    a relayed elicitation reply. All forgeable by the MCP → fails the HL-18 requirement. This is the
    status quo to remove.
 
-## 4. Decision (proposed)
+## 4. Decision
 
-Adopt **Option 1** (Tessera portal challenge-approval), optionally with **Option 2** (push) for UX.
-The `apple-mcp` `confirm` parameter signals **intent only** and **never** substitutes for the
-portal approval, which Tessera enforces independently. This closes HL-18: a compromised or
-prompt-injected MCP/model cannot mutate a calendar without a real, identity-bound, single-use human
-approval that Tessera owns end-to-end.
+Adopt **Option 1** (Tessera portal challenge-approval), implemented as a **hash-bound re-request** —
+a refinement of "execute-on-approve" that fits the egress streaming path with no forward-in-portal
+and no result store, and is equally non-forgeable:
+
+1. A manage-plane write with no approved challenge is **held**: Tessera stores it keyed by
+   `(verified onBehalfOf, target, content-hash)` and returns **409 + a single-use challenge id + a
+   human summary**. Nothing is forwarded.
+2. The person it is for **approves it in the portal** — their own forwarded token; the calling agent
+   is app-only, has no portal identity, and cannot approve — scoped so only the bound principal may
+   decide (an operator cannot approve another's write).
+3. The caller **re-issues the identical write**; Tessera matches the approved challenge by content
+   hash, **consumes it exactly once**, and forwards. A different request hashes differently → a
+   fresh approval is required (no swap); a second attempt finds nothing approved (no replay); a
+   restart drops the held state → re-request + re-approve (fail-safe, never a silent forward).
+
+The **content hash binds method + the validated upstream absolute URL + the WebDAV control headers
+(Destination / Overwrite / Depth) + body**, so an approval cannot be re-pointed at a different
+object, host, or move-target, nor widened (deep vs shallow). This closes HL-18: a compromised or
+prompt-injected MCP/model cannot mutate a calendar without a real, identity-bound, single-use,
+content-bound human approval that Tessera owns end-to-end.
 
 ## 5. MCP-side flow (`apple-mcp` `create_event` / `create_reminder`)
 

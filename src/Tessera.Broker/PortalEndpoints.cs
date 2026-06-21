@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Tessera.Core.Audit;
 using Tessera.Core.Configuration;
+using Tessera.Core.Egress;
 using Tessera.Core.Model;
 using Tessera.Core.Portal;
 using Tessera.Identity;
@@ -166,6 +167,37 @@ internal static class PortalEndpoints
             var summary = BuildAuditSummary(window);
             return Results.Json(new AuditFeedDto(rows, summary));
         });
+
+        // Pending writes awaiting YOUR out-of-band approval (ADR 0023). A manage: write is
+        // HELD until the person it is for confirms it here — the calling agent cannot drive
+        // this surface. Self-scoped for everyone: you only ever see, and may only approve,
+        // writes held for you. Cross-person oversight is the audit feed, not this page.
+        app.MapGet("/portal/pending-writes", async (
+            HttpContext ctx, ITokenValidator validator, IWriteChallengeStore challenges, TesseraConfig config) =>
+        {
+            var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
+            if (caller is null)
+            {
+                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+            }
+
+            var pending = challenges.ListActive(caller, DateTimeOffset.UtcNow);
+            return Results.Json(pending.Select(ToPendingWriteDto).ToArray());
+        });
+
+        // Approve a held write — only the bound person may, and only their own. Marks it
+        // approved so the caller may complete the IDENTICAL write exactly once; the write is
+        // still forwarded by the egress path on the re-request, never executed from here.
+        app.MapPost("/portal/pending-writes/{challengeId}/approve", (
+            HttpContext ctx, string challengeId, ITokenValidator validator,
+            IWriteChallengeStore challenges, IAuditSink audit, TesseraConfig config) =>
+                DecideWriteAsync(ctx, challengeId, approve: true, validator, challenges, audit, config));
+
+        // Deny a held write — the bound person refuses it; it can never complete.
+        app.MapPost("/portal/pending-writes/{challengeId}/deny", (
+            HttpContext ctx, string challengeId, ITokenValidator validator,
+            IWriteChallengeStore challenges, IAuditSink audit, TesseraConfig config) =>
+                DecideWriteAsync(ctx, challengeId, approve: false, validator, challenges, audit, config));
 
         // Delegations (ADR 0017) — "who/what may act as me". A projection of the
         // enforced grants. Self-scoped by default (a member sees only grants that
@@ -423,6 +455,43 @@ internal static class PortalEndpoints
         return idx >= 0 && idx < connectionId.Length - 1 ? connectionId[(idx + 1)..] : null;
     }
 
+    /// <summary>Approve or deny a held write (ADR 0023) on behalf of the signed-in person,
+    /// scoped to writes bound to them — a person confirms only their own writes, and an
+    /// operator cannot approve another's. Audits the decision against the held write's own
+    /// identity. 404 when there is no such pending write held for the caller.</summary>
+    private static async Task<IResult> DecideWriteAsync(
+        HttpContext ctx, string challengeId, bool approve,
+        ITokenValidator validator, IWriteChallengeStore challenges, IAuditSink audit, TesseraConfig config)
+    {
+        var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
+        if (caller is null)
+        {
+            return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+        }
+
+        var decided = challenges.Decide(challengeId, caller, approve, DateTimeOffset.UtcNow);
+        if (decided is null)
+        {
+            return Results.Json(
+                new { error = "no pending write with that id is held for you (it may be expired, already decided, or not yours)" },
+                statusCode: 404);
+        }
+
+        // The issuance was already audited as step-up; record the out-of-band decision too so
+        // the trail shows who approved/denied what, against the held write's own identity.
+        var verb = approve ? "approved" : "denied";
+        var request = new AccessRequest(decided.Caller, decided.Target, decided.Action, decided.OnBehalfOf);
+        var outcome = approve
+            ? Decision.Allow($"write {verb} in portal by {caller} (challenge {decided.Id})")
+            : Decision.Deny($"write {verb} in portal by {caller} (challenge {decided.Id})");
+        audit.Record(request, outcome, null);
+        return Results.Json(ToPendingWriteDto(decided));
+    }
+
+    private static PendingWriteDto ToPendingWriteDto(PendingWrite w) =>
+        new(w.Id, w.Principal, w.Target, w.Action, w.Method, w.PathAndQuery, w.UpstreamHost,
+            w.Summary, w.BodyExcerpt, w.Status.ToString(), w.CreatedAt, w.ExpiresAt, w.DecidedBy, w.DecidedAt);
+
     /// <summary>Parses an ISO-8601 <c>?since</c> bound to UTC; null when absent or unparseable.</summary>
     private static DateTimeOffset? ParseSince(string? since) =>
         !string.IsNullOrWhiteSpace(since)
@@ -493,6 +562,25 @@ internal static class PortalEndpoints
     private static ConsentDto ToConsentDto(Tessera.Core.Results.ConsentReceipt c) =>
         new(c.Principal, c.Target, c.DataClass, Tessera.Core.Resolution.CredentialOwners.ToToken(c.Owner), c.GrantedAt, c.Guardian, c.CoveredScopes);
 }
+
+/// <summary>A held write awaiting (or having received) out-of-band approval (ADR 0023).
+/// Secret-free: it carries the method/path/host + a capped body excerpt the approver verifies,
+/// never a credential. <c>Status</c> is one of pending|approved|denied|consumed|expired.</summary>
+internal sealed record PendingWriteDto(
+    string Id,
+    string Principal,
+    string Target,
+    string Action,
+    string Method,
+    string PathAndQuery,
+    string UpstreamHost,
+    string Summary,
+    string BodyExcerpt,
+    string Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    string? DecidedBy,
+    DateTimeOffset? DecidedAt);
 
 /// <summary>The /portal/me payload.</summary>
 internal sealed record MeResponse(string Principal, string Role);

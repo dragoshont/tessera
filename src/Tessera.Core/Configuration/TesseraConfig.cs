@@ -127,6 +127,22 @@ public sealed class EgressOptions
     /// internal").
     /// </summary>
     public bool AllowPlainHttp { get; init; }
+
+    /// <summary>
+    /// How many held write challenges (ADR 0023) the broker retains in memory awaiting
+    /// out-of-band approval. Bounded (oldest/terminal evicted first) and volatile (a restart
+    /// drops them — fail-safe: the caller simply re-requests + re-approves). Only ever
+    /// exercised once a <c>manage:</c> grant exists (the PDP denies writes outright otherwise).
+    /// </summary>
+    public int ChallengeCapacity { get; init; } = 256;
+
+    /// <summary>
+    /// How long (seconds) a held write challenge stays approvable + completable before it
+    /// lapses. Short by design — a human approves promptly, then the caller completes once;
+    /// the smaller the window, the less room an approved write has to sit before it is
+    /// single-use consumed. Default 600s (10 min).
+    /// </summary>
+    public int ChallengeTtlSeconds { get; init; } = 600;
 }
 
 /// <summary>Admin-portal settings (ADR 0016). The portal is a thin convenience

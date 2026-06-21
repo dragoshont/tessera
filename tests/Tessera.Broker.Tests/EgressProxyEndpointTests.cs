@@ -173,21 +173,98 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
         Assert.False(_forwarder.Forwarded);
     }
 
-    // ── Step-up on writes (the manage plane) ──────────────────────────────────
+    // ── Out-of-band write confirmation (ADR 0023 / HL-18) ─────────────────
 
     [Fact]
-    public async Task A_write_without_confirmation_is_409_step_up()
+    public async Task A_write_with_no_approval_is_held_409_and_not_forwarded()
     {
-        var resp = await _client.SendAsync(Build("DELETE")); // manage:dav → step-up
+        var resp = await _client.SendAsync(Build("DELETE")); // manage:dav → held for approval
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
+        Assert.False(_forwarder.Forwarded);
+        Assert.NotNull(await ReadChallengeId(resp)); // a single-use challenge id is issued
+    }
+
+    [Fact]
+    public async Task The_old_confirm_header_can_no_longer_force_a_write()
+    {
+        // The forgeable X-Tessera-Confirm is inert now (HL-18): a caller cannot self-confirm.
+        var resp = await _client.SendAsync(Build("DELETE", confirm: true));
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
         Assert.False(_forwarder.Forwarded);
     }
 
     [Fact]
-    public async Task A_write_with_confirmation_is_forwarded()
+    public async Task A_write_is_forwarded_only_after_out_of_band_approval()
     {
-        var resp = await _client.SendAsync(Build("DELETE", confirm: true));
-        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        // 1. The write is held — 409 with a challenge, NOT forwarded.
+        var held = await _client.SendAsync(Build("DELETE"));
+        Assert.Equal(HttpStatusCode.Conflict, held.StatusCode);
+        Assert.False(_forwarder.Forwarded);
+        var challengeId = await ReadChallengeId(held);
+        Assert.NotNull(challengeId);
+
+        // 2. Alice approves it out-of-band in the portal (her own token, not the agent's).
+        var approve = await Decide(challengeId!, "approve", asUser: UserAlice);
+        Assert.Equal(HttpStatusCode.OK, approve.StatusCode);
+
+        // 3. The identical write now completes exactly once.
+        var done = await _client.SendAsync(Build("DELETE"));
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
+        Assert.True(_forwarder.Forwarded);
+    }
+
+    [Fact]
+    public async Task Another_person_cannot_approve_your_held_write()
+    {
+        var held = await _client.SendAsync(Build("DELETE")); // held for alice
+        var challengeId = await ReadChallengeId(held);
+        Assert.NotNull(challengeId);
+
+        // Bob is not alice — he cannot approve a write held for her; it stays unapproved.
+        var approve = await Decide(challengeId!, "approve", asUser: UserBob);
+        Assert.Equal(HttpStatusCode.NotFound, approve.StatusCode);
+
+        var retry = await _client.SendAsync(Build("DELETE"));
+        Assert.Equal(HttpStatusCode.Conflict, retry.StatusCode);
+        Assert.False(_forwarder.Forwarded);
+    }
+
+    [Fact]
+    public async Task A_denied_write_is_never_forwarded()
+    {
+        var held = await _client.SendAsync(Build("DELETE"));
+        var challengeId = await ReadChallengeId(held);
+        Assert.NotNull(challengeId);
+
+        var deny = await Decide(challengeId!, "deny", asUser: UserAlice);
+        Assert.Equal(HttpStatusCode.OK, deny.StatusCode);
+
+        var retry = await _client.SendAsync(Build("DELETE"));
+        Assert.Equal(HttpStatusCode.Conflict, retry.StatusCode);
+        Assert.False(_forwarder.Forwarded);
+    }
+
+    [Fact]
+    public async Task An_approval_does_not_carry_to_a_different_upstream_resource()
+    {
+        // The HL-18 swap attack: an approval for one object must not let the caller delete a
+        // different one. DELETE has an empty body, so only the upstream URL distinguishes them.
+        const string eventA = "https://caldav.icloud.com/123/calendars/EVENT-A.ics";
+        const string eventB = "https://caldav.icloud.com/123/calendars/EVENT-B.ics";
+
+        var held = await _client.SendAsync(Build("DELETE", upstream: eventA));
+        var challengeId = await ReadChallengeId(held);
+        Assert.NotNull(challengeId);
+        Assert.Equal(HttpStatusCode.OK, (await Decide(challengeId!, "approve", asUser: UserAlice)).StatusCode);
+
+        // Re-request the SAME method/body but a DIFFERENT object — the approval must not carry.
+        var swap = await _client.SendAsync(Build("DELETE", upstream: eventB));
+        Assert.Equal(HttpStatusCode.Conflict, swap.StatusCode);
+        Assert.False(_forwarder.Forwarded);
+
+        // The originally-approved resource still completes exactly once.
+        var ok = await _client.SendAsync(Build("DELETE", upstream: eventA));
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         Assert.True(_forwarder.Forwarded);
     }
 
@@ -223,6 +300,21 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
         }
 
         return req;
+    }
+
+    /// <summary>Extracts the challenge id from a held-write 409 JSON body (or null).</summary>
+    private static async Task<string?> ReadChallengeId(HttpResponseMessage resp)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        return doc.RootElement.TryGetProperty("challenge", out var c) ? c.GetString() : null;
+    }
+
+    /// <summary>Approves/denies a held write via the portal as <paramref name="asUser"/>'s forwarded token.</summary>
+    private Task<HttpResponseMessage> Decide(string challengeId, string action, string asUser)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Post, $"/portal/pending-writes/{challengeId}/{action}");
+        req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {asUser}");
+        return _client.SendAsync(req);
     }
 
     private static async Task<(WebApplication App, HttpClient Client, string Dir)> BuildAppAsync(

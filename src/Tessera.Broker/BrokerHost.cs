@@ -142,6 +142,12 @@ public static class BrokerHost
         services.AddSingleton(store);
         services.AddSingleton(audit);
         services.AddSingleton(auditTail);
+        // Held-write challenge store (ADR 0023): manage-plane writes are confirmed
+        // OUT-OF-BAND in the portal, never by a caller-set header (HL-18). Volatile +
+        // bounded; only ever exercised once a manage: grant exists (the PDP denies a
+        // write outright otherwise, so this never opens a write path on its own).
+        services.AddSingleton<Tessera.Core.Egress.IWriteChallengeStore>(
+            new Tessera.Core.Egress.InMemoryWriteChallengeStore(Math.Max(1, config.Egress.ChallengeCapacity)));
         services.AddSingleton(broker);
         services.AddSingleton(validator);
         services.AddSingleton(status);
