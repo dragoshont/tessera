@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Activity, Inbox, Lock, LogOut, Menu, Radar, Users, Wallet } from 'lucide-react'
+import { Activity, Inbox, Lock, LogOut, Menu, Radar, ShieldCheck, Users, Wallet } from 'lucide-react'
 import type { Person } from '../../data/types'
 import { cn } from '../../lib/utils'
 import { useSession } from '../../app/session'
@@ -47,6 +47,10 @@ export function SidebarNav({
         <NavLink to="/activity" className={navItemClass} onClick={onNavigate}>
           <Activity className="h-4 w-4" aria-hidden />
           Activity &amp; access
+        </NavLink>
+        <NavLink to="/pending-writes" className={navItemClass} onClick={onNavigate}>
+          <ShieldCheck className="h-4 w-4" aria-hidden />
+          Pending writes
         </NavLink>
         <NavLink to="/action-required" className={navItemClass} onClick={onNavigate}>
           <Inbox className="h-4 w-4" aria-hidden />

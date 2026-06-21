@@ -7,6 +7,7 @@ import type {
   LiveViewHandle,
   LiveViewResult,
   Module,
+  PendingWrite,
   Person,
   PortalConfig,
   Recipe,
@@ -19,6 +20,7 @@ import {
   currentUserPrincipal as fixtureCurrentUserPrincipal,
   delegations as fixtureDelegations,
   modules as fixtureModules,
+  pendingWrites as fixturePendingWrites,
   people as fixturePeople,
   portalConfigDev,
   recipes as fixtureRecipes,
@@ -53,6 +55,20 @@ export interface TesseraClient {
    */
   getActivity(principal?: string, limit?: number): Promise<AuditFeed>
   /**
+   * Writes the broker is holding for out-of-band human approval (`GET /portal/pending-writes`,
+   * ADR 0023) — self-scoped to the signed-in person server-side. Secret-free: a human
+   * summary + a short body excerpt, never the payload or a credential.
+   */
+  getPendingWrites(): Promise<PendingWrite[]>
+  /**
+   * Approve a held write (`POST /portal/pending-writes/{id}/approve`) → authorizes the
+   * original caller to re-issue the *exact* request. Does NOT perform the write itself;
+   * returns the updated record. Throws `HttpError(404)` if it is not held for the caller.
+   */
+  approvePendingWrite(id: string): Promise<PendingWrite>
+  /** Deny a held write (`POST /portal/pending-writes/{id}/deny`) → it will never be forwarded. */
+  denyPendingWrite(id: string): Promise<PendingWrite>
+  /**
    * Who/what may act as a person (`GET /portal/delegations`). Self by default; an
    * operator may pass a principal, or omit it for every grant (incl. automation).
    */
@@ -75,6 +91,8 @@ export interface InMemorySeed {
   auditRows?: AuditRow[]
   delegations?: Delegation[]
   modules?: Module[]
+  /** Held writes awaiting out-of-band approval (ADR 0023); approve/deny mutate this set. */
+  pendingWrites?: PendingWrite[]
   /** Per-connection schedule override; defaults to a synthesized "none" schedule. */
   schedules?: Record<string, Schedule>
 }
@@ -117,6 +135,28 @@ export function createInMemoryClient(seed: InMemorySeed = {}): TesseraClient {
   const recipes = seed.recipes ?? fixtureRecipes
   const config = seed.config ?? portalConfigDev
   const currentPrincipal = seed.currentUserPrincipal ?? fixtureCurrentUserPrincipal
+  // A mutable copy so approve/deny is reflected by later getPendingWrites reads.
+  const pendingWrites = [...(seed.pendingWrites ?? fixturePendingWrites)]
+
+  // Mirrors the broker: only the bound principal may decide their own *held* write;
+  // a wrong owner, an already-decided write, or an unknown id is a 404 (not found).
+  // Swaps in a fresh record rather than mutating in place, so the shared fixture
+  // objects stay pristine across client instances (tests + Storybook).
+  function decidePendingWrite(id: string, status: 'approved' | 'denied'): PendingWrite {
+    const index = pendingWrites.findIndex((entry) => entry.id === id)
+    const write = index >= 0 ? pendingWrites[index] : undefined
+    if (!write || write.principal !== currentPrincipal || write.status !== 'pending') {
+      throw new HttpError(404, 'pending write is not held for you')
+    }
+    const decided: PendingWrite = {
+      ...write,
+      status,
+      decidedBy: currentPrincipal,
+      decidedAt: new Date().toISOString(),
+    }
+    pendingWrites[index] = decided
+    return decided
+  }
 
   return {
     async getConfig() {
@@ -177,6 +217,18 @@ export function createInMemoryClient(seed: InMemorySeed = {}): TesseraClient {
       const entries = typeof limit === 'number' ? ordered.slice(0, limit) : ordered
       // The summary spans the whole scoped window, not just the shown rows.
       return { entries, summary: summarizeAudit(ordered) }
+    },
+    async getPendingWrites() {
+      // Self-scoped + only those still waiting (mirrors the broker's held set).
+      return pendingWrites.filter(
+        (write) => write.status === 'pending' && write.principal === currentPrincipal,
+      )
+    },
+    async approvePendingWrite(id) {
+      return decidePendingWrite(id, 'approved')
+    },
+    async denyPendingWrite(id) {
+      return decidePendingWrite(id, 'denied')
     },
     async listDelegations(principal) {
       const all = seed.delegations ?? fixtureDelegations
@@ -332,6 +384,15 @@ export function createHttpClient({ baseUrl, getAuthHeader }: HttpClientOptions):
       if (typeof limit === 'number') params.set('limit', String(limit))
       const query = params.toString()
       return getJson<AuditFeed>(`/portal/audit${query ? `?${query}` : ''}`)
+    },
+    async getPendingWrites() {
+      return getJson<PendingWrite[]>('/portal/pending-writes')
+    },
+    async approvePendingWrite(id) {
+      return postJson<PendingWrite>(`/portal/pending-writes/${encodeURIComponent(id)}/approve`, {})
+    },
+    async denyPendingWrite(id) {
+      return postJson<PendingWrite>(`/portal/pending-writes/${encodeURIComponent(id)}/deny`, {})
     },
     async listDelegations(principal) {
       const query = principal ? `?principal=${encodeURIComponent(principal)}` : ''

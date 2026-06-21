@@ -273,3 +273,99 @@ describe('createHttpClient — awareness dashboard (ADR 0017)', () => {
     )
   })
 })
+
+describe('createInMemoryClient — pending writes (ADR 0023)', () => {
+  it('getPendingWrites returns the signed-in person’s held, still-waiting writes', async () => {
+    const client = createInMemoryClient()
+    const held = await client.getPendingWrites()
+
+    expect(held.length).toBeGreaterThan(0)
+    // Self-scoped + waiting only — never another person’s, never an already-decided one.
+    expect(held.every((write) => write.principal === 'alice@example.com')).toBe(true)
+    expect(held.every((write) => write.status === 'pending')).toBe(true)
+  })
+
+  it('approve marks the write approved, records the decider, and drops it from the held set', async () => {
+    const client = createInMemoryClient()
+    const [first] = await client.getPendingWrites()
+
+    const decided = await client.approvePendingWrite(first.id)
+    expect(decided.status).toBe('approved')
+    expect(decided.decidedBy).toBe('alice@example.com')
+    expect(decided.decidedAt).not.toBeNull()
+
+    // It no longer waits → the row leaves the list on the next read.
+    const after = await client.getPendingWrites()
+    expect(after.map((write) => write.id)).not.toContain(first.id)
+  })
+
+  it('deny marks the write denied and drops it from the held set', async () => {
+    const client = createInMemoryClient()
+    const [first] = await client.getPendingWrites()
+
+    const decided = await client.denyPendingWrite(first.id)
+    expect(decided.status).toBe('denied')
+
+    const after = await client.getPendingWrites()
+    expect(after.map((write) => write.id)).not.toContain(first.id)
+  })
+
+  it('refuses to decide a write that is not held for the caller (404)', async () => {
+    // Bob may not approve Alice’s held writes — the broker would 404; mirror that.
+    const asBob = createInMemoryClient({ currentUserPrincipal: 'bob@example.com' })
+    expect(await asBob.getPendingWrites()).toEqual([])
+    await expect(asBob.approvePendingWrite('cw_8f2a1c')).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('a second decision on the same write 404s (single-use, no replay)', async () => {
+    const client = createInMemoryClient()
+    const [first] = await client.getPendingWrites()
+
+    await client.approvePendingWrite(first.id)
+    await expect(client.approvePendingWrite(first.id)).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+describe('createHttpClient — pending writes (ADR 0023)', () => {
+  it('GETs /portal/pending-writes (self-scoped, no query param)', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse({ status: 200, body: [] }))
+    const client = createHttpClient({ baseUrl: 'http://broker.test/api' })
+
+    await client.getPendingWrites()
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://broker.test/api/portal/pending-writes',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+
+  it('POSTs the approve decision and returns the updated record', async () => {
+    const updated = { id: 'cw_8f2a1c', status: 'approved' }
+    fetchMock.mockResolvedValueOnce(makeResponse({ status: 200, body: updated }))
+    const client = createHttpClient({ baseUrl: 'http://broker.test/api' })
+
+    await expect(client.approvePendingWrite('cw_8f2a1c')).resolves.toEqual(updated)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://broker.test/api/portal/pending-writes/cw_8f2a1c/approve')
+    expect((init as RequestInit).method).toBe('POST')
+  })
+
+  it('POSTs the deny decision', async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({ status: 200, body: { id: 'cw_8f2a1c', status: 'denied' } }),
+    )
+    const client = createHttpClient({ baseUrl: 'http://broker.test/api' })
+
+    await client.denyPendingWrite('cw_8f2a1c')
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://broker.test/api/portal/pending-writes/cw_8f2a1c/deny',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('throws HttpError(404) when the write is not held for the caller', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse({ status: 404, body: { error: 'not found' } }))
+    const client = createHttpClient({ baseUrl: 'http://broker.test/api' })
+
+    await expect(client.approvePendingWrite('cw_missing')).rejects.toMatchObject({ status: 404 })
+  })
+})

@@ -1,10 +1,11 @@
-import { addDays, subDays, subHours } from 'date-fns'
+import { addDays, addMinutes, subDays, subHours, subMinutes } from 'date-fns'
 import type {
   AuditRow,
   Connection,
   Delegation,
   LiveViewHandle,
   Module,
+  PendingWrite,
   Person,
   PortalConfig,
   Recipe,
@@ -310,5 +311,65 @@ export const modules: Module[] = [
     toolCount: 3,
     connectionCount: 1,
     upstreamHost: 'api.utility.example.com',
+  },
+]
+
+/**
+ * Calendar writes the broker is holding for Alice's out-of-band approval (ADR 0023).
+ * All are `manage:dav` PUTs the apple-mcp `create_event` tool issued — each held with
+ * a single-use challenge and a short TTL until Alice approves it in the portal.
+ * Secret-free: a human summary + a small VEVENT excerpt, never a credential.
+ */
+export const pendingWrites: PendingWrite[] = [
+  {
+    id: 'cw_8f2a1c',
+    principal: currentUserPrincipal,
+    target: 'apple-calendar',
+    action: 'manage:dav',
+    method: 'PUT',
+    pathAndQuery: '/1984763/calendars/home/8f2a1c0b-dentist.ics',
+    upstreamHost: 'caldav.icloud.com',
+    summary: 'Create "Dentist" on Tue 24 Jun, 09:30-10:15 in Home',
+    bodyExcerpt:
+      'BEGIN:VEVENT\nUID:8f2a1c0b-dentist@apple-mcp\nSUMMARY:Dentist\nDTSTART:20260624T093000Z\nDTEND:20260624T101500Z\nEND:VEVENT',
+    status: 'pending',
+    createdAt: iso(subMinutes(now, 1)),
+    expiresAt: iso(addMinutes(now, 4)),
+    decidedBy: null,
+    decidedAt: null,
+  },
+  {
+    id: 'cw_3b7e90',
+    principal: currentUserPrincipal,
+    target: 'apple-calendar',
+    action: 'manage:dav',
+    method: 'PUT',
+    pathAndQuery: '/1984763/calendars/family/3b7e90a4-pickup.ics',
+    upstreamHost: 'caldav.icloud.com',
+    summary: 'Create "School pickup — Lily" on Wed 25 Jun, 15:00-15:30 in Family',
+    bodyExcerpt:
+      'BEGIN:VEVENT\nUID:3b7e90a4-pickup@apple-mcp\nSUMMARY:School pickup — Lily\nDTSTART:20260625T150000Z\nDTEND:20260625T153000Z\nLOCATION:Oakfield Primary\nEND:VEVENT',
+    status: 'pending',
+    createdAt: iso(subMinutes(now, 2)),
+    expiresAt: iso(addMinutes(now, 3)),
+    decidedBy: null,
+    decidedAt: null,
+  },
+  {
+    id: 'cw_d41f56',
+    principal: currentUserPrincipal,
+    target: 'apple-calendar',
+    action: 'manage:dav',
+    method: 'PUT',
+    pathAndQuery: '/1984763/calendars/home/d41f56e2-dinner.ics',
+    upstreamHost: 'caldav.icloud.com',
+    summary: 'Create "Dinner with Sam" on Fri 27 Jun, 19:00-21:00 in Home',
+    bodyExcerpt:
+      'BEGIN:VEVENT\nUID:d41f56e2-dinner@apple-mcp\nSUMMARY:Dinner with Sam\nDTSTART:20260627T190000Z\nDTEND:20260627T210000Z\nEND:VEVENT',
+    status: 'pending',
+    createdAt: iso(subMinutes(now, 5)),
+    expiresAt: iso(addMinutes(now, 2)),
+    decidedBy: null,
+    decidedAt: null,
   },
 ]

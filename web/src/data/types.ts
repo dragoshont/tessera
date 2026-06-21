@@ -170,6 +170,47 @@ export interface AuditFeed {
   summary: AuditSummary
 }
 
+// ── Pending writes (ADR 0023) ───────────────────────────────────────────────
+// Writes the broker is *holding* for an out-of-band human approval. Secret-free:
+// a human summary + a short body EXCERPT, never the full payload or a credential.
+
+/** The lifecycle of a held write awaiting out-of-band approval (ADR 0023). */
+export type PendingWriteStatus = 'pending' | 'approved' | 'denied' | 'consumed' | 'expired'
+
+/**
+ * One write the broker holds for out-of-band human approval (`GET /portal/pending-writes`,
+ * ADR 0023). Only the verified `principal` may decide it, and only in the portal — a
+ * channel the calling agent cannot forge. Approving authorizes the original caller to
+ * re-issue the *exact* request; the portal never performs the write itself.
+ */
+export interface PendingWrite {
+  /** The single-use challenge id the held write is keyed on. */
+  id: string
+  /** The verified person the write acts as — only they may approve/deny it. */
+  principal: string
+  /** The connector/module target, e.g. "apple-calendar". */
+  target: string
+  /** The brokered action plane this write needs, e.g. "manage:dav". */
+  action: string
+  /** The HTTP/WebDAV method, e.g. "PUT" | "DELETE" | "MOVE". */
+  method: string
+  /** The upstream resource path (+ query); the host is carried separately. Never a secret. */
+  pathAndQuery: string
+  /** The upstream host the write targets (host only), e.g. "caldav.icloud.com". */
+  upstreamHost: string
+  /** A human-readable description of the change, e.g. 'Create "Dentist" on Tue 24 Jun'. */
+  summary: string
+  /** A short, truncated excerpt of the request body (e.g. a VEVENT) — never the full payload. */
+  bodyExcerpt: string
+  status: PendingWriteStatus
+  createdAt: string
+  /** When the held challenge expires (single-use, short TTL). */
+  expiresAt: string
+  /** The verified principal who decided it, once decided (else null). */
+  decidedBy: string | null
+  decidedAt: string | null
+}
+
 /** One delegation — who/what may act as a person (`GET /portal/delegations`). */
 export interface Delegation {
   /** The caller workload the grant authorizes. */

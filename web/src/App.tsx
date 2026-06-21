@@ -14,6 +14,7 @@ import { AuthCallbackPage } from './pages/AuthCallbackPage'
 import { ConnectWizardPage } from './pages/ConnectWizardPage'
 import { LiveHandoffPage } from './pages/LiveHandoffPage'
 import { ObservabilityPage } from './pages/ObservabilityPage'
+import { PendingWritesPage } from './pages/PendingWritesPage'
 import { PersonDetailPage } from './pages/PersonDetailPage'
 import { SignInPage } from './pages/SignInPage'
 import { UsersPage } from './pages/UsersPage'
@@ -66,6 +67,7 @@ function AppRoutes() {
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/accounts/:connectionId" element={<AccountsPage />} />
           <Route path="/activity" element={<ActivityAccessPage />} />
+          <Route path="/pending-writes" element={<PendingWritesPage />} />
           <Route path="/connect" element={<ConnectWizardPage />} />
           <Route path="/handoff/:connectionId" element={<LiveHandoffPage />} />
           <Route path="/action-required" element={<ActionRequiredPage />} />

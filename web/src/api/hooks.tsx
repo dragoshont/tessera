@@ -100,3 +100,36 @@ export function useSchedule(connectionId?: string) {
     enabled: Boolean(connectionId),
   })
 }
+
+// ── Pending writes (ADR 0023) ───────────────────────────────────────────────
+
+/** Writes held for the signed-in person's out-of-band approval (self-scoped server-side). */
+export function usePendingWrites() {
+  const client = useTesseraClient()
+  return useQuery({ queryKey: ['pendingWrites'], queryFn: () => client.getPendingWrites() })
+}
+
+/** Approve a held write (authorizes the caller to re-issue the exact request; does not perform it).
+ *  Refetches the held set whether the decision lands or fails (e.g. an expired write 404s). */
+export function useApprovePendingWrite() {
+  const client = useTesseraClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => client.approvePendingWrite(id),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['pendingWrites'] })
+    },
+  })
+}
+
+/** Deny a held write (it will never be forwarded). Refetches the held set on success or failure. */
+export function useDenyPendingWrite() {
+  const client = useTesseraClient()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => client.denyPendingWrite(id),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['pendingWrites'] })
+    },
+  })
+}
