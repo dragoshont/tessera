@@ -37,5 +37,23 @@
     "applyTo": [
       "deploy/**"
     ]
+  },
+  "ops": {
+    "kind": "homelab-mcp",
+    "mode": "read-only",
+    "mcpServer": "homelab",
+    "purpose": [
+      "runtime-health",
+      "logs",
+      "deployment-verification",
+      "version-drift"
+    ],
+    "requiresApprovalFor": [
+      "mutations",
+      "reconcile",
+      "restart",
+      "secret-access",
+      "network-change"
+    ]
   }
 }
