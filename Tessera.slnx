@@ -16,5 +16,4 @@
     <Project Path="tests/Tessera.Providers.Tests/Tessera.Providers.Tests.csproj" />
     <Project Path="tests/Tessera.Stores.AzureKeyVault.Tests/Tessera.Stores.AzureKeyVault.Tests.csproj" />
   </Folder>
-  <Project Path="../../../../tmp/nimd-reflect/reflect.csproj" />
 </Solution>

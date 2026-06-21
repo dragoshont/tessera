@@ -13,7 +13,7 @@
     "web/**"
   ],
   "build": "npm --prefix web run build",
-  "test": "npm --prefix web run test",
+  "test": "npm --prefix web run test -- --pool=threads --maxWorkers=1",
   "backend": {
     "stack": "dotnet",
     "solution": "Tessera.slnx",
