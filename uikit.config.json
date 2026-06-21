@@ -1,0 +1,41 @@
+{
+  "platform": "web",
+  "stack": "react",
+  "designSource": {
+    "type": "storybook",
+    "path": "web/.storybook",
+    "url": "http://localhost:6006",
+    "mcp": "http://localhost:6006/mcp",
+    "spec": "docs/ui/tessera-admin-portal-ui-spec.md"
+  },
+  "knowledgePack": "web",
+  "applyTo": [
+    "web/**"
+  ],
+  "build": "npm --prefix web run build",
+  "test": "npm --prefix web run test",
+  "backend": {
+    "stack": "dotnet",
+    "solution": "Tessera.slnx",
+    "architectureDocs": [
+      "docs/adr",
+      "docs/architecture.md",
+      "docs/specs"
+    ],
+    "applyTo": [
+      "src/**",
+      "tests/**"
+    ],
+    "build": "dotnet build Tessera.slnx",
+    "test": "dotnet test Tessera.slnx"
+  },
+  "iac": {
+    "kind": "mixed",
+    "path": "deploy",
+    "plan": "kubectl kustomize deploy/k8s >/tmp/tessera-k8s-rendered.yaml && test -s /tmp/tessera-k8s-rendered.yaml",
+    "policy": "kubectl kustomize deploy/k8s >/tmp/tessera-k8s-rendered.yaml && kubeconform -summary /tmp/tessera-k8s-rendered.yaml",
+    "applyTo": [
+      "deploy/**"
+    ]
+  }
+}
