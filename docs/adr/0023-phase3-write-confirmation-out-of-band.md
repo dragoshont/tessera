@@ -49,7 +49,6 @@ write** so the request cannot be swapped after approval.
 1. **Tessera portal challenge-approval (RECOMMENDED).** On a `manage:` write with no approved
    challenge, Tessera returns **409 + a single-use challenge id** and **stores the pending write
    server-side** — keyed by `{verified onBehalfOf, target, exact method+URL+body, human summary,
-   short TTL, single-use}`. The human opens the **Tessera portal** (`auth.example.com`, their own
    token — out-of-band from `apple-mcp`), sees the human-readable diff, and Approves/Denies. On
    approval Tessera executes the **exact stored request** and marks the challenge consumed. The MCP
    re-requests with the challenge id to retrieve the result. Reuses the existing portal (ADR 0016 /
