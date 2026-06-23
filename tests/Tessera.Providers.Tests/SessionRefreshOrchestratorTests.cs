@@ -1,4 +1,5 @@
 using Tessera.Core.Configuration;
+using Tessera.Core.Health;
 using Tessera.Core.Policy;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
@@ -102,6 +103,41 @@ public sealed class SessionRefreshOrchestratorTests
         Assert.Equal(1, summary.Dead);
         Assert.Equal(0, summary.Rotated);
         Assert.Null(writer.LastBundle); // never wrote, never drove a login
+    }
+
+    [Fact]
+    public async Task Harvests_the_rotation_plane_verdict_into_the_liveness_store()
+    {
+        // SDD-01 P4 (judge C2): the keep-warm pass is the most incident-relevant liveness
+        // signal for an RM-style session, so a rotation proves alive and a dead refresh
+        // token proves dead in the SAME store the portal reads.
+        var bindings = new[] { new TargetBinding("portal", "portal-alice", "alice@example.com", CredentialOwner.User) };
+        const string key = "portal:alice@example.com";
+
+        // A successful rotation ⇒ alive.
+        var aliveStore = new InMemoryCredentialStore();
+        aliveStore.Put("portal-alice", Live());
+        var health = new InMemoryConnectionHealthStore();
+        var rotated = new SessionRefreshOrchestrator(
+            Policy(bindings, OwnedPortal()), aliveStore,
+            new SessionRefresher(new FakeTransport(200, "{\"access_token\":\"NEW_AT\"}"), new CapturingWriter(), Guard),
+            health);
+        await rotated.RunPassAsync();
+        var aliveRecord = await health.GetAsync(key);
+        Assert.True(aliveRecord!.VerifiedAlive);
+        Assert.NotNull(aliveRecord.LastVerifiedAt);
+
+        // A dead refresh token ⇒ dead, in the same store.
+        var deadStore = new InMemoryCredentialStore();
+        deadStore.Put("portal-alice", Live());
+        var deadHealth = new InMemoryConnectionHealthStore();
+        var dead = new SessionRefreshOrchestrator(
+            Policy(bindings, OwnedPortal()), deadStore,
+            new SessionRefresher(new FakeTransport(401, "unauthorized"), new CapturingWriter(), Guard),
+            deadHealth);
+        await dead.RunPassAsync();
+        var deadRecord = await deadHealth.GetAsync(key);
+        Assert.False(deadRecord!.VerifiedAlive);
     }
 
     [Fact]

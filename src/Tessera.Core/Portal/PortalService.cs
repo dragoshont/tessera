@@ -1,4 +1,5 @@
 using Tessera.Core.Configuration;
+using Tessera.Core.Health;
 using Tessera.Core.Policy;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
@@ -27,6 +28,14 @@ public sealed class PortalService
     private readonly CredentialResolver _resolver;
     private readonly IReadOnlyList<string> _admins;
     private readonly Action<LoadedPolicy>? _persist;
+    // The use-based liveness metadata (ADR 0025 / SDD-01 P4), recorded from real
+    // brokered calls and read here to project an earned verdict. Optional: when null
+    // (or a record is missing/unavailable) every present connection projects as
+    // "unverified" — presence is never green (fail-closed, analysis A5).
+    private readonly IConnectionHealthStore? _health;
+    // The freshness bound: a confirmed-alive older than this decays from "live" to
+    // "unverified" at projection time (analysis A8). One clock for the whole portal.
+    private readonly TimeSpan _freshnessMaxAge;
     // The consent ledger (ADR 0020): a receipt is appended when a person seeds a
     // user/dependent-owned connection (the consent act). It is per-(principal,
     // target, data class) so calendar consent never satisfies mail. In-memory +
@@ -49,7 +58,9 @@ public sealed class PortalService
         LoadedPolicy policy,
         CredentialResolver resolver,
         IReadOnlyCollection<string> admins,
-        Action<LoadedPolicy>? persist = null)
+        Action<LoadedPolicy>? persist = null,
+        IConnectionHealthStore? health = null,
+        TimeSpan? freshnessMaxAge = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(resolver);
@@ -58,6 +69,12 @@ public sealed class PortalService
         _resolver = resolver;
         _admins = admins.ToArray();
         _persist = persist;
+        _health = health;
+        // Default 12h; a non-positive value would make every confirmation instantly
+        // stale, so coerce to the default rather than render everything unverified.
+        _freshnessMaxAge = freshnessMaxAge is { } age && age > TimeSpan.Zero
+            ? age
+            : TimeSpan.FromHours(12);
     }
 
     /// <summary>The current policy snapshot (swapped atomically on a mutation).</summary>
@@ -322,12 +339,25 @@ public sealed class PortalService
 
             var recipe = FindRecipe(policy, binding.Target);
             var health = await _resolver.AssessBindingAsync(binding, cancellationToken).ConfigureAwait(false);
+            // Earned verdict (ADR 0025 / SDD-01 P4): a present session is "unverified"
+            // until a real call confirmed it alive, and decays back to "unverified" once
+            // that confirmation is stale. Only present connections can earn a verdict;
+            // absent/error are already truthful from the status alone. Fail-closed: any
+            // store error leaves the verdict null ⇒ "unverified", never green (analysis A5).
+            bool? verifiedAlive = null;
+            DateTimeOffset? lastVerifiedAt = null;
+            if (health.Status == CredentialStatus.Present)
+            {
+                var record = await TryGetHealthAsync($"{binding.Target}:{binding.Principal}", cancellationToken).ConfigureAwait(false);
+                (verifiedAlive, lastVerifiedAt) = ConnectionHealthVerdict.Resolve(record, DateTimeOffset.UtcNow, _freshnessMaxAge);
+            }
+
             connections.Add(new PortalConnection(
                 ConnectionId: $"{binding.Target}:{binding.Principal}",
                 OwnerPrincipal: binding.Principal,
                 Provider: binding.Target,
                 DisplayName: recipe?.Description ?? binding.Target,
-                Status: MapStatus(health.Status),
+                Status: MapStatus(health.Status, verifiedAlive),
                 HasCookies: health.HasCookies,
                 HasRefreshToken: health.HasRefreshToken,
                 HasAccessToken: health.HasAccessToken,
@@ -337,7 +367,8 @@ public sealed class PortalService
                 ExpiryIsEstimated: true,
                 Detail: health.Detail,
                 Owner: CredentialOwners.ToToken(binding.Owner),
-                Guardian: binding.Guardian));
+                Guardian: binding.Guardian,
+                LastVerifiedAt: lastVerifiedAt));
         }
 
         // Stable order: needs-attention first, then by provider name.
@@ -345,6 +376,30 @@ public sealed class PortalService
             .OrderByDescending(c => c.Status is not "live")
             .ThenBy(c => c.Provider, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Reads the recorded liveness metadata, fail-closed: no store, a miss, or any
+    /// store error all yield <c>null</c> ("never observed" ⇒ the verdict is
+    /// <c>unverified</c>). A flaky metadata store must never be able to paint a
+    /// connection green (analysis A5).
+    /// </summary>
+    private async Task<ConnectionHealthRecord?> TryGetHealthAsync(string connectionKey, CancellationToken cancellationToken)
+    {
+        if (_health is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await _health.GetAsync(connectionKey, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The verdict simply stays unverified this round — never green on a store fault.
+            return null;
+        }
     }
 
     /// <summary>

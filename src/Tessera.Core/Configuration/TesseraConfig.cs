@@ -223,6 +223,24 @@ public sealed class RefreshOptions
     public bool AcknowledgeSingleWriter { get; init; }
 }
 
+/// <summary>
+/// Connection-health freshness (ADR 0025 / SDD-01 P4). A connection earns the green
+/// <c>live</c> badge only from a real call that confirmed the session alive, and only
+/// while that confirmation is fresh: after <see cref="MaxAgeSeconds"/> the verdict decays
+/// to <c>unverified</c> (never silently green). One clock, read by the portal projection
+/// (and, later, the refresh trigger) so the two can never contradict (analysis A8).
+/// </summary>
+public sealed class FreshnessOptions
+{
+    /// <summary>
+    /// How long (seconds) a confirmed-alive stays <c>live</c> before it decays to
+    /// <c>unverified</c>. Default 12h: long enough that an actively used session stays
+    /// green between uses, short enough that a silently-dead session stops looking alive
+    /// within a day. Must be &gt; 0.
+    /// </summary>
+    public int MaxAgeSeconds { get; init; } = 43200;
+}
+
 /// <summary>The full broker configuration, with fail-closed validation.</summary>
 public sealed class TesseraConfig
 {
@@ -249,6 +267,9 @@ public sealed class TesseraConfig
 
     /// <summary>Background session-refresh (Mode U rotation owner) settings.</summary>
     public RefreshOptions Refresh { get; init; } = new();
+
+    /// <summary>Connection-health freshness (the <c>live</c> → <c>unverified</c> decay bound).</summary>
+    public FreshnessOptions Freshness { get; init; } = new();
 
     /// <summary>
     /// Returns a list of problems. Empty list == valid. These checks encode the
@@ -295,6 +316,11 @@ public sealed class TesseraConfig
         if (Egress is { Enabled: true, AllowedHosts.Count: 0 })
         {
             problems.Add("egress.enabled is true but egress.allowedHosts is empty (an SSRF allow-list is required).");
+        }
+
+        if (Freshness.MaxAgeSeconds <= 0)
+        {
+            problems.Add($"freshness.maxAgeSeconds {Freshness.MaxAgeSeconds} is invalid (must be > 0).");
         }
 
         if (LiveView.Enabled)

@@ -40,7 +40,8 @@ public sealed class BrokerProviderGateway : IProviderGateway
         IReadOnlyList<Recipe> recipes,
         IHttpTransport transport,
         Tessera.Core.Audit.IAuditSink? audit = null,
-        ICredentialWriter? writer = null)
+        ICredentialWriter? writer = null,
+        Tessera.Core.Health.IConnectionHealthStore? health = null)
     {
         if (!config.Egress.Enabled)
         {
@@ -49,7 +50,7 @@ public sealed class BrokerProviderGateway : IProviderGateway
 
         var guard = new SsrfGuard(config.Egress.AllowedHosts, config.Egress.AllowPlainHttp);
         var egress = new ProviderEgress(
-            new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, recipes, guard, transport, audit: audit, writer: writer);
+            new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, recipes, guard, transport, audit: audit, writer: writer, health: health);
         return new BrokerProviderGateway(egress, pdp, recipes);
     }
 

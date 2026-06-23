@@ -2,6 +2,7 @@ using System.Text.Json;
 using Tessera.Core.Audit;
 using Tessera.Core.Broker;
 using Tessera.Core.Egress;
+using Tessera.Core.Health;
 using Tessera.Core.Identity;
 using Tessera.Core.Model;
 using Tessera.Core.Recipes;
@@ -68,6 +69,7 @@ public sealed class ProviderEgress
     private readonly IHttpTransport _transport;
     private readonly IAuditSink _audit;
     private readonly ICredentialWriter? _writer;
+    private readonly IConnectionHealthStore? _health;
     private readonly int _maxBodyBytes;
     private readonly int _metadataMaxBytes;
 
@@ -81,7 +83,8 @@ public sealed class ProviderEgress
         int maxBodyBytes = 1_000_000,
         int metadataMaxBytes = 65_536,
         IAuditSink? audit = null,
-        ICredentialWriter? writer = null)
+        ICredentialWriter? writer = null,
+        IConnectionHealthStore? health = null)
     {
         _pdp = pdp;
         _resolver = resolver;
@@ -92,6 +95,7 @@ public sealed class ProviderEgress
         _maxBodyBytes = maxBodyBytes;
         _metadataMaxBytes = metadataMaxBytes;
         _writer = writer;
+        _health = health;
     }
 
     /// <summary>
@@ -219,7 +223,58 @@ public sealed class ProviderEgress
         // can't spill more than ids + snippets (service-access spec §"Output classes").
         var cap = tool.OutputClass == ResultClass.Metadata ? Math.Min(_maxBodyBytes, _metadataMaxBytes) : _maxBodyBytes;
         var body = response.Body.Length > cap ? response.Body[..cap] : response.Body;
+
+        // Record the use-based liveness verdict (ADR 0025 / SDD-01 P4) from this real
+        // call's outcome: a 2xx confirms the session alive; a 401/403 marks it dead. Any
+        // other status (5xx, 429) is not a liveness signal and leaves the verdict
+        // unchanged. A transport error returned earlier, so only a real HTTP response
+        // reaches here. Best-effort + out-of-band: a metadata write never affects the result.
+        await RecordLivenessAsync(request, response.Status, cancellationToken).ConfigureAwait(false);
+
         return new ProviderCallResult(ProviderCallStatus.Completed, response.Status, body, $"{tool.Method} {tool.Path} -> {response.Status}", tool.OutputClass);
+    }
+
+    /// <summary>
+    /// Folds a real call's HTTP outcome into the connection's use-based liveness verdict
+    /// (ADR 0025 / SDD-01 P4). A 2xx ⇒ confirmed alive; a 401/403 ⇒ dead; anything else is
+    /// not a verdict. Fail-safe: no store, no binding, or a write error is swallowed so the
+    /// brokered call's result is never affected.
+    /// <para>
+    /// <b>Soft-200 caveat (judge C1, tracked for SDD-05).</b> This trusts the upstream's
+    /// status line: a provider that answers <c>200</c> + a login page for an <em>expired</em>
+    /// session (the literal ADR 0025 incident class) would be recorded alive. It cannot
+    /// misfire in the default posture (egress is off; an RM-style session is not yet
+    /// Tessera-rotated), but a recipe-level success assertion (e.g. an expected
+    /// content marker) must gate this before the v0.6.0 cutover makes such a provider live.
+    /// </para>
+    /// </summary>
+    private async Task RecordLivenessAsync(AccessRequest request, int httpStatus, CancellationToken cancellationToken)
+    {
+        if (_health is null)
+        {
+            return;
+        }
+
+        bool? alive = httpStatus is >= 200 and < 300 ? true
+            : httpStatus is 401 or 403 ? false
+            : null;
+        if (alive is null || _resolver.BindingFor(request) is not { } binding || binding.Principal is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _health.RecordOutcomeAsync(
+                $"{binding.Target}:{binding.Principal}",
+                alive.Value,
+                DateTimeOffset.UtcNow,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Never fail a brokered call because its liveness metadata couldn't be written.
+        }
     }
 
     /// <summary>GET/HEAD calls never carry a request body.</summary>

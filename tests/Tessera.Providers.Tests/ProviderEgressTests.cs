@@ -1,4 +1,5 @@
 using Tessera.Core.Egress;
+using Tessera.Core.Health;
 using Tessera.Core.Identity;
 using Tessera.Core.Policy;
 using Tessera.Core.Recipes;
@@ -31,7 +32,8 @@ public sealed class ProviderEgressTests
     private static (ProviderEgress Egress, FakeTransport Transport) Build(
         FakeTransport? transport = null,
         bool grantWrite = false,
-        bool seedCredential = true)
+        bool seedCredential = true,
+        IConnectionHealthStore? health = null)
     {
         var store = new InMemoryCredentialStore();
         if (seedCredential)
@@ -59,7 +61,8 @@ public sealed class ProviderEgressTests
             resolver,
             [PortalRecipe()],
             new SsrfGuard([Host]),
-            t);
+            t,
+            health: health);
         return (egress, t);
     }
 
@@ -90,6 +93,47 @@ public sealed class ProviderEgressTests
 
         Assert.Equal(ProviderCallStatus.StepUpRequired, result.Status);
         Assert.Equal(0, transport.Calls); // NEVER called the provider without confirmation
+    }
+
+    [Fact]
+    public async Task A_successful_call_records_the_session_as_alive()
+    {
+        // SDD-01 P4: a real 2xx is the use-based confirmation that earns "live".
+        var health = new InMemoryConnectionHealthStore();
+        var (egress, _) = Build(new FakeTransport(200, "{}"), health: health);
+
+        var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+        Assert.Equal(ProviderCallStatus.Completed, result.Status);
+
+        var record = await health.GetAsync($"{Target}:{User}");
+        Assert.True(record!.VerifiedAlive);
+        Assert.NotNull(record.LastVerifiedAt);
+    }
+
+    [Fact]
+    public async Task An_unauthorized_call_records_the_session_as_dead()
+    {
+        // A 401 is the use-based signal that the session is dead.
+        var health = new InMemoryConnectionHealthStore();
+        var (egress, _) = Build(new FakeTransport(401, "unauthorized"), health: health);
+
+        await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        var record = await health.GetAsync($"{Target}:{User}");
+        Assert.False(record!.VerifiedAlive);
+        Assert.Equal(1, record.ConsecutiveFailures);
+    }
+
+    [Fact]
+    public async Task A_server_error_is_not_a_liveness_verdict()
+    {
+        // A 500 says nothing about the session's auth state — leave the verdict unrecorded.
+        var health = new InMemoryConnectionHealthStore();
+        var (egress, _) = Build(new FakeTransport(500, "boom"), health: health);
+
+        await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_list_items", null, confirmed: false);
+
+        Assert.Null(await health.GetAsync($"{Target}:{User}"));
     }
 
     [Fact]

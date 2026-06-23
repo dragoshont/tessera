@@ -1,4 +1,5 @@
 using Tessera.Core.Configuration;
+using Tessera.Core.Health;
 using Tessera.Core.Recipes;
 using Tessera.Core.Stores;
 
@@ -32,6 +33,12 @@ public sealed class SessionRefreshOrchestrator
     private readonly Func<LoadedPolicy> _policy;
     private readonly ICredentialStore _store;
     private readonly SessionRefresher _refresher;
+    // The same use-based liveness store the data-plane egress writes to (ADR 0025 /
+    // SDD-01 P4). The rotation owner's own verdict — a kept-warm session that rotated
+    // (alive) or whose refresh token is dead — is the most incident-relevant liveness
+    // signal for an RM-style session, so the keep-warm pass folds it in too (judge C2).
+    // Optional + best-effort: a metadata write never affects a rotation pass.
+    private readonly IConnectionHealthStore? _health;
 
     /// <summary>Creates the orchestrator over a live policy source, the store (read), and the refresher (write).</summary>
     /// <param name="policy">
@@ -41,7 +48,8 @@ public sealed class SessionRefreshOrchestrator
     /// </param>
     /// <param name="store">The credential store (read).</param>
     /// <param name="refresher">The session refresher (write-back).</param>
-    public SessionRefreshOrchestrator(Func<LoadedPolicy> policy, ICredentialStore store, SessionRefresher refresher)
+    /// <param name="health">Optional liveness store: the pass records rotated⇒alive / dead⇒dead.</param>
+    public SessionRefreshOrchestrator(Func<LoadedPolicy> policy, ICredentialStore store, SessionRefresher refresher, IConnectionHealthStore? health = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(store);
@@ -49,11 +57,12 @@ public sealed class SessionRefreshOrchestrator
         _policy = policy;
         _store = store;
         _refresher = refresher;
+        _health = health;
     }
 
     /// <summary>Convenience overload over a fixed policy snapshot (tests / static policies).</summary>
-    public SessionRefreshOrchestrator(LoadedPolicy policy, ICredentialStore store, SessionRefresher refresher)
-        : this(() => policy, store, refresher)
+    public SessionRefreshOrchestrator(LoadedPolicy policy, ICredentialStore store, SessionRefresher refresher, IConnectionHealthStore? health = null)
+        : this(() => policy, store, refresher, health)
     {
         ArgumentNullException.ThrowIfNull(policy);
     }
@@ -116,6 +125,31 @@ public sealed class SessionRefreshOrchestrator
                     case RefreshStatus.Dead: dead++; break;
                     case RefreshStatus.NotConfigured: skipped++; break;
                     default: errors++; break;
+                }
+
+                // Fold the rotation-plane verdict into the shared liveness store: a
+                // successful rotation proves the session alive; a dead refresh token
+                // proves it dead. Best-effort + out-of-band (judge C2).
+                bool? alive = result.Status switch
+                {
+                    RefreshStatus.Rotated => true,
+                    RefreshStatus.Dead => false,
+                    _ => null,
+                };
+                if (_health is not null && alive is not null && binding.Principal is not null)
+                {
+                    try
+                    {
+                        await _health.RecordOutcomeAsync(
+                            $"{binding.Target}:{binding.Principal}",
+                            alive.Value,
+                            DateTimeOffset.UtcNow,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // Never let a metadata write fail a rotation pass.
+                    }
                 }
             }
         }

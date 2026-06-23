@@ -151,6 +151,12 @@ public static class BrokerHost
         services.AddSingleton(broker);
         services.AddSingleton(validator);
         services.AddSingleton(status);
+        // Use-based liveness metadata (ADR 0025 / SDD-01 P4): one shared, non-secret
+        // store the egress writes verdicts to and the portal reads them from. In-memory
+        // (single replica); a present connection projects as unverified until a real
+        // call earns a verdict, and on any store fault (fail-closed).
+        var connectionHealth = new Tessera.Core.Health.InMemoryConnectionHealthStore();
+        services.AddSingleton<Tessera.Core.Health.IConnectionHealthStore>(connectionHealth);
         services.AddHttpForwarder();
         if (options.ForwarderOverride is not null)
         {
@@ -166,7 +172,9 @@ public static class BrokerHost
             config, pdp, resolver, policy.Recipes, sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), audit,
             // A writable store lets a recipe with absorbSetCookie write a rotated
             // sliding session back on a read; a read-only store leaves it null (read-only).
-            store as ICredentialWriter));
+            store as ICredentialWriter,
+            // The egress records each call's outcome as the connection's liveness verdict.
+            connectionHealth));
         services.AddTesseraMcp(mcpOptions);
 
         // The non-human caller plane (ADR 0021): authenticate a workload from its
@@ -183,7 +191,10 @@ public static class BrokerHost
         Action<LoadedPolicy>? persist = string.IsNullOrEmpty(policyPath)
             ? null
             : updated => ConfigLoader.SavePolicy(policyPath, updated);
-        services.AddSingleton(new PortalService(policy, resolver, config.Portal.Admins, persist));
+        services.AddSingleton(new PortalService(
+            policy, resolver, config.Portal.Admins, persist,
+            // The portal projects the earned verdict + freshness decay from the same store.
+            connectionHealth, TimeSpan.FromSeconds(config.Freshness.MaxAgeSeconds)));
         services.AddSingleton<Tessera.Core.Portal.ILiveViewProvider>(
             BuildLiveViewProvider(config, options));
 
@@ -206,7 +217,9 @@ public static class BrokerHost
                 () => sp.GetRequiredService<PortalService>().CurrentPolicy,
                 store,
                 new Tessera.Providers.SessionRefresher(
-                    sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), writer, refreshGuard)));
+                    sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), writer, refreshGuard),
+                // Harvest the rotation owner's own verdict into the shared liveness store.
+                connectionHealth));
             services.AddHostedService(sp => new SessionRefreshService(
                 sp.GetRequiredService<Tessera.Providers.SessionRefreshOrchestrator>(),
                 TimeSpan.FromSeconds(config.Refresh.IntervalSeconds),

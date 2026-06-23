@@ -78,3 +78,30 @@
 - Backend: P1 (429/0). Frontend: P2+P2b+P2c (vitest 73/73, build, gate PASS). Verify: P3 Playwright 7/7.
 - Deferred to a future SDD: P4 verdict engine (the only thing standing between `unverified` and an
   *earned, time-bounded* `live`). Tracked in the roadmap.
+
+## P4 — use-based liveness verdict engine — DONE · judge: PASS
+- Grounded in online research (fencing tokens / circuit breaker / health-endpoint caching) +
+  [cross-phase adversarial analysis](../cross-phase-adversarial-analysis.md). Passive-first (A3),
+  separate non-secret metadata store (A4), one freshness clock (A8), fail-closed (A5).
+- `Tessera.Core/Health/`: `ConnectionHealthRecord` (VerifiedAlive?/LastVerifiedAt?/ConsecutiveFailures),
+  `IConnectionHealthStore` + `InMemoryConnectionHealthStore` (keyed `{target}:{principal}`),
+  `ConnectionHealthVerdict.Resolve` (pure: null⇒unverified, dead, fresh⇒live, **stale⇒decays to unverified**).
+- Recording from REAL calls only: `ProviderEgress.RecordLivenessAsync` (2xx⇒alive, 401/403⇒dead, else⇒none,
+  best-effort) AND the rotation-plane harvest `SessionRefreshOrchestrator` (Rotated⇒alive, Dead⇒dead — the
+  RM-incident-relevant signal, judge C2). Projection `PortalService` is fail-closed (no store / miss / throw
+  ⇒ `unverified`, never green). One config knob `freshness.maxAgeSeconds` (default 12h, validated >0).
+- Verified: `gates/backend-checks.sh` **PASS** (Core 255, Providers 46, Broker 115, +KV/Mcp/Identity;
+  IaC + secret scan clean). New tests: every `Resolve` branch, store folding, portal end-to-end incl.
+  **fail-closed-on-throw**, egress 2xx/401/500 recording, rotation-plane harvest.
+- ADVERSARIAL JUDGE (Architrave): **PASS** — airtight verdict math, correct decay, secret-clean, green-free
+  default posture (egress off ⇒ nothing recorded ⇒ all present read `unverified`). Addressed in-loop: C2
+  (rotation-plane harvest wired + tested), C1 (soft-200 caveat documented in code — a provider that serves
+  `200`+login-HTML on expiry must get a recipe-level success assertion before the v0.6.0 cutover).
+  Deferred (faithful to the analysis): the A6 verdict-transition **event** → SDD-02 (when a subscriber exists);
+  the active probe + per-connection **breaker** → SDD-05; the soft-200 success-assertion → SDD-05/cutover.
+
+## Status — SDD-01 COMPLETE incl. P4 (judge PASS ×2)
+- Truth (P1–P3) + earned, time-bounded, fail-closed `live` (P4). Presence never green; stale never green;
+  unknown never green. Verdicts ride real calls (data plane) + the keep-warm pass (rotation plane).
+- Carried into later phases: soft-200 success assertion + verdict event + per-connection breaker (SDD-02/05),
+  all named in [the roadmap](../README.md) and [cross-phase analysis](../cross-phase-adversarial-analysis.md).
