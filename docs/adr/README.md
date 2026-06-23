@@ -28,6 +28,9 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0019](0019-app-integrations-and-user-delegated-actions.md) | **Keep app-to-app integrations direct; broker user-delegated actions through Tessera** (Sonarr/Radarr/qBittorrent/Prowlarr/Seerr runtime plumbing stays native; users/tools go through Tessera for privileged actions) | Accepted |
 | [0020](0020-credential-ownership.md) | **Credential ownership: user vs service vs dependent** (who owns the secret drives seeding/reveal/revoke/onboarding/consent; user-owned = delegation of your own login, service-owned = brokered authority you never hold, dependent = guardian-seeded; default service = fail-safe) | Accepted |
 | [0021](0021-caller-authentication-plane.md) | **Caller authentication plane for non-human callers** (the missing `/v1/broker` door: phase 1 = service OIDC token reusing the app-only→`CallerIdentity` path, phase 2 = mTLS; two independent fail-closed gates; unblocks the ADR 0015 domain-MCP cutover) | Accepted |
+| [0022](0022-apple-caldav-tessera.md) | **Apple iCloud (Calendar/Reminders/Contacts) via a credential-free `apple-mcp` brokered through Tessera** (same single-custodian model as RM; reads + step-up-gated writes) | Accepted |
+| [0023](0023-phase3-write-confirmation-out-of-band.md) | **Phase 3 write confirmation: a server-issued, out-of-band approval** (resolving HL-18; high-risk writes confirmed off-channel before commit) | Accepted |
+| [0024](0024-session-liveness-and-oracle-driven-reseed.md) | **Session liveness is the rotator's truth; re-seed is oracle-driven, not timer-driven** (the harvester re-seeds on the rotator's real verdict, breaker-safe; closes the gap behind the 5-day RM silent death and the stale Tessera cutover; owner-agnostic — hardens v0.5.2 now, unblocks the v0.6.0 cutover) | Proposed |
 
 ## Format
 
