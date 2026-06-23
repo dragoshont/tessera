@@ -1,4 +1,4 @@
-import { AlertTriangle, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, HelpCircle, XCircle, type LucideIcon } from 'lucide-react'
 import type { ConnectionStatus } from '../../data/types'
 import { cn } from '../../lib/utils'
 
@@ -12,9 +12,12 @@ interface HealthVisual {
   pulse?: boolean
 }
 
-// Absent is intentionally neutral gray (a to-do), never red. Red is error only.
+// Absent is intentionally neutral gray (a to-do), never red. Red is error/dead only.
+// `live` is the ONLY green — presence alone never earns it (ADR 0025).
 const VISUALS: Record<ConnectionStatus, HealthVisual> = {
   live: { label: 'Live', text: 'text-health-live', dot: 'bg-health-live' },
+  // Present, but Tessera has not confirmed it is alive — amber caution, never green.
+  unverified: { label: 'Unverified', text: 'text-health-expiring', dot: 'bg-health-expiring', icon: HelpCircle },
   expiring_soon: { label: 'Expiring soon', text: 'text-health-expiring', dot: 'bg-health-expiring' },
   absent: {
     label: 'Absent',
@@ -22,8 +25,19 @@ const VISUALS: Record<ConnectionStatus, HealthVisual> = {
     dot: 'border border-health-absent bg-transparent',
   },
   error: { label: 'Error', text: 'text-health-error', dot: 'bg-health-error', icon: AlertTriangle },
+  // A verdict confirmed the session is dead — red, distinct from an unreadable-store `error`.
+  dead: { label: 'Dead', text: 'text-health-error', dot: 'bg-health-error', icon: XCircle },
   seeding: { label: 'Seeding', text: 'text-accent', dot: 'bg-accent', pulse: true },
   needs_human: { label: 'Needs you', text: 'text-health-expiring', dot: 'bg-health-expiring', pulse: true },
+}
+
+// Fail closed: a status the UI does not recognise (e.g. a backend that adds one)
+// renders a neutral "Unknown" — NEVER green and never a crash (ADR 0025: unknown ⇒ degraded).
+const UNKNOWN_FALLBACK: HealthVisual = {
+  label: 'Unknown',
+  text: 'text-health-absent',
+  dot: 'border border-health-absent bg-transparent',
+  icon: HelpCircle,
 }
 
 export function HealthBadge({
@@ -33,7 +47,7 @@ export function HealthBadge({
   status: ConnectionStatus
   className?: string
 }) {
-  const visual = VISUALS[status]
+  const visual = (VISUALS as Record<string, HealthVisual>)[status] ?? UNKNOWN_FALLBACK
   const Icon = visual.icon
   return (
     <span

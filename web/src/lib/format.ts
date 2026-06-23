@@ -40,6 +40,9 @@ export function needsAttention(connection: Pick<Connection, 'status'>): boolean 
   return (
     connection.status === 'expiring_soon' ||
     connection.status === 'error' ||
-    connection.status === 'needs_human'
+    connection.status === 'needs_human' ||
+    // ADR 0025: an unconfirmed or dead session is degraded — surface it, don't hide it.
+    connection.status === 'unverified' ||
+    connection.status === 'dead'
   )
 }

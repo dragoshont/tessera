@@ -130,7 +130,9 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         Assert.Equal(Admin, people[0].GetProperty("principal").GetString());
         Assert.Equal("Admin", people[0].GetProperty("role").GetString());
         Assert.Equal(2, people[0].GetProperty("connectionCount").GetInt32());
-        Assert.Equal(1, people[0].GetProperty("needsAttentionCount").GetInt32());   // utility-co is absent
+        // ADR 0025: health-portal is present-but-unverified (no longer a false "live")
+        // and utility-co is absent — both are non-"live", so both need attention.
+        Assert.Equal(2, people[0].GetProperty("needsAttentionCount").GetInt32());
 
         Assert.Equal(Member, people[1].GetProperty("principal").GetString());
         Assert.Equal("Member", people[1].GetProperty("role").GetString());
@@ -145,11 +147,12 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         var conns = doc.RootElement.EnumerateArray().ToArray();
 
         Assert.Equal(2, conns.Length);
-        var live = conns.Single(c => c.GetProperty("provider").GetString() == "health-portal");
-        Assert.Equal("live", live.GetProperty("status").GetString());
-        Assert.True(live.GetProperty("hasRefreshToken").GetBoolean());
-        Assert.True(live.GetProperty("hasCookies").GetBoolean());
-        Assert.False(live.GetProperty("hasAccessToken").GetBoolean());
+        var hp = conns.Single(c => c.GetProperty("provider").GetString() == "health-portal");
+        // ADR 0025: present but not exercised ⇒ "unverified" on the wire, not a false "live".
+        Assert.Equal("unverified", hp.GetProperty("status").GetString());
+        Assert.True(hp.GetProperty("hasRefreshToken").GetBoolean());
+        Assert.True(hp.GetProperty("hasCookies").GetBoolean());
+        Assert.False(hp.GetProperty("hasAccessToken").GetBoolean());
 
         // Secretless: the bundle's real values never appear on the wire.
         Assert.DoesNotContain("RT", body, StringComparison.Ordinal);

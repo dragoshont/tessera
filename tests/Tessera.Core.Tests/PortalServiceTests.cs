@@ -39,7 +39,7 @@ public sealed class PortalServiceTests
     }
 
     [Fact]
-    public async Task A_present_bundle_is_live_with_presence_flags_but_no_value()
+    public async Task A_present_bundle_is_unverified_not_live_until_a_verdict_confirms_it()
     {
         var store = new InMemoryCredentialStore();
         store.Put("health-portal-alice", new CredentialBundle(
@@ -49,7 +49,10 @@ public sealed class PortalServiceTests
         var portal = Build(store, policy, Admin);
         var connection = Assert.Single(await portal.ListConnectionsAsync(Admin));
 
-        Assert.Equal("live", connection.Status);
+        // ADR 0025: presence is not liveness. The bundle is present, but Tessera has
+        // not exercised it — the honest status is "unverified", never optimistic "live".
+        Assert.Equal("unverified", connection.Status);
+        Assert.Null(connection.LastVerifiedAt);      // never confirmed alive
         Assert.True(connection.HasRefreshToken);
         Assert.True(connection.HasCookies);
         Assert.False(connection.HasAccessToken);
@@ -96,10 +99,12 @@ public sealed class PortalServiceTests
     }
 
     [Fact]
-    public async Task People_rollup_counts_only_unhealthy_connections_as_needing_attention()
+    public async Task People_rollup_counts_non_live_connections_as_needing_attention()
     {
         var store = new InMemoryCredentialStore();
-        // alice: one live (present) + one absent (empty) → needsAttention = 1.
+        // alice: one present-but-unverified + one absent (empty). Per ADR 0025 an
+        // unconfirmed session is NOT "live" (unknown ⇒ degraded), so BOTH need
+        // attention → needsAttention = 2 (the present one is no longer a false green).
         store.Put("health-portal-alice", new CredentialBundle(RefreshToken: "x"));
         var policy = Policy(
             new TargetBinding("health-portal", "health-portal-alice", Admin),
@@ -111,15 +116,16 @@ public sealed class PortalServiceTests
         Assert.Equal(Admin, person.Principal);
         Assert.Equal(PortalRole.Admin, person.Role);
         Assert.Equal(2, person.ConnectionCount);
-        Assert.Equal(1, person.NeedsAttentionCount);
+        Assert.Equal(2, person.NeedsAttentionCount);
     }
 
     [Fact]
     public async Task Unhealthy_connections_sort_first()
     {
         var store = new InMemoryCredentialStore();
-        store.Put("bbb-alice", new CredentialBundle(RefreshToken: "x")); // live
-        // aaa has no bundle → absent → must sort before the live bbb.
+        store.Put("bbb-alice", new CredentialBundle(RefreshToken: "x")); // present → unverified
+        // Both are non-"live" now (aaa absent, bbb unverified); among non-live the
+        // tie-break is provider name, so aaa still sorts first.
         var policy = Policy(
             new TargetBinding("bbb", "bbb-alice", Admin),
             new TargetBinding("aaa", "aaa-alice", Admin));
@@ -130,6 +136,16 @@ public sealed class PortalServiceTests
         Assert.Equal("aaa", conns[0].Provider);   // absent first
         Assert.Equal("bbb", conns[1].Provider);
     }
+
+    [Theory]
+    [InlineData(CredentialStatus.Present, null, "unverified")]  // present, no verdict ⇒ honest unverified (NOT optimistic live)
+    [InlineData(CredentialStatus.Present, true, "live")]        // a real verdict confirmed the session
+    [InlineData(CredentialStatus.Present, false, "dead")]       // a real verdict says the session is dead
+    [InlineData(CredentialStatus.Absent, null, "absent")]
+    [InlineData(CredentialStatus.Incomplete, null, "error")]
+    [InlineData(CredentialStatus.Error, null, "error")]
+    public void MapStatus_is_honest_presence_is_not_liveness(CredentialStatus status, bool? verifiedAlive, string expected) =>
+        Assert.Equal(expected, PortalService.MapStatus(status, verifiedAlive));
 
     [Fact]
     public async Task Disabled_live_view_provider_fails_closed()

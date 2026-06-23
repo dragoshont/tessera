@@ -54,9 +54,14 @@ export interface CreateConnectionInput {
 
 export type ConnectionStatus =
   | 'live'
+  // ADR 0025: present in the store but Tessera has NOT confirmed the session is
+  // actually alive — shown amber ("present, not confirmed alive"), never green.
+  | 'unverified'
   | 'expiring_soon'
   | 'absent'
   | 'error'
+  // A real liveness verdict confirmed the session is dead (vs `error` = store unreadable).
+  | 'dead'
   | 'seeding'
   | 'needs_human'
 
@@ -82,6 +87,11 @@ export interface Connection {
   lastSeededAt?: string
   /** "last successfully used" — shown alongside expiry for trust. */
   lastUsedAt?: string
+  /**
+   * When Tessera last *confirmed the session is alive* by exercising it, or absent
+   * when it never has — the honest backing for the `unverified` status (ADR 0025).
+   */
+  lastVerifiedAt?: string
   expiresAt?: string
   /** True when `expiresAt` is a guess (cookies often have no readable TTL). */
   expiryIsEstimated: boolean

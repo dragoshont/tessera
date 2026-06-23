@@ -501,11 +501,25 @@ public sealed class PortalService
     // The store status maps to the UI health vocabulary. expiring_soon / seeding /
     // needs_human are live-flow states not derivable from a static bundle yet, so
     // they are intentionally not emitted here (honest — see spec R2).
-    private static string MapStatus(CredentialStatus status) => status switch
+    /// <summary>
+    /// Maps the store's secret-free <see cref="CredentialStatus"/> (presence) to the
+    /// portal's UI health — <b>honestly: presence is not liveness</b> (ADR 0025). A
+    /// present bundle is <c>unverified</c> ("present, not confirmed alive") unless a
+    /// real liveness verdict is supplied: <c>live</c> only when something actually
+    /// exercised the session, <c>dead</c> when a verdict says so. The
+    /// <paramref name="verifiedAlive"/> seam stays <c>null</c> (⇒ unverified) until the
+    /// use-based verdict lands (SDD-01 P4) — never an optimistic green from presence.
+    /// </summary>
+    internal static string MapStatus(CredentialStatus status, bool? verifiedAlive = null) => status switch
     {
-        CredentialStatus.Present => "live",
         CredentialStatus.Absent => "absent",
         CredentialStatus.Incomplete => "error",
+        CredentialStatus.Present => verifiedAlive switch
+        {
+            true => "live",          // a verdict confirmed the session works
+            false => "dead",         // a verdict says the session is dead
+            null => "unverified",    // present, but Tessera has NOT confirmed it — honest default
+        },
         _ => "error",
     };
 }

@@ -11,7 +11,7 @@ namespace Tessera.Core.Portal;
 /// <param name="OwnerPrincipal">The person this connection acts on behalf of.</param>
 /// <param name="Provider">The provider/target (the recipe target).</param>
 /// <param name="DisplayName">A human label (recipe description, else the target).</param>
-/// <param name="Status">UI health: <c>live | expiring_soon | absent | error | seeding | needs_human</c>.</param>
+/// <param name="Status">UI health: <c>live | unverified | expiring_soon | absent | error | dead | seeding | needs_human</c>. <c>live</c> is shown ONLY when a real verdict has confirmed the session; a present-but-unconfirmed session is <c>unverified</c> ("present, not confirmed alive"), never an optimistic <c>live</c> (ADR 0025).</param>
 /// <param name="HasCookies">Whether session cookies are present (presence, not value).</param>
 /// <param name="HasRefreshToken">Whether a refresh token is present.</param>
 /// <param name="HasAccessToken">Whether an access token is present.</param>
@@ -20,6 +20,7 @@ namespace Tessera.Core.Portal;
 /// <param name="Detail">A secret-free explanation of the status.</param>
 /// <param name="Owner">Whose credential backs this connection (ADR 0020): <c>service</c> (household/brokered key) | <c>user</c> (the person's own login) | <c>dependent</c> (a guardian seeded it).</param>
 /// <param name="Guardian">For an <c>owner: dependent</c> connection, the guardian who seeded it; otherwise null.</param>
+/// <param name="LastVerifiedAt">When Tessera last <em>confirmed the session is alive</em> by exercising it, or null when it never has — the honest default for a present-but-unverified connection (the same null-not-faked rule as the rotation schedule's last-run).</param>
 public sealed record PortalConnection(
     string ConnectionId,
     string OwnerPrincipal,
@@ -33,7 +34,8 @@ public sealed record PortalConnection(
     bool ExpiryIsEstimated,
     string Detail = "",
     string Owner = "service",
-    string? Guardian = null);
+    string? Guardian = null,
+    DateTimeOffset? LastVerifiedAt = null);
 
 /// <summary>A person plus the portal's attention rollup (Users-view row).</summary>
 /// <param name="Principal">The verified principal (e.g. <c>alice@example.com</c>).</param>

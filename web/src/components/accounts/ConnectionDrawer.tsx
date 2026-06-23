@@ -124,10 +124,13 @@ export function ConnectionDrawer({ connection, open, onOpenChange, onAction, sch
               <Badge variant="secondary" title={ownerMeta(connection.owner, connection.guardian).title}>
                 {ownerMeta(connection.owner, connection.guardian).label}
               </Badge>
-              {connection.lastUsedAt || connection.lastSeededAt ? (
+              {connection.lastVerifiedAt ? (
                 <span className="text-muted-foreground">
-                  · verified {relativeTime(connection.lastUsedAt ?? connection.lastSeededAt)}
+                  · confirmed alive {relativeTime(connection.lastVerifiedAt)}
                 </span>
+              ) : connection.lastUsedAt ? (
+                // Honest: a use-timer is NOT a liveness verdict (ADR 0025) — say "used", not "verified".
+                <span className="text-muted-foreground">· last used {relativeTime(connection.lastUsedAt)}</span>
               ) : null}
             </div>
           </SheetHeader>
@@ -158,6 +161,10 @@ export function ConnectionDrawer({ connection, open, onOpenChange, onAction, sch
 
                 <section className="flex flex-col">
                   <h4 className="pb-1 text-sm font-semibold">Health</h4>
+                  <DetailRow
+                    label="last confirmed alive"
+                    value={connection.lastVerifiedAt ? relativeTime(connection.lastVerifiedAt) : 'never'}
+                  />
                   <DetailRow
                     label="last re-seeded"
                     value={connection.lastSeededAt ? relativeTime(connection.lastSeededAt) : '—'}

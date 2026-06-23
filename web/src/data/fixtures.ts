@@ -20,8 +20,11 @@ const iso = (date: Date) => date.toISOString()
 export const currentUserPrincipal = 'alice@example.com'
 
 /**
- * Alice (the operator) owns one connection in each of the four health states so
- * the My-accounts table can show Live · Expiring soon · Absent · Error at once.
+ * Alice (the operator) owns one connection in each of four health states so the
+ * My-accounts table can show Unverified · Expiring soon · Absent · Error at once
+ * (ADR 0025: a present-but-unconfirmed session is "Unverified", not a false "Live").
+ * Bob's Health Portal is the deliberate verified-"Live" sample — it carries a
+ * lastVerifiedAt, so "live" is earned by a verdict, not assumed from presence.
  * Bob owns a single live connection; Carol owns none.
  */
 export const connections: Connection[] = [
@@ -30,7 +33,9 @@ export const connections: Connection[] = [
     ownerPrincipal: 'alice@example.com',
     provider: 'Health Portal',
     displayName: 'Health Portal',
-    status: 'live',
+    // ADR 0025: present, but Tessera has not independently confirmed it is alive
+    // (no rotation verdict yet) -> honest "unverified", never an optimistic "live".
+    status: 'unverified',
     lastSeededAt: iso(subDays(now, 12)),
     lastUsedAt: iso(subHours(now, 3)),
     expiresAt: undefined,
@@ -93,6 +98,8 @@ export const connections: Connection[] = [
     status: 'live',
     lastSeededAt: iso(subDays(now, 2)),
     lastUsedAt: iso(subHours(now, 20)),
+    // "live" is earned: Tessera confirmed the session alive 1h ago (ADR 0025).
+    lastVerifiedAt: iso(subHours(now, 1)),
     expiresAt: undefined,
     expiryIsEstimated: true,
     hasCookies: true,
@@ -136,6 +143,17 @@ export const people: Person[] = [
 export const aliceConnections = connections.filter(
   (connection) => connection.ownerPrincipal === 'alice@example.com',
 )
+
+/**
+ * The one verified-"live" connection (bob's Health Portal) — `live` earned by a real
+ * `lastVerifiedAt`, not assumed from presence (ADR 0025). The single source of truth
+ * for stories/tests that show the confirmed-alive state, so a future fixture change
+ * that removes the verified-live sample fails a test instead of silently rendering a
+ * blank story.
+ */
+export const liveConnection: Connection = connections.find(
+  (connection) => connection.status === 'live' && Boolean(connection.lastVerifiedAt),
+)!
 
 export const allExpiringConnections: Connection[] = aliceConnections.map((connection) => ({
   ...connection,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { connections, people } from './fixtures'
+import { connections, liveConnection, people } from './fixtures'
 import type { ConnectionStatus } from './types'
 
 describe('fixtures — people + connections contract', () => {
@@ -31,7 +31,16 @@ describe('fixtures — people + connections contract', () => {
         .filter((connection) => connection.ownerPrincipal === 'alice@example.com')
         .map((connection) => connection.status),
     )
-    expect(aliceStates).toEqual(new Set<ConnectionStatus>(['live', 'expiring_soon', 'absent', 'error']))
+    // ADR 0025: a present-but-unverified session is "unverified", not a false "live".
+    expect(aliceStates).toEqual(new Set<ConnectionStatus>(['unverified', 'expiring_soon', 'absent', 'error']))
+  })
+
+  it('exposes a verified-"live" sample whose green is earned by a real lastVerifiedAt (ADR 0025)', () => {
+    // The single source of truth for the confirmed-alive stories/tests. If a fixture
+    // change ever removes it, THIS fails (instead of a story silently rendering blank).
+    expect(liveConnection).toBeDefined()
+    expect(liveConnection.status).toBe('live')
+    expect(liveConnection.lastVerifiedAt).toBeTruthy()
   })
 
   it('never carries a raw secret value (presence flags only)', () => {

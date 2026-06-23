@@ -23,8 +23,9 @@ test('sign in, read My accounts, open a connection — and reveal no secret', as
   await expect(page.getByRole('heading', { name: 'My accounts' })).toBeVisible()
   await expect(page.getByText('acting as alice@example.com')).toBeVisible()
 
-  // All four health states are present at a glance.
-  await expect(page.getByText('Live', { exact: true }).first()).toBeVisible()
+  // Four health states are present at a glance. ADR 0025: the present Health Portal
+  // session shows the honest "Unverified" (amber), not an optimistic green "Live".
+  await expect(page.getByText('Unverified', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Expiring soon')).toBeVisible()
   await expect(page.getByText('Absent')).toBeVisible()
   await expect(page.getByText('Error', { exact: true }).first()).toBeVisible()

@@ -31,6 +31,7 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0022](0022-apple-caldav-tessera.md) | **Apple iCloud (Calendar/Reminders/Contacts) via a credential-free `apple-mcp` brokered through Tessera** (same single-custodian model as RM; reads + step-up-gated writes) | Accepted |
 | [0023](0023-phase3-write-confirmation-out-of-band.md) | **Phase 3 write confirmation: a server-issued, out-of-band approval** (resolving HL-18; high-risk writes confirmed off-channel before commit) | Accepted |
 | [0024](0024-session-liveness-and-oracle-driven-reseed.md) | **Session liveness is the rotator's truth; re-seed is oracle-driven, not timer-driven** (the harvester re-seeds on the rotator's real verdict, breaker-safe; closes the gap behind the 5-day RM silent death and the stale Tessera cutover; owner-agnostic — hardens v0.5.2 now, unblocks the v0.6.0 cutover) | Proposed |
+| [0025](0025-liveness-first-class-invariant.md) | **Liveness is a first-class invariant: brokered sessions are observably alive, self-healing, or fail loud** (adds a 6th architecture invariant — truthful use-based health `healthy\|stale\|dead\|needs-human` with provenance, no silent degradation, self-heal where safe / escalate loud, health is first-class broker output, unknown ⇒ degraded fail-closed; the design basis for SDD-01) | Proposed |
 
 ## Format
 
