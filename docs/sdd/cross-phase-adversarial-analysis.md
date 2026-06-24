@@ -170,3 +170,34 @@ graph LR
 - **R-RM:** every active touch of the live RM session (A2/A3 probe, SDD-05 write) is staged
   behind opt-in config + the breaker + (for writes) the lease; the default-off posture from
   `refresh.enabled`/`egress.enabled` is preserved.
+
+## Post-implementation adversarial review (P4 → SDD-02 → SDD-03 → SDD-05 shipped)
+
+Re-attacking the *built* code (the semantic judge sub-agent was unavailable; this is the
+self-review that replaced it, plus the deterministic gate = PASS). Findings:
+
+- **A1 (single-writer integrity) — BUG FOUND & FIXED.** `ProcessSingleWriterLease` first
+  shipped as *always-grant*. With both the rotation pass and SDD-05 read-through enabled, two
+  **in-process** writers could each "hold" the lease and refresh the same session
+  concurrently — the precise double-write the lease exists to prevent. Fixed: the in-process
+  lease is now a real **non-blocking mutex** (one hold at a time; a concurrent acquire returns
+  `null`, so the second writer stays inert / surfaces the original 401). Single-process
+  exclusion is now genuine; cross-replica still needs the K8s `Lease` (plan-only). Tested
+  (`denies_a_second_concurrent_holder`).
+- **A1 fencing honesty — OK.** The token is monotonic and threaded; store-side rejection
+  (CAS) is **disclosed** as the plan-only follow-on in ADR 0026, not hidden.
+- **Default-safety — OK.** Shipped defaults (`egress.enabled` off, `readThroughOn401` off,
+  `refresh.enabled` off) leave behavior unchanged and green-free. Read-through cannot activate
+  without the opt-in **and** a writable store **and** a lease (guarded in `Build` + the ctor).
+- **No false-green — OK.** Read-through records `alive` only from the **final** response (a
+  genuine 2xx retry); a successful self-heal logs *no* degradation (the initial 401 is replaced
+  before the verdict is recorded). A degradation fires only on a transition **into** `dead`.
+- **Endpoint authz — OK.** `/portal/degradations` is server-scoped: a member is forced to
+  self (403 on asking for another), an operator sees all or `?principal=`. The payload is
+  identity metadata + remediation text — no secret.
+- **Concurrency — OK.** The read-through holds the (now real) lease across refresh+retry via
+  `await using`; non-blocking acquire ⇒ no deadlock; the rotator simply skips a pass if the
+  lease is held. The degradation ring is lock-guarded and bounded.
+- **YAGNI — OK.** The K8s `Lease` adapter, store-side fencing CAS, and the OpenBao adapter are
+  documented plan-only deferrals, not half-built; nothing load-bearing is missing for the
+  (all-off) shipped defaults.

@@ -11,11 +11,35 @@ namespace Tessera.Core.Tests;
 public sealed class SingleWriterLeaseTests
 {
     [Fact]
-    public async Task Process_lease_always_grants()
+    public async Task Process_lease_grants_when_free_and_releases_on_dispose()
     {
         var lease = new ProcessSingleWriterLease();
-        await using var hold = await lease.TryAcquireAsync();
-        Assert.NotNull(hold);
+
+        long firstToken;
+        await using (var hold = await lease.TryAcquireAsync())
+        {
+            Assert.NotNull(hold);
+            firstToken = hold!.FencingToken;
+        } // released here
+
+        // Free again ⇒ re-acquirable, with a strictly higher fencing token.
+        await using var second = await lease.TryAcquireAsync();
+        Assert.NotNull(second);
+        Assert.True(second!.FencingToken > firstToken);
+    }
+
+    [Fact]
+    public async Task Process_lease_denies_a_second_concurrent_holder()
+    {
+        var lease = new ProcessSingleWriterLease();
+
+        await using var first = await lease.TryAcquireAsync();
+        Assert.NotNull(first);
+
+        // While the first hold is alive, a second acquire must be refused — the two
+        // in-process writers (rotation pass + read-through refresh) are serialized.
+        var second = await lease.TryAcquireAsync();
+        Assert.Null(second);
     }
 
     [Fact]
@@ -23,12 +47,13 @@ public sealed class SingleWriterLeaseTests
     {
         var lease = new ProcessSingleWriterLease();
 
-        await using var a = await lease.TryAcquireAsync();
-        await using var b = await lease.TryAcquireAsync();
-        await using var c = await lease.TryAcquireAsync();
+        long a, b, c;
+        await using (var h = await lease.TryAcquireAsync()) { a = h!.FencingToken; }
+        await using (var h = await lease.TryAcquireAsync()) { b = h!.FencingToken; }
+        await using (var h = await lease.TryAcquireAsync()) { c = h!.FencingToken; }
 
         // Strictly increasing — a write tagged with a lower token must be refused (fencing).
-        Assert.True(b!.FencingToken > a!.FencingToken);
-        Assert.True(c!.FencingToken > b!.FencingToken);
+        Assert.True(b > a);
+        Assert.True(c > b);
     }
 }
