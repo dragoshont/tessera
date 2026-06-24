@@ -24,6 +24,15 @@ public interface IConnectionHealthStore
     /// failure counter); = false folds in an unauthorized rejection (sets
     /// <c>VerifiedAlive=false</c>, increments the failure counter, preserves the prior
     /// <c>LastVerifiedAt</c> so the UI can still say "last alive …"). Idempotent per call.
+    /// A transition <em>into</em> <c>dead</c> (from <c>live</c> or <c>unverified</c>) is
+    /// surfaced via <see cref="RecentDegradations"/> so a death is seen, not silent (A6).
     /// </summary>
     Task RecordOutcomeAsync(string connectionKey, bool alive, DateTimeOffset at, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The most recent degradations (newest first), bounded. The awareness surface reads
+    /// this to show "what just broke" — the proactive-degradation signal that was missing
+    /// when the RM session died unseen. Secret-free identity metadata only.
+    /// </summary>
+    IReadOnlyList<DegradationEvent> RecentDegradations(int max = 32);
 }

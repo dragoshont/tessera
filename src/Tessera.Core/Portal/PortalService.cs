@@ -403,6 +403,14 @@ public sealed class PortalService
     }
 
     /// <summary>
+    /// The recent connection degradations (newest first) — the awareness surface so a
+    /// session death is <em>seen</em>, not silent (ADR 0025; SDD-02). Empty when no
+    /// liveness store is wired or nothing has degraded.
+    /// </summary>
+    public IReadOnlyList<DegradationEvent> RecentDegradations(int max = 32)
+        => _health?.RecentDegradations(max) ?? [];
+
+    /// <summary>
     /// Adds (or re-points) a connection: writes a binding <c>(provider, principal) →
     /// credential</c> into the policy so the person + connection appear, then
     /// persists the document (best-effort — skipped on a read-only mount). This is

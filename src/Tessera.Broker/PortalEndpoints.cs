@@ -168,6 +168,47 @@ internal static class PortalEndpoints
             return Results.Json(new AuditFeedDto(rows, summary));
         });
 
+        // Recent connection degradations (ADR 0025 / SDD-02) — the awareness surface so a
+        // session death is SEEN, not discovered days later. Self-scoped: a member sees
+        // only degradations of their own connections; an operator sees everyone's (or a
+        // ?principal= scope). Secret-free identity metadata only — the "what just broke"
+        // feed that was missing when the RM session died unseen.
+        app.MapGet("/portal/degradations", async (
+            HttpContext ctx, ITokenValidator validator, PortalService portal, TesseraConfig config,
+            string? principal, int? limit) =>
+        {
+            var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
+            if (caller is null)
+            {
+                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+            }
+
+            // Scope server-side: operator sees everyone (or ?principal=), member is forced to self.
+            string? scope;
+            if (portal.IsAdmin(caller))
+            {
+                scope = string.IsNullOrWhiteSpace(principal) ? null : principal.Trim();
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(principal)
+                    && !string.Equals(principal.Trim(), caller, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Json(new { error = "forbidden: a member may only read their own degradations" }, statusCode: 403);
+                }
+
+                scope = caller;
+            }
+
+            var rowLimit = Math.Clamp(limit ?? 50, 1, 128);
+            var events = portal.RecentDegradations(128)
+                .Where(e => scope is null || string.Equals(e.Principal, scope, StringComparison.OrdinalIgnoreCase))
+                .Take(rowLimit)
+                .Select(e => new { connectionKey = e.ConnectionKey, provider = e.Provider, principal = e.Principal, from = e.From, to = e.To, at = e.At, remediation = e.Remediation })
+                .ToArray();
+            return Results.Json(events);
+        });
+
         // Pending writes awaiting YOUR out-of-band approval (ADR 0023). A manage: write is
         // HELD until the person it is for confirms it here — the calling agent cannot drive
         // this surface. Self-scoped for everyone: you only ever see, and may only approve,

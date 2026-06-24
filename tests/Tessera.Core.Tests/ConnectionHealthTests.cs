@@ -109,6 +109,64 @@ public sealed class ConnectionHealthTests
     public async Task Store_returns_null_for_an_unseen_key()
         => Assert.Null(await new InMemoryConnectionHealthStore().GetAsync("nothing:here"));
 
+    // --- SDD-02: a death is surfaced as a degradation (no more silent failure). ---
+
+    [Fact]
+    public async Task Store_surfaces_a_live_to_dead_degradation_once()
+    {
+        var store = new InMemoryConnectionHealthStore();
+        const string key = "health-portal:alice@example.com";
+        var t0 = DateTimeOffset.UtcNow;
+
+        await store.RecordOutcomeAsync(key, alive: true, t0);                       // live
+        Assert.Empty(store.RecentDegradations());                                   // healthy ⇒ nothing to report
+
+        await store.RecordOutcomeAsync(key, alive: false, t0 + TimeSpan.FromMinutes(1)); // live → dead
+        var first = Assert.Single(store.RecentDegradations());
+        Assert.Equal(key, first.ConnectionKey);
+        Assert.Equal("health-portal", first.Provider);
+        Assert.Equal("alice@example.com", first.Principal);
+        Assert.Equal("live", first.From);
+        Assert.Equal("dead", first.To);
+        Assert.Contains("portal", first.Remediation, StringComparison.OrdinalIgnoreCase); // actionable
+
+        await store.RecordOutcomeAsync(key, alive: false, t0 + TimeSpan.FromMinutes(2)); // dead → dead
+        Assert.Single(store.RecentDegradations());                                  // same outage, not re-reported
+    }
+
+    [Fact]
+    public async Task Store_surfaces_an_unverified_to_dead_degradation()
+    {
+        var store = new InMemoryConnectionHealthStore();
+        await store.RecordOutcomeAsync("portal:bob@example.com", alive: false, DateTimeOffset.UtcNow);
+
+        var evt = Assert.Single(store.RecentDegradations());
+        Assert.Equal("unverified", evt.From);   // never confirmed, then rejected
+        Assert.Equal("dead", evt.To);
+    }
+
+    [Fact]
+    public async Task Portal_surfaces_recent_degradations()
+    {
+        var (portal, health) = BuildPortal();
+        await health.RecordOutcomeAsync("health-portal:alice@example.com", alive: true, DateTimeOffset.UtcNow);
+        await health.RecordOutcomeAsync("health-portal:alice@example.com", alive: false, DateTimeOffset.UtcNow);
+
+        var degradations = portal.RecentDegradations();
+        var evt = Assert.Single(degradations);
+        Assert.Equal("dead", evt.To);
+    }
+
+    [Fact]
+    public void Portal_with_no_store_has_no_degradations()
+    {
+        var store = new InMemoryCredentialStore();
+        var policy = new LoadedPolicy(Grants: [], Recipes: [], Bindings: []);
+        var resolver = new CredentialResolver(policy.Bindings, store);
+        var portal = new PortalService(policy, resolver, [Admin]); // no health store wired
+        Assert.Empty(portal.RecentDegradations());
+    }
+
     // --- The portal projects the earned verdict end-to-end. ---
 
     private static (PortalService portal, InMemoryConnectionHealthStore health) BuildPortal(IConnectionHealthStore? health = null)
@@ -184,5 +242,7 @@ public sealed class ConnectionHealthTests
 
         public Task RecordOutcomeAsync(string connectionKey, bool alive, DateTimeOffset at, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public IReadOnlyList<DegradationEvent> RecentDegradations(int max = 32) => [];
     }
 }
