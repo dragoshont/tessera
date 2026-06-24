@@ -1,0 +1,39 @@
+# PLAN-ONLY (ADR 0026) — DO NOT add to kustomization.yaml; a human applies this.
+#
+# This grants the broker's ServiceAccount the RBAC to hold a Kubernetes `Lease`, the
+# etcd/Raft-backed single-writer guard for session rotation (SDD-03). It is required ONLY
+# to run the broker with more than one replica safely; the default in-process lease
+# (ProcessSingleWriterLease) is correct for a single replica and needs none of this.
+#
+# It is deliberately NOT in `kustomization.yaml` so GitOps never auto-applies an RBAC grant.
+# Review, then apply explicitly:   kubectl apply -f deploy/k8s/plan-only-rotation-lease-rbac.yaml
+#
+# Identity/RBAC is the highest blast radius — the agent proposes; you apply.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tessera-rotation-lease
+  namespace: default # set to the broker's namespace
+rules:
+  # The minimum to acquire/renew a single named Lease. Scoped to the namespace; no cluster role.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "watch", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tessera-rotation-lease
+  namespace: default # set to the broker's namespace
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tessera-rotation-lease
+subjects:
+  - kind: ServiceAccount
+    name: tessera # set to the broker's ServiceAccount
+    namespace: default
+# The Lease object itself is created on first acquisition by the broker (verb: create).
+# A KubernetesSingleWriterLease : ISingleWriterLease adapter (a small Kubernetes-client
+# implementation) is the code follow-on once this RBAC is applied — see ADR 0026.

@@ -157,6 +157,11 @@ public static class BrokerHost
         // call earns a verdict, and on any store fault (fail-closed).
         var connectionHealth = new Tessera.Core.Health.InMemoryConnectionHealthStore();
         services.AddSingleton<Tessera.Core.Health.IConnectionHealthStore>(connectionHealth);
+        // Single-writer lease (ADR 0026): the rotation owner runs ONLY while it holds this
+        // lease. Default is the in-process lease (single-replica correct, today's behavior
+        // made an explicit seam + fencing token). A Kubernetes-Lease-backed implementation
+        // (its RBAC is plan-only infra) gives real multi-replica safety.
+        services.AddSingleton<Tessera.Core.Rotation.ISingleWriterLease>(new Tessera.Core.Rotation.ProcessSingleWriterLease());
         services.AddHttpForwarder();
         if (options.ForwarderOverride is not null)
         {
@@ -223,7 +228,9 @@ public static class BrokerHost
             services.AddHostedService(sp => new SessionRefreshService(
                 sp.GetRequiredService<Tessera.Providers.SessionRefreshOrchestrator>(),
                 TimeSpan.FromSeconds(config.Refresh.IntervalSeconds),
-                sp.GetRequiredService<ILoggerFactory>().CreateLogger<SessionRefreshService>()));
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger<SessionRefreshService>(),
+                // Rotate only while holding the single-writer lease (ADR 0026).
+                sp.GetRequiredService<Tessera.Core.Rotation.ISingleWriterLease>()));
         }
 
         var app = builder.Build();
