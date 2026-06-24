@@ -41,7 +41,8 @@ public sealed class BrokerProviderGateway : IProviderGateway
         IHttpTransport transport,
         Tessera.Core.Audit.IAuditSink? audit = null,
         ICredentialWriter? writer = null,
-        Tessera.Core.Health.IConnectionHealthStore? health = null)
+        Tessera.Core.Health.IConnectionHealthStore? health = null,
+        Tessera.Core.Rotation.ISingleWriterLease? lease = null)
     {
         if (!config.Egress.Enabled)
         {
@@ -49,8 +50,20 @@ public sealed class BrokerProviderGateway : IProviderGateway
         }
 
         var guard = new SsrfGuard(config.Egress.AllowedHosts, config.Egress.AllowPlainHttp);
+
+        // Read-through-on-401 (SDD-05 / ADR 0026): only wired when the operator opts in AND a
+        // writable store + a single-writer lease are present (the refresh is a rotation
+        // write). Off by default — it acts on the live call path.
+        SessionRefresher? refresher = null;
+        if (config.Egress.ReadThroughOn401 && writer is not null && lease is not null)
+        {
+            refresher = new SessionRefresher(transport, writer, guard);
+        }
+
         var egress = new ProviderEgress(
-            new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, recipes, guard, transport, audit: audit, writer: writer, health: health);
+            new PolicyDecisionPointAdapter(pdp.Evaluate), resolver, recipes, guard, transport,
+            audit: audit, writer: writer, health: health,
+            refresher: refresher, lease: lease, readThroughOn401: config.Egress.ReadThroughOn401);
         return new BrokerProviderGateway(egress, pdp, recipes);
     }
 

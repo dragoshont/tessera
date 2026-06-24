@@ -143,6 +143,16 @@ public sealed class EgressOptions
     /// single-use consumed. Default 600s (10 min).
     /// </summary>
     public int ChallengeTtlSeconds { get; init; } = 600;
+
+    /// <summary>
+    /// Read-through-on-401 (ADR 0026 / SDD-05). When a brokered read is rejected as
+    /// unauthorized, attempt a single in-line refresh of the session and retry the call
+    /// once, instead of just failing. The refresh is a rotation <em>write</em>, so it runs
+    /// only while holding the single-writer lease and carries its fencing token (analysis
+    /// A1). OFF by default — it acts on the live call path and is only safe once Tessera
+    /// owns rotation for the provider; turning it on is part of the v0.6.0 cutover.
+    /// </summary>
+    public bool ReadThroughOn401 { get; init; }
 }
 
 /// <summary>Admin-portal settings (ADR 0016). The portal is a thin convenience

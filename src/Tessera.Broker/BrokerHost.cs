@@ -161,7 +161,8 @@ public static class BrokerHost
         // lease. Default is the in-process lease (single-replica correct, today's behavior
         // made an explicit seam + fencing token). A Kubernetes-Lease-backed implementation
         // (its RBAC is plan-only infra) gives real multi-replica safety.
-        services.AddSingleton<Tessera.Core.Rotation.ISingleWriterLease>(new Tessera.Core.Rotation.ProcessSingleWriterLease());
+        var singleWriterLease = new Tessera.Core.Rotation.ProcessSingleWriterLease();
+        services.AddSingleton<Tessera.Core.Rotation.ISingleWriterLease>(singleWriterLease);
         services.AddHttpForwarder();
         if (options.ForwarderOverride is not null)
         {
@@ -179,7 +180,9 @@ public static class BrokerHost
             // sliding session back on a read; a read-only store leaves it null (read-only).
             store as ICredentialWriter,
             // The egress records each call's outcome as the connection's liveness verdict.
-            connectionHealth));
+            connectionHealth,
+            // Read-through-on-401 refresh is a rotation write — gated by the same lease.
+            singleWriterLease));
         services.AddTesseraMcp(mcpOptions);
 
         // The non-human caller plane (ADR 0021): authenticate a workload from its

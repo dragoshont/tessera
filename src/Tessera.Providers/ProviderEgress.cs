@@ -70,6 +70,9 @@ public sealed class ProviderEgress
     private readonly IAuditSink _audit;
     private readonly ICredentialWriter? _writer;
     private readonly IConnectionHealthStore? _health;
+    private readonly SessionRefresher? _refresher;
+    private readonly Tessera.Core.Rotation.ISingleWriterLease? _lease;
+    private readonly bool _readThroughOn401;
     private readonly int _maxBodyBytes;
     private readonly int _metadataMaxBytes;
 
@@ -84,7 +87,10 @@ public sealed class ProviderEgress
         int metadataMaxBytes = 65_536,
         IAuditSink? audit = null,
         ICredentialWriter? writer = null,
-        IConnectionHealthStore? health = null)
+        IConnectionHealthStore? health = null,
+        SessionRefresher? refresher = null,
+        Tessera.Core.Rotation.ISingleWriterLease? lease = null,
+        bool readThroughOn401 = false)
     {
         _pdp = pdp;
         _resolver = resolver;
@@ -96,6 +102,11 @@ public sealed class ProviderEgress
         _metadataMaxBytes = metadataMaxBytes;
         _writer = writer;
         _health = health;
+        _refresher = refresher;
+        _lease = lease;
+        // Read-through is only wired when the refresher + lease are present (it is a
+        // rotation write). Off unless the operator opts in AND the parts are available.
+        _readThroughOn401 = readThroughOn401 && refresher is not null && lease is not null;
     }
 
     /// <summary>
@@ -195,6 +206,20 @@ public sealed class ProviderEgress
             return new ProviderCallResult(ProviderCallStatus.TransportError, Detail: ex.Message);
         }
 
+        // Read-through-on-401 (SDD-05 / ADR 0026): an unauthorized read often just means the
+        // session rotated out from under us. When enabled, refresh once under the
+        // single-writer lease and retry the call — so a sliding session self-heals instead
+        // of surfacing a transient 401. Off by default; only acts when the recipe is
+        // refresh-capable. The refreshed verdict is recorded below from the retry's outcome.
+        if (response.Status is 401 or 403
+            && _readThroughOn401
+            && recipe.Refresh is not null
+            && _resolver.BindingFor(request) is { } rtBinding)
+        {
+            response = await ReadThroughAsync(
+                request, recipe, rtBinding.Credential, bundle, tool, url, sendBody ? requestBody : null, response, cancellationToken).ConfigureAwait(false);
+        }
+
         // Sliding-session write-back (ADR 0014/0015): when the recipe owns it and the
         // upstream rotated the session on this read (a Set-Cookie on a 2xx), capture the
         // rotated cookies and merge them back to the store so the next read uses the live
@@ -232,6 +257,61 @@ public sealed class ProviderEgress
         await RecordLivenessAsync(request, response.Status, cancellationToken).ConfigureAwait(false);
 
         return new ProviderCallResult(ProviderCallStatus.Completed, response.Status, body, $"{tool.Method} {tool.Path} -> {response.Status}", tool.OutputClass);
+    }
+
+    /// <summary>
+    /// Read-through-on-401 (SDD-05 / ADR 0026): refresh the session once under the
+    /// single-writer lease, then retry the call. The refresh is a rotation write, so it runs
+    /// only while this process holds the lease (no two writers rotate the same session); the
+    /// hold's fencing token guards the write (store-side enforcement is the plan-only
+    /// follow-on). If the lease is held elsewhere, the refresh token is dead, or the retry
+    /// fails, the original unauthorized response is surfaced unchanged.
+    /// </summary>
+    private async Task<TransportResponse> ReadThroughAsync(
+        AccessRequest request, Recipe recipe, string credentialName, CredentialBundle current,
+        RecipeTool tool, string url, string? sendBody, TransportResponse original, CancellationToken cancellationToken)
+    {
+        await using var hold = await _lease!.TryAcquireAsync(cancellationToken).ConfigureAwait(false);
+        if (hold is null)
+        {
+            // Another replica owns rotation — never refresh here (single-writer).
+            return original;
+        }
+
+        var refresh = await _refresher!.RefreshAsync(recipe, recipe.Refresh, credentialName, current, cancellationToken).ConfigureAwait(false);
+        if (refresh.Status != RefreshStatus.Rotated)
+        {
+            // Dead refresh token / not configured / error — surface the original 401.
+            return original;
+        }
+
+        // Re-resolve the now-rotated bundle and retry the call exactly once.
+        var fresh = await _resolver.ResolveBundleAsync(request, cancellationToken).ConfigureAwait(false);
+        if (fresh is null)
+        {
+            return original;
+        }
+
+        var headers = ProviderHeaders.Build(recipe, fresh);
+        if (headers is null)
+        {
+            return original;
+        }
+
+        if (sendBody is not null)
+        {
+            headers["Content-Type"] = "application/json";
+        }
+
+        try
+        {
+            return await _transport.SendAsync(tool.Method, url, headers, sendBody, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The retry itself failed at the transport — surface the original unauthorized.
+            return original;
+        }
     }
 
     /// <summary>
