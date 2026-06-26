@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using ModelContextProtocol.Server;
 
@@ -59,10 +60,18 @@ public sealed class TesseraMcpTools
     public Task<ProviderCallToolResult> CallAsync(
         [Description("The provider/target, e.g. the health portal.")] string target,
         [Description("The operation name, from tessera_list_provider_tools.")] string tool,
-        [Description("Optional JSON arguments/body for the operation.")] string? args,
-        [Description("Set true ONLY for a write/booking after the user has explicitly confirmed the exact details.")] bool confirm,
-        CancellationToken cancellationToken) =>
-        _service.CallProviderAsync(ForwardedToken(), target, tool, args, confirm, cancellationToken);
+        [Description("Optional JSON arguments/body (a JSON object) for the operation; omit when the tool takes none.")] JsonElement? args = null,
+        [Description("Set true ONLY for a write/booking after the user has explicitly confirmed the exact details.")] bool confirm = false,
+        CancellationToken cancellationToken = default)
+    {
+        // MCP clients send `args` as a JSON object (or omit it); the provider
+        // pipeline expects a JSON STRING (it JsonDocument.Parse-s it downstream).
+        // Mirror the broker HTTP path (CallerBrokerEndpoint): object -> GetRawText().
+        var argsJson = args is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } element
+            ? element.GetRawText()
+            : null;
+        return _service.CallProviderAsync(ForwardedToken(), target, tool, argsJson, confirm, cancellationToken);
+    }
 
     private string? ForwardedToken()
     {
