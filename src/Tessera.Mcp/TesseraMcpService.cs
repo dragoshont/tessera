@@ -118,9 +118,16 @@ public sealed class TesseraMcpService
         var targets = new List<TargetInfo>(_recipes.Count);
         foreach (var recipe in _recipes)
         {
-            var action = recipe.ExposedActions.Count > 0 ? recipe.ExposedActions[0] : "read:*";
-            var request = new AccessRequest(identity.Caller!, recipe.Target, action, identity.User);
-            var granted = _pdp.Evaluate(request).Allowed;
+            // Granted if the identity may perform ANY exposed action — NOT just the
+            // first one. The first exposed action is frequently read:selftest, which
+            // only the selftest caller holds; a chat caller legitimately granted
+            // read:appointments/read:slots would otherwise be reported "not granted"
+            // here, and the model then refuses to call a target it actually may use.
+            var actions = recipe.ExposedActions.Count > 0
+                ? (IReadOnlyList<string>)recipe.ExposedActions
+                : new[] { "read:*" };
+            var granted = actions.Any(a =>
+                _pdp.Evaluate(new AccessRequest(identity.Caller!, recipe.Target, a, identity.User)).Allowed);
             targets.Add(new TargetInfo(
                 recipe.Target,
                 recipe.ExposedActions,
