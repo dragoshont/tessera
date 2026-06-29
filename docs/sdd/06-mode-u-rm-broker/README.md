@@ -157,3 +157,24 @@ session can always be reached the old way.
   persistence.
 - **Wrong-account access:** the act-as principal a caller may assert is grant-bound
   (ADR 0015 §2) — a compromised consumer cannot impersonate another user.
+
+## 9. Amendment 2026-06-29 — recipe routes through the MCP smart tools (Mode P)
+
+**Problem.** Mode U pointed the chat recipe at raw apimng endpoints (`GetIntervals`,
+`Get`, `GetAllAssociations`, `NewAppointment`) with `TokenSSO` injection. Slot search
+therefore bypassed the MCP's hardened `rm_search_slots` (name→id, ISO-date, required
+specialty+district), so chat hit RM's `GetIntervals` validation directly and failed,
+while voice (direct `rm_*`) worked — **two contracts, one hardened**.
+
+**Fix (shipped, homelab `06d7503`+`3b4ee93`).** The `reginamaria` recipe now targets
+`http://reginamaria-mcp.default.svc:8080` with `injection:none` and calls the MCP
+**smart** tools: `rm_search_slots` / `rm_list_appointments` / `rm_list_dependents` /
+`rm_create_appointment`. Raw apimng paths are retired from the LLM surface. Net: one
+search/booking contract for chat **and** voice; the date/specialty traps are
+impossible. Tessera still brokers identity/policy; the MCP owns RM logic + the session
+(sole rotator, ADR-0014); netpol allows tessera→MCP. Reads stay non-mutating; booking
+keeps the per-call confirm in the MCP. Reversible by reverting the ConfigMap block.
+
+**Liveness dependency closed:** the v0.6.0 stale-regression risk is mitigated by
+homelab SDD-42 L1/L2 (truthful liveness + adopt-fenced KV write-back) shipped in
+reginamaria-mcp v0.5.5; the harvester oracle (L3) auto-re-seeds on the truthful verdict.
