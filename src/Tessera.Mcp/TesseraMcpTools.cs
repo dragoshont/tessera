@@ -29,22 +29,22 @@ public sealed class TesseraMcpTools
 
     /// <summary>Reports who Tessera believes is calling — the verified caller and end-user.</summary>
     [McpServerTool(Name = "tessera_whoami")]
-    [Description("Report the verified identity Tessera resolved for this call: the calling workload and, if delegated, the signed-in user. Use this to confirm per-user delegation is working.")]
+    [Description("INTERNAL diagnostic only: report the verified identity Tessera resolved. Rarely needed. NEVER surface the user's identity or email address in an answer, and do not call this just to greet or identify the user.")]
     public Task<WhoAmIResult> WhoAmIAsync(CancellationToken cancellationToken) =>
         _service.WhoAmIAsync(ForwardedToken(), cancellationToken);
 
     /// <summary>Lists the targets the current user may ask about.</summary>
     [McpServerTool(Name = "tessera_list_targets")]
-    [Description("List the providers/targets configured in Tessera and whether the signed-in user is granted access to each. Read-only; makes no upstream call.")]
+    [Description("List the providers/targets configured in Tessera and whether the signed-in user is granted access to each. These are the ONLY valid target ids for tessera_call/tessera_check_access — never invent or guess a target name. Read-only.")]
     public Task<ListTargetsResult> ListTargetsAsync(CancellationToken cancellationToken) =>
         _service.ListTargetsAsync(ForwardedToken(), cancellationToken);
 
     /// <summary>Checks whether the current user may perform an action, and whether a credential is ready.</summary>
     [McpServerTool(Name = "tessera_check_access")]
-    [Description("Authorize a (target, action) for the signed-in user and report the policy decision plus whether a usable credential is present in the vault. Read-only: it does NOT call the upstream service.")]
+    [Description("Authorize a (target, action) for the signed-in user and report the policy decision plus whether a usable credential is present in the vault. Read-only: it does NOT call the upstream service. If the decision is deny, tell the user the action is currently unavailable — NEVER ask the user to grant access or delegation (grants are admin-managed, not something the user can approve in chat).")]
     public Task<CheckAccessResult> CheckAccessAsync(
-        [Description("The provider/target, e.g. health-portal or marketplace.")] string target,
-        [Description("The action verb, e.g. read:results or write:events.create.")] string action,
+        [Description("The exact target id from tessera_list_targets (e.g. reginamaria). Never invent a target.")] string target,
+        [Description("The action verb from tessera_list_provider_tools (e.g. read:slots).")] string action,
         CancellationToken cancellationToken) =>
         _service.CheckAccessAsync(ForwardedToken(), target, action, cancellationToken);
 
@@ -56,9 +56,9 @@ public sealed class TesseraMcpTools
 
     /// <summary>Calls a provider operation on behalf of the signed-in user (Tessera injects their credential).</summary>
     [McpServerTool(Name = "tessera_call")]
-    [Description("Call a provider operation as the signed-in user — Tessera injects that user's credential and returns only the result (the caller never sees the secret). For a WRITE/booking operation you MUST first read back the exact details to the user, get a spoken/typed yes, then call again with confirm=true; a write never runs with confirm=false.")]
+    [Description("Call a provider operation as the signed-in user — Tessera injects that user's credential and returns only the result (the caller never sees the secret). If the call is denied, tell the user the action is currently unavailable — NEVER ask the user to grant access or delegation. For a WRITE/booking operation you MUST first read back the exact details to the user, get a spoken/typed yes, then call again with confirm=true; a write never runs with confirm=false.")]
     public Task<ProviderCallToolResult> CallAsync(
-        [Description("The provider/target, e.g. the health portal.")] string target,
+        [Description("The exact target id from tessera_list_targets (e.g. reginamaria). Never invent or guess a target name.")] string target,
         [Description("The operation name, from tessera_list_provider_tools.")] string tool,
         [Description("Optional JSON arguments/body (a JSON object) for the operation; omit when the tool takes none.")] JsonElement? args = null,
         [Description("Set true ONLY for a write/booking after the user has explicitly confirmed the exact details.")] bool confirm = false,
