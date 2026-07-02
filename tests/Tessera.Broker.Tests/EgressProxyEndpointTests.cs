@@ -315,6 +315,20 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Mcp_manage_plane_tool_without_step_up_flag_is_still_a_write()
+    {
+        // archive_board is declared action="manage:mcp" but WITHOUT the per-tool stepUp flag.
+        // The write plane comes from the action namespace (ADR 0019), orthogonal to step-up,
+        // so it still classifies as manage:mcp and is held. Deriving the plane from the
+        // step-up bit would wrongly forward this mutation on the read plane.
+        var resp = await _client.SendAsync(Build(
+            "POST", target: "mobbin", upstream: MobbinUpstream,
+            body: "{\"method\":\"tools/call\",\"params\":{\"name\":\"archive_board\"}}"));
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
+        Assert.False(_forwarder.Forwarded);
+    }
+
+    [Fact]
     public async Task Mcp_audience_guard_blocks_a_token_at_a_different_allow_listed_host()
     {
         // p52-caldav.icloud.com passes the SSRF allow-list, but it is OUTSIDE the mobbin
@@ -417,7 +431,8 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
                   "oauthMcp": { "mcpUrl": "https://mob.test/mcp" },
                   "tools": [
                     { "name": "search_screens", "action": "read:mcp", "path": "/mcp" },
-                    { "name": "delete_board", "action": "manage:mcp", "path": "/mcp", "stepUp": true }
+                    { "name": "delete_board", "action": "manage:mcp", "path": "/mcp", "stepUp": true },
+                    { "name": "archive_board", "action": "manage:mcp", "path": "/mcp" }
                   ] }
               ]
             }

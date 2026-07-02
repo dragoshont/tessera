@@ -10,6 +10,7 @@ using Tessera.Core.Configuration;
 using Tessera.Core.Egress;
 using Tessera.Core.Model;
 using Tessera.Core.OAuthMcp;
+using Tessera.Core.Policy;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
 using Tessera.Identity;
@@ -409,10 +410,16 @@ internal static class EgressProxyEndpoint
             return null;
         }
 
+        // The write bit is the tool's ACTION PLANE (ADR 0019), the same source the PDP
+        // enforces (RecipeTool.EffectivePlane) — NOT its step-up bit. Plane (read vs manage)
+        // and step-up risk are orthogonal (see ActionPlane): a manage tool that omits step-up
+        // is still a write, and a read tool that opts into step-up is still a read. Deriving
+        // the plane from step-up would let a manage tool whose author forgot the flag execute
+        // on the read plane — the exact divergence RecipeTool.EffectivePlane exists to prevent.
         var declared = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var tool in recipe.ExposedTools)
         {
-            declared[tool.Name] = tool.StepUp;
+            declared[tool.Name] = tool.EffectivePlane == ActionPlane.Manage;
         }
 
         return McpActionClassifier.Classify(call, declared) == McpAccess.Read ? "read:mcp" : "manage:mcp";

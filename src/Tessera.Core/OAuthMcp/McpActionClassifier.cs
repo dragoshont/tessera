@@ -71,8 +71,10 @@ public static class McpActionClassifier
     /// <summary>
     /// Classify a call. Everything that is not a <c>tools/call</c> is a read. A
     /// <c>tools/call</c> is a write iff <paramref name="declaredTools"/> maps its tool to
-    /// <c>true</c>; a declared read tool is a read; an <b>undeclared</b> tool (or a malformed
-    /// <c>tools/call</c> with no name) is a write (fail-safe).
+    /// <c>true</c> — i.e. the tool sits on the <c>manage:</c> plane (ADR 0019), the same
+    /// axis the PDP authorizes and orthogonal to step-up risk. A declared read tool is a
+    /// read; an <b>undeclared</b> tool (or a malformed <c>tools/call</c> with no name) is a
+    /// write (fail-safe / default-deny).
     /// </summary>
     public static McpAccess Classify(McpCall call, IReadOnlyDictionary<string, bool> declaredTools)
     {
