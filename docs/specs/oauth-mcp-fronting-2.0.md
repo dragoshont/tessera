@@ -117,7 +117,25 @@ human.
 
 ## 6.1 Build findings (2.0-beta, evidence-backed)
 
-Recorded as phases are implemented so the reasoning survives the branch:
+Recorded as phases are implemented so the reasoning survives the branch.
+
+**Phase ledger (live).** The commit-phases below implement the plan's discovery +
+egress-fronting mechanics; "acquisition + store" (§3 P2) is the next unbuilt phase.
+
+| Phase | Scope | Status | Evidence |
+|---|---|---|---|
+| P1 | RFC 9728/8414 discovery + classifier + `oauth-mcp` recipe shape | ✅ done | `a007c51` |
+| P2a | audience/resource guard wired into egress | ✅ done | `2926b47` |
+| P2b | MCP-aware egress action model (read vs manage from the JSON-RPC method/tool) | ✅ done | `3942865` + fix `0c3bf50` |
+| P3 | per-user OAuth acquisition (auth-code + PKCE + refresh) + per-principal store, single-writer | ⬜ next | — |
+| P4 | slim down Tessera — retire bespoke per-target credential code the generalization replaces | ⬜ | — |
+| — | homelab rollout (§4) | ⛔ out of scope this run (pre-rollout only) | plan-only |
+
+> Vocabulary note: original §3 numbered the phases P1–P4 (discovery → acquisition →
+> egress fronting → conformance). Implementation split "egress fronting" into the
+> audience guard (P2a) + the MCP-aware action model (P2b) and sequenced them **before**
+> acquisition — the egress mechanics are testable with a synthetic bearer, ahead of the
+> live OAuth round-trip. The table above is the authoritative status.
 
 - **P1 done** (`a007c51`): RFC 9728/8414 discovery + classifier + the `oauth-mcp`
   recipe shape; full suite green. Discovery's `HttpClient` **must** be SSRF-guarded
@@ -125,15 +143,23 @@ Recorded as phases are implemented so the reasoning survives the branch:
 - **P2a done** (`2926b47`): the §4 **audience guard** (`OAuthMcpAudience.IsBound`) binds
   an `oauth-mcp` recipe's injected token to its resource and is wired into
   `EgressProxyEndpoint` after the SSRF/port checks. 11 tests; full suite 477 green.
-- **P2b — MCP-aware egress (NEW; blocks the end-to-end "front the clone").** The raw
-  `/v1/egress` proxy is CalDAV-shaped: `MapMethodToAction` classifies **`POST` ⇒
-  `manage` (step-up write)**. MCP uses `POST` for **reads** (`tools/list`, query tool
-  calls), so proxying an MCP verbatim through it would force out-of-band approval on
-  every read. Fronting MCP correctly needs an **MCP-aware action model** — classify the
-  JSON-RPC method/tool (`tools/call` to a query tool = read; only a mutating tool =
-  write), reusing the recipe tool→action map (`RecipeTool.Action`/`StepUp`, ADR 0014)
-  instead of the HTTP-verb map, with request-body buffering. This is design-then-
-  implement, not a quick slice — it is the real "front the MCP" work.
+- **P2b done** (`3942865`, review fix `0c3bf50`): the raw `/v1/egress` proxy is
+  CalDAV-shaped — `MapMethodToAction` classifies **`POST` ⇒ `manage` (step-up write)**,
+  but MCP uses `POST` for **reads** (`tools/list`, query tool calls), so proxying an MCP
+  verbatim would force out-of-band approval on every read. Added `McpActionClassifier`
+  (parse the JSON-RPC body → classify by method/tool: non-`tools/call` = read; a
+  `tools/call` is a write iff the tool's **action plane** is `manage:`; an undeclared tool
+  or unparseable body = write, fail-safe) and wired it into `EgressProxyEndpoint` for
+  `oauth-mcp` recipes (256 KiB body buffer, rewound so the forwarder relays it verbatim);
+  non-MCP proxy recipes keep the HTTP-verb map. **Review finding fixed:** the write bit is
+  the tool's `EffectivePlane == Manage` (the source the PDP enforces), **not**
+  `RecipeTool.StepUp` — plane and step-up are orthogonal (ADR 0019 / `ActionPlane`), so a
+  `manage:` tool that omits the step-up flag can never execute on the read plane, matching
+  how `BrokerProviderGateway`/`ProviderEgress` authorize from `tool.Action`. 8 unit + 6
+  end-to-end tests (read forwards + injects the upstream bearer & strips the caller token;
+  declared read forwards; declared write and undeclared tool step up — 409, not forwarded;
+  a `manage:` tool without step-up still holds; audience guard blocks an off-resource
+  replay). Full suite 491 green (Core 290, Broker 123).
 
 ## 7. Non-goals (this iteration)
 
