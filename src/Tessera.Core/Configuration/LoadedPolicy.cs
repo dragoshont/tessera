@@ -48,6 +48,13 @@ internal sealed class RecipeDto
     public string? Description { get; init; }
     public RecipeRotationDto? Rotation { get; init; }
     public RefreshSpecDto? RefreshSpec { get; init; }
+    public OAuthMcpDto? OAuthMcp { get; init; }
+}
+
+internal sealed class OAuthMcpDto
+{
+    public string McpUrl { get; init; } = "";
+    public List<string>? Scopes { get; init; }
 }
 
 internal sealed class RefreshSpecDto
@@ -129,7 +136,8 @@ public sealed record LoadedPolicy(
                 Refresh: r.RefreshSpec is null
                     ? null
                     : new RefreshSpec(r.RefreshSpec.Path, r.RefreshSpec.Method, r.RefreshSpec.AccessTokenField, r.RefreshSpec.RefreshTokenField, r.RefreshSpec.AbsorbSetCookie, r.RefreshSpec.TokenUrl),
-                AbsorbSetCookie: r.AbsorbSetCookie ?? false))
+                AbsorbSetCookie: r.AbsorbSetCookie ?? false,
+                OAuthMcp: r.OAuthMcp is null ? null : new OAuthMcpTarget(r.OAuthMcp.McpUrl, r.OAuthMcp.Scopes)))
             .ToArray();
 
         return new LoadedPolicy(grants, bindings, recipes);    }
@@ -210,6 +218,9 @@ public sealed record LoadedPolicy(
                 Driver = r.Driver,
                 Egress = r.Egress == EgressMode.Http ? "http" : "none",
                 UpstreamBaseUrl = r.UpstreamBaseUrl,
+                OAuthMcp = r.OAuthMcp is null
+                    ? null
+                    : new OAuthMcpDto { McpUrl = r.OAuthMcp.McpUrl, Scopes = r.OAuthMcp.Scopes is { Count: > 0 } ? [.. r.OAuthMcp.Scopes] : null },
                 Injection = r.Injection switch
                 {
                     InjectionKind.BearerToken => "bearer",

@@ -69,6 +69,19 @@ public enum InjectionKind
 public sealed record RecipeRotation(string Owner, string? Detail = null);
 
 /// <summary>
+/// Declares a recipe's upstream is an OAuth-MCP (ADR 0027): the broker discovers its
+/// authorization server (RFC 9728/8414), acquires a per-user token, and injects it
+/// (reusing <see cref="InjectionKind.BearerToken"/>) into the ADR-0015 MCP egress.
+/// </summary>
+/// <param name="McpUrl">The upstream MCP endpoint (discovery + egress target).</param>
+/// <param name="Scopes">Scopes to request; null ⇒ the resource's advertised scopes.</param>
+public sealed record OAuthMcpTarget(string McpUrl, IReadOnlyList<string>? Scopes = null)
+{
+    /// <summary>The scopes to request (never null).</summary>
+    public IReadOnlyList<string> RequestedScopes => Scopes ?? [];
+}
+
+/// <summary>
 /// A provider recipe — the easy-setup unit that names a target, the harvest driver
 /// that keeps it warm, and how the broker reaches it (ADR 0006 / 0002). A recipe
 /// changes neither the broker nor the policy model; adding a provider is additive.
@@ -87,6 +100,7 @@ public sealed record RecipeRotation(string Owner, string? Detail = null);
 /// <param name="Rotation">Who owns rotating this provider's session (awareness dashboard, ADR 0017); null ⇒ no rotation declared (static).</param>
 /// <param name="Refresh">How Tessera rotates this session when it is the owner (Mode U, ADR 0015); null ⇒ no Tessera-owned refresh (static or external).</param>
 /// <param name="AbsorbSetCookie">For cookie injection: when true, a session the upstream rotates on a tool call (a <c>Set-Cookie</c> on a 2xx response) is captured and written back to the store, so the next read uses the live session instead of a stale one (ADR 0014/0015). The rotated cookies are reverse-mapped through <see cref="CookieMap"/>; requires a writable store. Default false (the broker only reads).</param>
+/// <param name="OAuthMcp">When set, the upstream is an OAuth-MCP (ADR 0027): discover its authorization server, acquire a per-user token, and inject it (BearerToken) into the ADR-0015 MCP egress.</param>
 public sealed record Recipe(
     string Target,
     string Driver = "browser",
@@ -101,7 +115,8 @@ public sealed record Recipe(
     string? Description = null,
     RecipeRotation? Rotation = null,
     RefreshSpec? Refresh = null,
-    bool AbsorbSetCookie = false)
+    bool AbsorbSetCookie = false,
+    OAuthMcpTarget? OAuthMcp = null)
 {
     /// <summary>The action verbs this recipe exposes (never null).</summary>
     public IReadOnlyList<string> ExposedActions => Actions ?? [];
