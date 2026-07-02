@@ -268,6 +268,64 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
         Assert.True(_forwarder.Forwarded);
     }
 
+    // ── OAuth-MCP fronting (P2b): the MCP-aware action model ───────────────────
+
+    private const string MobbinUpstream = "https://mob.test/mcp";
+
+    [Fact]
+    public async Task Mcp_tools_list_is_a_read_and_injects_the_upstream_bearer()
+    {
+        var resp = await _client.SendAsync(Build(
+            "POST", target: "mobbin", upstream: MobbinUpstream, body: "{\"method\":\"tools/list\"}"));
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.True(_forwarder.Forwarded);
+        // the recipe's bearer is injected; the caller's own token is stripped; destination pinned
+        Assert.Equal("Bearer upstream-bearer", _forwarder.Captured!.Headers.Authorization?.ToString());
+        Assert.Equal(new Uri(MobbinUpstream), _forwarder.Captured.RequestUri);
+    }
+
+    [Fact]
+    public async Task Mcp_read_tool_call_is_forwarded()
+    {
+        var resp = await _client.SendAsync(Build(
+            "POST", target: "mobbin", upstream: MobbinUpstream,
+            body: "{\"method\":\"tools/call\",\"params\":{\"name\":\"search_screens\"}}"));
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.True(_forwarder.Forwarded);
+    }
+
+    [Fact]
+    public async Task Mcp_write_tool_call_steps_up_and_is_not_forwarded()
+    {
+        var resp = await _client.SendAsync(Build(
+            "POST", target: "mobbin", upstream: MobbinUpstream,
+            body: "{\"method\":\"tools/call\",\"params\":{\"name\":\"delete_board\"}}"));
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);   // held for out-of-band approval
+        Assert.False(_forwarder.Forwarded);
+    }
+
+    [Fact]
+    public async Task Mcp_undeclared_tool_call_fails_safe_to_step_up()
+    {
+        var resp = await _client.SendAsync(Build(
+            "POST", target: "mobbin", upstream: MobbinUpstream,
+            body: "{\"method\":\"tools/call\",\"params\":{\"name\":\"ghost_tool\"}}"));
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);   // undeclared => write => step-up
+        Assert.False(_forwarder.Forwarded);
+    }
+
+    [Fact]
+    public async Task Mcp_audience_guard_blocks_a_token_at_a_different_allow_listed_host()
+    {
+        // p52-caldav.icloud.com passes the SSRF allow-list, but it is OUTSIDE the mobbin
+        // recipe's resource — the audience guard must refuse (token confused-deputy).
+        var resp = await _client.SendAsync(Build(
+            "POST", target: "mobbin", upstream: "https://p52-caldav.icloud.com/mcp",
+            body: "{\"method\":\"tools/list\"}"));
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        Assert.False(_forwarder.Forwarded);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static HttpRequestMessage Build(
@@ -276,9 +334,14 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
         string? caller = CallerApp,
         string? obo = UserAlice,
         string? upstream = DefaultUpstream,
-        bool confirm = false)
+        bool confirm = false,
+        string? body = null)
     {
         var req = new HttpRequestMessage(new HttpMethod(method), $"/v1/egress/{target}");
+        if (body is not null)
+        {
+            req.Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+        }
         if (caller is not null)
         {
             req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {caller}");
@@ -330,7 +393,7 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
               "identity": { "mode": "oidc", "oidc": { "issuer": "https://issuer.example/v2.0", "audience": "tessera" } },
               "policy": { "default": "deny", "manageRequiresStepUp": true },
               "audit": { "enabled": false },
-              "egress": { "enabled": {{(egressEnabled ? "true" : "false")}}, "allowedHosts": ["caldav.icloud.com", "re:^p\\d{1,3}-(caldav|contacts)\\.icloud\\.com$"] }
+              "egress": { "enabled": {{(egressEnabled ? "true" : "false")}}, "allowedHosts": ["caldav.icloud.com", "mob.test", "re:^p\\d{1,3}-(caldav|contacts)\\.icloud\\.com$"] }
             }
             """);
 
@@ -340,13 +403,22 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
             {
               "grants": [
                 { "caller": "{{CallerId}}", "onBehalfOf": "alice@example.com",
-                  "target": "apple-caldav", "actions": ["read:dav", "manage:dav"] }
+                  "target": "apple-caldav", "actions": ["read:dav", "manage:dav"] },
+                { "caller": "{{CallerId}}", "onBehalfOf": "alice@example.com",
+                  "target": "mobbin", "actions": ["read:mcp", "manage:mcp"] }
               ],
               "bindings": [
-                { "target": "apple-caldav", "onBehalfOf": "alice@example.com", "credential": "apple-account-a" }
+                { "target": "apple-caldav", "onBehalfOf": "alice@example.com", "credential": "apple-account-a" },
+                { "target": "mobbin", "onBehalfOf": "alice@example.com", "credential": "mobbin-token" }
               ],
               "recipes": [
-                { "target": "apple-caldav", "egress": "proxy", "injection": "basic" }
+                { "target": "apple-caldav", "egress": "proxy", "injection": "basic" },
+                { "target": "mobbin", "egress": "proxy", "injection": "bearer",
+                  "oauthMcp": { "mcpUrl": "https://mob.test/mcp" },
+                  "tools": [
+                    { "name": "search_screens", "action": "read:mcp", "path": "/mcp" },
+                    { "name": "delete_board", "action": "manage:mcp", "path": "/mcp", "stepUp": true }
+                  ] }
               ]
             }
             """);
@@ -355,6 +427,7 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
         store.Put("apple-account-a", new CredentialBundle(
             AccessToken: "app-specific-pw",
             Extra: new Dictionary<string, string> { ["username"] = "alice@icloud.com" }));
+        store.Put("mobbin-token", new CredentialBundle(AccessToken: "upstream-bearer"));
 
         var validator = new FakeTokenValidator()
             .AddApp(CallerApp, CallerId)

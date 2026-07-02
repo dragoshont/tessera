@@ -185,4 +185,43 @@ public class OAuthMcpTests
     {
         Assert.False(OAuthMcpAudience.IsBound(new Uri("https://mob.test/mcp"), "not-a-url"));
     }
+
+    // --- MCP action classifier (P2b) ----------------------------------------
+    [Theory]
+    [InlineData("{\"method\":\"tools/list\"}", "tools/list", null)]
+    [InlineData("{\"method\":\"initialize\",\"params\":{}}", "initialize", null)]
+    [InlineData("{\"method\":\"tools/call\",\"params\":{\"name\":\"search_screens\",\"arguments\":{}}}", "tools/call", "search_screens")]
+    public void Mcp_parse_extracts_method_and_tool(string body, string method, string? tool)
+    {
+        var call = McpActionClassifier.Parse(body);
+        Assert.NotNull(call);
+        Assert.Equal(method, call!.Method);
+        Assert.Equal(tool, call.ToolName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("[{\"method\":\"tools/list\"}]")]   // batch array => null
+    [InlineData("{\"id\":1}")]                        // no method
+    public void Mcp_parse_returns_null_for_non_jsonrpc(string body)
+    {
+        Assert.Null(McpActionClassifier.Parse(body));
+    }
+
+    [Fact]
+    public void Mcp_classify_reads_protocol_and_declared_reads_writes_the_rest()
+    {
+        var declared = new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            ["search_screens"] = false,   // declared read
+            ["delete_board"] = true,      // declared write
+        };
+        Assert.Equal(McpAccess.Read, McpActionClassifier.Classify(new McpCall("tools/list", null), declared));
+        Assert.Equal(McpAccess.Read, McpActionClassifier.Classify(new McpCall("initialize", null), declared));
+        Assert.Equal(McpAccess.Read, McpActionClassifier.Classify(new McpCall("tools/call", "search_screens"), declared));
+        Assert.Equal(McpAccess.Write, McpActionClassifier.Classify(new McpCall("tools/call", "delete_board"), declared));
+        Assert.Equal(McpAccess.Write, McpActionClassifier.Classify(new McpCall("tools/call", "unknown_tool"), declared));  // undeclared => fail-safe
+        Assert.Equal(McpAccess.Write, McpActionClassifier.Classify(new McpCall("tools/call", null), declared));            // malformed => fail-safe
+    }
 }

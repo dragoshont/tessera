@@ -154,14 +154,29 @@ internal static class EgressProxyEndpoint
                 statusCode: StatusCodes.Status403Forbidden);
         }
 
-        // Map the HTTP method to an action plane: observe (read) vs the control/manage
-        // plane (writes). An unknown method is refused (fail-closed).
-        var action = MapMethodToAction(ctx.Request.Method);
-        if (action is null)
+        // Determine the action plane: observe (read) vs control/manage (write, step-up).
+        // For an OAuth-MCP recipe the HTTP verb is uninformative (MCP carries reads over
+        // POST), so classify by the JSON-RPC method/tool instead (ADR 0027 §P2b).
+        string? action;
+        if (recipe.OAuthMcp is not null)
         {
-            return Results.Json(
-                new { error = $"method '{ctx.Request.Method}' is not permitted on the egress proxy" },
-                statusCode: StatusCodes.Status405MethodNotAllowed);
+            action = await ClassifyMcpActionAsync(ctx.Request, recipe, cancellationToken).ConfigureAwait(false);
+            if (action is null)
+            {
+                return Results.Json(
+                    new { error = "not a valid MCP request (expected JSON-RPC on POST, or GET/DELETE)" },
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+        }
+        else
+        {
+            action = MapMethodToAction(ctx.Request.Method);
+            if (action is null)
+            {
+                return Results.Json(
+                    new { error = $"method '{ctx.Request.Method}' is not permitted on the egress proxy" },
+                    statusCode: StatusCodes.Status405MethodNotAllowed);
+            }
         }
 
         // Authorize (PDP) and audit the hop, secret-free, via the broker spine. The
@@ -354,6 +369,54 @@ internal static class EgressProxyEndpoint
             or "LOCK" or "UNLOCK" or "ACL" => "manage:dav",
         _ => null,
     };
+
+    /// <summary>Cap on an MCP request body we will buffer to classify (a JSON-RPC call is small).</summary>
+    private const int MaxMcpBodyBytes = 256 * 1024;
+
+    /// <summary>
+    /// Classifies an OAuth-MCP request by its JSON-RPC method/tool (ADR 0027 §P2b), not the
+    /// HTTP verb: <c>GET</c>/<c>DELETE</c> (the streamable-HTTP server stream / session end)
+    /// and every non-<c>tools/call</c> method are reads; a <c>tools/call</c> is a write iff the
+    /// recipe declares the tool mutating (an undeclared tool ⇒ write, fail-safe). Returns
+    /// <c>read:mcp</c>/<c>manage:mcp</c>, or null when the request is not a classifiable MCP
+    /// request (so the caller refuses it). The body is buffered + rewound so the forwarder
+    /// still relays it verbatim.
+    /// </summary>
+    private static async Task<string?> ClassifyMcpActionAsync(HttpRequest request, Recipe recipe, CancellationToken ct)
+    {
+        var method = request.Method.ToUpperInvariant();
+        if (method is "GET" or "DELETE")
+        {
+            return "read:mcp";
+        }
+
+        if (method != "POST")
+        {
+            return null;
+        }
+
+        request.EnableBuffering();
+        var raw = await ReadBodyCappedAsync(request, MaxMcpBodyBytes, ct).ConfigureAwait(false);
+        request.Body.Position = 0;   // rewind so the forwarder re-reads the full body
+        if (raw is null)
+        {
+            return null;             // over the cap — refuse rather than forward unclassified
+        }
+
+        var call = McpActionClassifier.Parse(System.Text.Encoding.UTF8.GetString(raw));
+        if (call is null)
+        {
+            return null;
+        }
+
+        var declared = new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (var tool in recipe.ExposedTools)
+        {
+            declared[tool.Name] = tool.StepUp;
+        }
+
+        return McpActionClassifier.Classify(call, declared) == McpAccess.Read ? "read:mcp" : "manage:mcp";
+    }
 
     /// <summary>Maps a non-forwarded egress disposition to a fail-closed HTTP status.</summary>
     private static IResult MapDisposition(EgressDisposition disposition) => disposition switch
