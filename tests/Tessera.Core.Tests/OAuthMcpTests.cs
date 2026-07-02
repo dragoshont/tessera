@@ -164,4 +164,25 @@ public class OAuthMcpTests
             File.Delete(path2);
         }
     }
+
+    // --- audience guard (ADR 0027 §4) ---------------------------------------
+    [Theory]
+    [InlineData("https://mob.test/mcp", true)]              // exact
+    [InlineData("https://mob.test/mcp/", true)]             // trailing slash
+    [InlineData("https://mob.test/mcp/messages", true)]     // subpath (SSE/session)
+    [InlineData("https://mob.test/other", false)]           // sibling path
+    [InlineData("https://mob.test/mcp2", false)]            // path-prefix trick
+    [InlineData("https://evil.test/mcp", false)]            // different host (confused deputy)
+    [InlineData("https://mob.test:8443/mcp", false)]        // different port
+    [InlineData("http://mob.test/mcp", false)]              // downgraded scheme
+    public void Audience_binds_token_to_its_resource(string upstream, bool bound)
+    {
+        Assert.Equal(bound, OAuthMcpAudience.IsBound(new Uri(upstream), "https://mob.test/mcp"));
+    }
+
+    [Fact]
+    public void Audience_fails_closed_on_malformed_resource()
+    {
+        Assert.False(OAuthMcpAudience.IsBound(new Uri("https://mob.test/mcp"), "not-a-url"));
+    }
 }

@@ -9,6 +9,7 @@ using Tessera.Core.Broker;
 using Tessera.Core.Configuration;
 using Tessera.Core.Egress;
 using Tessera.Core.Model;
+using Tessera.Core.OAuthMcp;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
 using Tessera.Identity;
@@ -139,6 +140,17 @@ internal static class EgressProxyEndpoint
         {
             return Results.Json(
                 new { error = $"upstream port {upstream.Port} is not permitted (default port only)" },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        // Audience guard (ADR 0027 §4): an OAuth-MCP recipe's injected token is minted for
+        // its resource. Refuse any upstream outside the recipe's McpUrl — the SSRF host
+        // allow-list alone would let THIS recipe's token be injected at a *different*
+        // allow-listed host (a token confused-deputy).
+        if (recipe.OAuthMcp is { McpUrl: var mcpUrl } && !OAuthMcpAudience.IsBound(upstream, mcpUrl))
+        {
+            return Results.Json(
+                new { error = $"upstream '{upstream}' is outside the OAuth-MCP resource '{mcpUrl}'" },
                 statusCode: StatusCodes.Status403Forbidden);
         }
 
