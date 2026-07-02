@@ -115,6 +115,26 @@ human.
   P3/P4 slices.
 - No secret material in the diff; `git` history clean.
 
+## 6.1 Build findings (2.0-beta, evidence-backed)
+
+Recorded as phases are implemented so the reasoning survives the branch:
+
+- **P1 done** (`a007c51`): RFC 9728/8414 discovery + classifier + the `oauth-mcp`
+  recipe shape; full suite green. Discovery's `HttpClient` **must** be SSRF-guarded
+  (hard-documented contract on `OAuthMcpDiscovery`).
+- **P2a done** (`2926b47`): the §4 **audience guard** (`OAuthMcpAudience.IsBound`) binds
+  an `oauth-mcp` recipe's injected token to its resource and is wired into
+  `EgressProxyEndpoint` after the SSRF/port checks. 11 tests; full suite 477 green.
+- **P2b — MCP-aware egress (NEW; blocks the end-to-end "front the clone").** The raw
+  `/v1/egress` proxy is CalDAV-shaped: `MapMethodToAction` classifies **`POST` ⇒
+  `manage` (step-up write)**. MCP uses `POST` for **reads** (`tools/list`, query tool
+  calls), so proxying an MCP verbatim through it would force out-of-band approval on
+  every read. Fronting MCP correctly needs an **MCP-aware action model** — classify the
+  JSON-RPC method/tool (`tools/call` to a query tool = read; only a mutating tool =
+  write), reusing the recipe tool→action map (`RecipeTool.Action`/`StepUp`, ADR 0014)
+  instead of the HTTP-verb map, with request-body buffering. This is design-then-
+  implement, not a quick slice — it is the real "front the MCP" work.
+
 ## 7. Non-goals (this iteration)
 
 - RFC 8693 token exchange from Tessera's own IdP to the upstream AS (a future
