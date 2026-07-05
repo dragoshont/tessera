@@ -128,8 +128,10 @@ unbuilt phase.
 | P1 | RFC 9728/8414 discovery + classifier + `oauth-mcp` recipe shape | ✅ done | `a007c51` |
 | P2a | audience/resource guard wired into egress | ✅ done | `2926b47` |
 | P2b | MCP-aware egress action model (read vs manage from the JSON-RPC method/tool) | ✅ done | `3942865` + fix `0c3bf50` |
-| P3 | per-user OAuth acquisition (auth-code + PKCE + refresh) + per-principal store, single-writer | ✅ done | `727ca25` |
-| P4 | slim down Tessera — retire bespoke per-target credential code the generalization replaces | ⬜ next | — |
+| P3 | per-user OAuth acquisition **mechanism** (PKCE + auth-code + refresh acquirer) — unit-tested, not yet wired into a live acquire/refresh flow | ✅ done (mechanism) | `727ca25` |
+| P4 | slim down Tessera — retire bespoke per-target credential code the generalization replaces | ✅ analyzed — **empty by design** (nothing to retire) | `527e830` |
+| W | **wire acquisition end-to-end** — connect-wizard callback (`code`→`AcquireAsync`, `state`/CSRF) + orchestrator `oauth-mcp` branch (route to `OAuthMcpAcquirer.RefreshAsync`, not `SessionRefresher`) | ⬜ not-started | — |
+| C | **conformance** (plan §3 P4) — front `mobbin-clone` `/mcp` through Tessera end-to-end (`tools/list` + a tool call return inline images, client holds no token) + the 402→200 entitlement demo; **needs a minimal OAuth AS added to `mobbin-clone`** first | ⬜ not-started | — |
 | — | homelab rollout (§4) | ⛔ out of scope this run (pre-rollout only) | plan-only |
 
 > Vocabulary note: original §3 numbered the phases P1–P4 (discovery → acquisition →
@@ -185,6 +187,35 @@ unbuilt phase.
   public clients + dynamic client registration); confidential-client
   (`client_secret_basic`) is out of scope until a target needs it. 16 tests; full suite
   **507 green** (Core 297, Providers 58).
+- **P4 analyzed — empty by design** (`527e830`): "slim down — retire bespoke per-target
+  credential code the generalization replaces" found **nothing to retire**, and inventing
+  removals would violate YAGNI + capability-preservation. Evidence: (a) Tessera has **no
+  per-target hardcoding** — the credential switches are on `recipe.Injection` and action
+  verbs, never on a target name (no `== "mobbin"` anywhere in `src/`; the only `mobbin`
+  strings in `src/` are doc-comment examples); (b) the OAuth-MCP path **reuses**
+  `InjectionKind.BearerToken` (ADR 0027) rather than adding a parallel injector, so it was
+  additive/consolidated from the start; (c) all `grant_type`/PKCE code is the **new**
+  `OAuthMcp/*` — there was no pre-existing OAuth acquisition code it replaced; (d) RM/OLX
+  harvest-and-inject + Pomerium are explicit non-goals (untouched). The generalization
+  being additive is the intended outcome, not a miss.
+- **Honest re-scope of the remaining pre-rollout work.** The implementation ledger
+  (P1/P2a/P2b/P3) diverged from the plan's §3 numbering; two real items remain before the
+  OAuth-MCP fronting is functional end to end:
+  - **W (wiring).** The acquisition mechanism (`OAuthMcpDiscovery`, `OAuthAuthorizeUrl`,
+    `OAuthMcpAcquirer`) is built + unit-tested but **not called by any live code** — the
+    live refresh paths (`ProviderEgress`, `SessionRefreshOrchestrator`) still use
+    `SessionRefresher`. There is **no callback endpoint** to turn a consent `code` into a
+    stored token, and **no orchestrator branch** routing an `oauth-mcp` recipe to
+    `OAuthMcpAcquirer.RefreshAsync`. Until W lands, no user can acquire a token through the
+    running broker. (Egress-side enforcement — audience guard P2a + action model P2b — **is**
+    wired.)
+  - **C (conformance, = plan §3 P4).** No end-to-end proof that `tools/list` + a tool call
+    return inline images **through Tessera** with the client holding no token, and no
+    402→200 entitlement demo. **Blocker:** `mobbin-clone` is not yet a full OAuth AS — it
+    answers 401 + RFC 9728 `resource_metadata` and validates a static bearer, but hosts
+    **no** `authorize`/`token` endpoints, so there is nothing for W's acquirer to exchange a
+    code against. C therefore requires a **minimal conformant OAuth AS** added to
+    `mobbin-clone` first (authorize → code, token → code/refresh grant, PKCE S256).
 
 ## 7. Non-goals (this iteration)
 
