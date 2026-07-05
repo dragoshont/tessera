@@ -119,9 +119,9 @@ human.
 
 Recorded as phases are implemented so the reasoning survives the branch.
 
-**Phase ledger (live).** The commit-phases below implement the plan's discovery +
-egress-fronting mechanics + per-user acquisition; the **slim-down (P4)** is the next
-unbuilt phase.
+**Phase ledger (live).** The commit-phases below implement discovery, egress-fronting,
+per-user acquisition, and the full acquisition WIRING (W1+W2a+W2b); **conformance (C)**
+is the next unbuilt slice.
 
 | Phase | Scope | Status | Evidence |
 |---|---|---|---|
@@ -131,8 +131,10 @@ unbuilt phase.
 | P3 | per-user OAuth acquisition **mechanism** (PKCE + auth-code + refresh acquirer) — unit-tested, not yet wired into a live acquire/refresh flow | ✅ done (mechanism) | `727ca25` |
 | P4 | slim down Tessera — retire bespoke per-target credential code the generalization replaces | ✅ analyzed — **empty by design** (nothing to retire) | `527e830` |
 | C0 | **`mobbin-clone` OAuth AS** — RFC 8414 metadata + authorize/token + PKCE S256 + rotating refresh; resource gate admits issued tokens (unblocks W+C) | ✅ done | clone `32c158b` |
-| W | **wire acquisition end-to-end** — connect-wizard callback (`code`→`AcquireAsync`, `state`/CSRF) + orchestrator `oauth-mcp` branch (route to `OAuthMcpAcquirer.RefreshAsync`, not `SessionRefresher`) | ⬜ next | — |
-| C | **conformance** (plan §3 P4) — front `mobbin-clone` `/mcp` through Tessera end-to-end (`tools/list` + a tool call return inline images, client holds no token) + the 402→200 entitlement demo (AS now hosted by the clone) | ⬜ not-started | — |
+| W1 | oauth-mcp **rotation** wired into the refresh orchestrator (acquirer stamps the refresh context in the bundle; orchestrator routes an oauth-mcp binding to `RefreshStoredAsync`) | ✅ done | `75ddbc4` |
+| W2a | **connect state machine** — pending-authorization store (single-use/TTL state) + `OAuthMcpConnectService` (Begin/CompleteAsync) + discovery-orchestrating `BeginForRecipeAsync` | ✅ done | `b340271` + `3637e27` |
+| W2b | **Broker host wiring** — `oauthMcp` config (client id + redirect URI), an SSRF-guarded discovery `HttpClient`, DI (pending store + acquirer + connect service; acquirer into the orchestrator), and the `POST /oauth/mcp/connect` + `GET /oauth/mcp/callback` endpoints (+ per-principal binding) | ✅ done | `f26ab77` |
+| C | **conformance** (plan §3 P4) — front `mobbin-clone` `/mcp` through Tessera end-to-end (`tools/list` + a tool call return inline images, client holds no token) + the 402→200 entitlement demo (AS now hosted by the clone) | ⬜ next | — |
 | — | homelab rollout (§4) | ⛔ out of scope this run (pre-rollout only) | plan-only |
 
 > Vocabulary note: original §3 numbered the phases P1–P4 (discovery → acquisition →
@@ -226,6 +228,39 @@ unbuilt phase.
   access token as well as the static bearer, **fail-closed + backward-compatible** (empty
   allow-list issues nothing). 45 tests green (24 new). This **unblocks W and C** — there is
   now a real token endpoint for Tessera's acquirer to exchange a code/refresh against.
+- **W1 done** (`75ddbc4`): oauth-mcp rotation is wired into the refresh orchestrator. The
+  acquirer stamps the non-secret refresh context (token endpoint, client id, RFC 8707
+  resource) into the bundle `Extra` at acquire time; `RefreshStoredAsync` rotates from that
+  stored context alone (no re-discovery), still re-checked by the `SsrfGuard` (defence in
+  depth). `IsTesseraOwned` now covers an oauth-mcp recipe (owner=tessera WITHOUT a
+  `refreshSpec` — its refresh IS the OAuth token endpoint); `RunPassAsync` routes it to the
+  acquirer and a header-injection recipe to `SessionRefresher`, both under the single-writer
+  lease. +7 tests.
+- **W2a done** (`b340271`): the per-user connect state machine. A single-use, TTL'd
+  pending-authorization store (state = a 256-bit CSRF binding) + `OAuthMcpConnectService`:
+  `Begin` mints PKCE+state, stashes the exchange (verifier stays server-side), and builds the
+  authorize URL; `CompleteAsync` redeems the code via the acquirer (an unknown/expired/replayed
+  state or a code-less callback is refused WITHOUT hitting the AS); `BeginForRecipeAsync` adds
+  the RFC 9728/8414 discovery step (over an SSRF-guarded client) → authorize URL. +12 tests
+  (Providers 77).
+- **W2b done** (`f26ab77`): the connect flow is composed into the running Broker, so a
+  per-user OAuth-MCP session can now be acquired end to end. An `oauthMcp` config block
+  (enabled + the registered redirect URI + client id, fail-closed validation) gates two
+  endpoints: `POST /oauth/mcp/connect` (operator-authenticated — refuses a non-oauth target
+  or a non-admin cross-principal connect, mints a deterministic per-(target,principal) secret
+  name, discovers the AS over the guarded client, returns the authorize URL + state) and the
+  **public** `GET /oauth/mcp/callback` (the 256-bit single-use `state` is the CSRF capability;
+  an unknown/expired/forged state is refused with no token call and no binding; a real
+  acquisition creates the per-principal binding, the token itself written by the acquirer,
+  never surfaced). BrokerHost builds ONE acquirer shared by the endpoints and the W1 rotation
+  owner, reusing the data-egress SSRF allow-list + address guard (discovery via a new
+  `HttpClientTransport.CreateGuardedHttpClient`). **Adversarial review: PASS.** Also fixed a
+  latent `ConfigLoader` bug — `ApplyEnvironmentOverrides` rebuilt the config with a partial
+  field list that silently dropped `LiveView`/`Refresh`/`Freshness` (and would have dropped
+  `OAuthMcp`) back to defaults after load. +8 Broker integration tests (disabled=404,
+  unauthenticated=401, non-oauth=400, cross-principal=403, bad-callback=400, and the full
+  begin→callback→binding path against a stub AS). Full suite **534 green**. **W is complete
+  end to end; C (conformance) is next.**
 
 ## 7. Non-goals (this iteration)
 
