@@ -130,8 +130,9 @@ unbuilt phase.
 | P2b | MCP-aware egress action model (read vs manage from the JSON-RPC method/tool) | ✅ done | `3942865` + fix `0c3bf50` |
 | P3 | per-user OAuth acquisition **mechanism** (PKCE + auth-code + refresh acquirer) — unit-tested, not yet wired into a live acquire/refresh flow | ✅ done (mechanism) | `727ca25` |
 | P4 | slim down Tessera — retire bespoke per-target credential code the generalization replaces | ✅ analyzed — **empty by design** (nothing to retire) | `527e830` |
-| W | **wire acquisition end-to-end** — connect-wizard callback (`code`→`AcquireAsync`, `state`/CSRF) + orchestrator `oauth-mcp` branch (route to `OAuthMcpAcquirer.RefreshAsync`, not `SessionRefresher`) | ⬜ not-started | — |
-| C | **conformance** (plan §3 P4) — front `mobbin-clone` `/mcp` through Tessera end-to-end (`tools/list` + a tool call return inline images, client holds no token) + the 402→200 entitlement demo; **needs a minimal OAuth AS added to `mobbin-clone`** first | ⬜ not-started | — |
+| C0 | **`mobbin-clone` OAuth AS** — RFC 8414 metadata + authorize/token + PKCE S256 + rotating refresh; resource gate admits issued tokens (unblocks W+C) | ✅ done | clone `32c158b` |
+| W | **wire acquisition end-to-end** — connect-wizard callback (`code`→`AcquireAsync`, `state`/CSRF) + orchestrator `oauth-mcp` branch (route to `OAuthMcpAcquirer.RefreshAsync`, not `SessionRefresher`) | ⬜ next | — |
+| C | **conformance** (plan §3 P4) — front `mobbin-clone` `/mcp` through Tessera end-to-end (`tools/list` + a tool call return inline images, client holds no token) + the 402→200 entitlement demo (AS now hosted by the clone) | ⬜ not-started | — |
 | — | homelab rollout (§4) | ⛔ out of scope this run (pre-rollout only) | plan-only |
 
 > Vocabulary note: original §3 numbered the phases P1–P4 (discovery → acquisition →
@@ -216,6 +217,15 @@ unbuilt phase.
     **no** `authorize`/`token` endpoints, so there is nothing for W's acquirer to exchange a
     code against. C therefore requires a **minimal conformant OAuth AS** added to
     `mobbin-clone` first (authorize → code, token → code/refresh grant, PKCE S256).
+- **C0 done** (clone `32c158b`): the `mobbin-clone` repo now hosts a minimal conformant
+  OAuth 2.1 AS — RFC 8414 metadata at `/.well-known/oauth-authorization-server`, an
+  `/oauth/authorize` (public client + PKCE **S256 only**, redirect-URI allow-list so it is
+  not an open redirector, RFC 8707 resource match, single-use short-TTL code) and an
+  `/oauth/token` (authorization_code with exact redirect/client binding + constant-time
+  PKCE verify; rotating single-use refresh). Its resource gate now admits an AS-issued
+  access token as well as the static bearer, **fail-closed + backward-compatible** (empty
+  allow-list issues nothing). 45 tests green (24 new). This **unblocks W and C** — there is
+  now a real token endpoint for Tessera's acquirer to exchange a code/refresh against.
 
 ## 7. Non-goals (this iteration)
 
