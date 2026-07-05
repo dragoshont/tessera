@@ -55,6 +55,16 @@ public sealed record OAuthAcquireResult(OAuthAcquireStatus Status, string Detail
 /// </remarks>
 public sealed class OAuthMcpAcquirer
 {
+    /// <summary>Bundle <c>Extra</c> key for the discovered token endpoint — persisted at acquire
+    /// time so a later refresh needs no re-discovery (and the rotation owner needs no HTTP client).</summary>
+    public const string ExtraTokenEndpoint = "oauth_token_endpoint";
+
+    /// <summary>Bundle <c>Extra</c> key for the OAuth client id used on the token exchange.</summary>
+    public const string ExtraClientId = "oauth_client_id";
+
+    /// <summary>Bundle <c>Extra</c> key for the RFC 8707 resource the token is bound to.</summary>
+    public const string ExtraResource = "oauth_resource";
+
     private readonly IHttpTransport _transport;
     private readonly ICredentialWriter _writer;
     private readonly SsrfGuard _guard;
@@ -106,7 +116,16 @@ public sealed class OAuthMcpAcquirer
             ("code_verifier", verifier),
             ("resource", resource),
         };
-        return ExchangeAsync(tokenEndpoint, form, CredentialBundle.Empty, secretName, cancellationToken);
+        // Seed the bundle with the (non-secret) refresh context so a later rotation is
+        // self-contained — the rotation owner refreshes from the stored bundle alone,
+        // without re-running discovery or holding an HTTP client (see RefreshStoredAsync).
+        var context = new CredentialBundle(Extra: new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [ExtraTokenEndpoint] = tokenEndpoint.ToString(),
+            [ExtraClientId] = clientId,
+            [ExtraResource] = resource,
+        });
+        return ExchangeAsync(tokenEndpoint, form, context, secretName, cancellationToken);
     }
 
     /// <summary>
@@ -144,6 +163,36 @@ public sealed class OAuthMcpAcquirer
             ("resource", resource),
         };
         return ExchangeAsync(tokenEndpoint, form, current, secretName, cancellationToken);
+    }
+
+    /// <summary>
+    /// Rotate a stored per-principal bundle using ONLY the OAuth refresh context it carries
+    /// in <see cref="CredentialBundle.Extra"/> (the token endpoint, client id and resource
+    /// stamped by <see cref="AcquireAsync"/>) plus its refresh token — no re-discovery. This is
+    /// the entry point the rotation owner (<c>SessionRefreshOrchestrator</c>) calls for an
+    /// <c>oauth-mcp</c> binding. A bundle without the stamped context is reported as an error
+    /// (it was not acquired through the OAuth path), never silently skipped.
+    /// </summary>
+    public Task<OAuthAcquireResult> RefreshStoredAsync(
+        string secretName,
+        CredentialBundle current,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(secretName);
+        ArgumentNullException.ThrowIfNull(current);
+
+        var extra = current.Extra;
+        if (extra is null
+            || !extra.TryGetValue(ExtraTokenEndpoint, out var endpoint)
+            || !Uri.TryCreate(endpoint, UriKind.Absolute, out var tokenEndpoint)
+            || !extra.TryGetValue(ExtraClientId, out var clientId) || string.IsNullOrWhiteSpace(clientId)
+            || !extra.TryGetValue(ExtraResource, out var resource) || string.IsNullOrWhiteSpace(resource))
+        {
+            return Task.FromResult(OAuthAcquireResult.Failed(
+                "bundle is missing the OAuth refresh context (token endpoint/client id/resource)"));
+        }
+
+        return RefreshAsync(tokenEndpoint, clientId, resource, secretName, current, cancellationToken);
     }
 
     private async Task<OAuthAcquireResult> ExchangeAsync(

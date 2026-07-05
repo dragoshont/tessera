@@ -4,6 +4,7 @@ using Tessera.Core.Policy;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
 using Tessera.Core.Stores;
+using Tessera.Providers.OAuthMcp;
 using Xunit;
 
 namespace Tessera.Providers.Tests;
@@ -27,6 +28,24 @@ public sealed class SessionRefreshOrchestratorTests
         new([], bindings, recipes);
 
     private static readonly Tessera.Core.Egress.SsrfGuard Guard = new(["api.example.com"]);
+
+    // ── oauth-mcp rotation (W1) ───────────────────────────────────────────
+    private static readonly Tessera.Core.Egress.SsrfGuard AsGuard = new(["as.example.com"]);
+
+    private static Recipe OwnedOAuthMcp() => new(
+        "mobbin",
+        Rotation: new RecipeRotation("tessera"),
+        OAuthMcp: new OAuthMcpTarget("https://mob.test/mcp", ["screens.read"]));
+
+    private static CredentialBundle OAuthLive() => new(
+        AccessToken: "OLD_AT",
+        RefreshToken: "OLD_RT",
+        Extra: new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [OAuthMcpAcquirer.ExtraTokenEndpoint] = "https://as.example.com/token",
+            [OAuthMcpAcquirer.ExtraClientId] = "tessera",
+            [OAuthMcpAcquirer.ExtraResource] = "https://mob.test/mcp",
+        });
 
     [Fact]
     public async Task Rotates_owned_bindings_and_skips_absent_ones()
@@ -175,6 +194,78 @@ public sealed class SessionRefreshOrchestratorTests
         var second = await orchestrator.RunPassAsync();
         Assert.Equal(1, second.Considered); // picked up without a restart
         Assert.Equal(1, second.Rotated);
+    }
+
+    [Fact]
+    public async Task Rotates_an_oauth_mcp_binding_through_the_acquirer()
+    {
+        var bindings = new[] { new TargetBinding("mobbin", "mobbin-alice", "alice@example.com", CredentialOwner.User) };
+        var store = new InMemoryCredentialStore();
+        store.Put("mobbin-alice", OAuthLive());
+        var acquirerWriter = new CapturingWriter();
+        var acquirer = new OAuthMcpAcquirer(
+            new FakeTransport(200, "{\"access_token\":\"NEW_AT\",\"refresh_token\":\"NEW_RT\"}"), acquirerWriter, AsGuard);
+        var orchestrator = new SessionRefreshOrchestrator(
+            Policy(bindings, OwnedOAuthMcp()), store,
+            new SessionRefresher(new FakeTransport(), new CapturingWriter(), Guard),
+            oauthAcquirer: acquirer);
+
+        var summary = await orchestrator.RunPassAsync();
+
+        Assert.Equal(1, summary.Considered);
+        Assert.Equal(1, summary.Rotated);
+        Assert.Equal(0, summary.Errors);
+        Assert.Equal("mobbin-alice", acquirerWriter.LastName);
+        Assert.Equal("NEW_AT", acquirerWriter.LastBundle!.AccessToken);
+    }
+
+    [Fact]
+    public void An_oauth_mcp_recipe_is_owned_without_a_refresh_spec()
+    {
+        var acquirer = new OAuthMcpAcquirer(new FakeTransport(), new CapturingWriter(), AsGuard);
+        var owned = new SessionRefreshOrchestrator(
+            Policy([], OwnedOAuthMcp()), new InMemoryCredentialStore(),
+            new SessionRefresher(new FakeTransport(), new CapturingWriter(), Guard), oauthAcquirer: acquirer);
+        Assert.True(owned.HasOwnedRotation);   // oauth-mcp ownership needs no RefreshSpec
+    }
+
+    [Fact]
+    public async Task An_oauth_mcp_binding_is_skipped_when_no_acquirer_is_wired()
+    {
+        var bindings = new[] { new TargetBinding("mobbin", "mobbin-alice", "alice@example.com", CredentialOwner.User) };
+        var store = new InMemoryCredentialStore();
+        store.Put("mobbin-alice", OAuthLive());
+        var refresherWriter = new CapturingWriter();
+        var orchestrator = new SessionRefreshOrchestrator(
+            Policy(bindings, OwnedOAuthMcp()), store,
+            new SessionRefresher(new FakeTransport(), refresherWriter, Guard));  // no acquirer
+
+        var summary = await orchestrator.RunPassAsync();
+
+        Assert.Equal(1, summary.Considered);
+        Assert.Equal(1, summary.Skipped);
+        Assert.Equal(0, summary.Rotated);
+        Assert.Null(refresherWriter.LastBundle);   // the header-injection refresher was never used
+    }
+
+    [Fact]
+    public async Task A_dead_oauth_refresh_token_is_tallied_not_relogged_in()
+    {
+        var bindings = new[] { new TargetBinding("mobbin", "mobbin-alice", "alice@example.com", CredentialOwner.User) };
+        var store = new InMemoryCredentialStore();
+        store.Put("mobbin-alice", OAuthLive());
+        var acquirerWriter = new CapturingWriter();
+        var acquirer = new OAuthMcpAcquirer(
+            new FakeTransport(400, "{\"error\":\"invalid_grant\"}"), acquirerWriter, AsGuard);
+        var orchestrator = new SessionRefreshOrchestrator(
+            Policy(bindings, OwnedOAuthMcp()), store,
+            new SessionRefresher(new FakeTransport(), new CapturingWriter(), Guard), oauthAcquirer: acquirer);
+
+        var summary = await orchestrator.RunPassAsync();
+
+        Assert.Equal(1, summary.Dead);
+        Assert.Equal(0, summary.Rotated);
+        Assert.Null(acquirerWriter.LastBundle);   // dead grant: never wrote, never drove a login
     }
 
     private sealed class CapturingWriter : ICredentialWriter

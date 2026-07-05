@@ -162,6 +162,65 @@ public sealed class OAuthMcpAcquirerTests
         Assert.Null(writer.LastBundle);
     }
 
+    // ── stamped refresh context (W1) ──────────────────────────────────────────
+
+    [Fact]
+    public async Task Acquire_stamps_the_refresh_context_into_extra()
+    {
+        var transport = new FakeTransport(200, "{\"access_token\":\"AT\",\"refresh_token\":\"RT\"}");
+        var writer = new CapturingWriter();
+        var acquirer = new OAuthMcpAcquirer(transport, writer, Guard());
+
+        await acquirer.AcquireAsync(Token, Client, Redirect, "code", "ver", Resource, Secret);
+
+        var extra = writer.LastBundle!.Extra!;
+        Assert.Equal(Token.ToString(), extra[OAuthMcpAcquirer.ExtraTokenEndpoint]);
+        Assert.Equal(Client, extra[OAuthMcpAcquirer.ExtraClientId]);
+        Assert.Equal(Resource, extra[OAuthMcpAcquirer.ExtraResource]);
+    }
+
+    [Fact]
+    public async Task RefreshStored_rotates_using_the_stamped_context_without_rediscovery()
+    {
+        var transport = new FakeTransport(200, "{\"access_token\":\"NEW_AT\",\"refresh_token\":\"NEW_RT\"}");
+        var writer = new CapturingWriter();
+        var acquirer = new OAuthMcpAcquirer(transport, writer, Guard());
+        var stored = new CredentialBundle(
+            AccessToken: "OLD_AT",
+            RefreshToken: "OLD_RT",
+            Extra: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [OAuthMcpAcquirer.ExtraTokenEndpoint] = Token.ToString(),
+                [OAuthMcpAcquirer.ExtraClientId] = Client,
+                [OAuthMcpAcquirer.ExtraResource] = Resource,
+            });
+
+        var result = await acquirer.RefreshStoredAsync(Secret, stored);
+
+        Assert.Equal(OAuthAcquireStatus.Acquired, result.Status);
+        Assert.Equal(Token.ToString(), transport.LastUrl);   // the endpoint from Extra, no re-discovery
+        Assert.Contains("grant_type=refresh_token", transport.LastBody!, StringComparison.Ordinal);
+        Assert.Contains("refresh_token=OLD_RT", transport.LastBody!, StringComparison.Ordinal);
+        Assert.Equal("NEW_AT", writer.LastBundle!.AccessToken);
+        // the refresh context survives the rotation so the NEXT refresh is still self-contained
+        Assert.Equal(Token.ToString(), writer.LastBundle!.Extra![OAuthMcpAcquirer.ExtraTokenEndpoint]);
+    }
+
+    [Fact]
+    public async Task RefreshStored_without_the_context_is_an_error_and_makes_no_call()
+    {
+        var transport = new FakeTransport();
+        var writer = new CapturingWriter();
+        var acquirer = new OAuthMcpAcquirer(transport, writer, Guard());
+
+        // a bundle with a refresh token but no stamped OAuth context (e.g. a harvest bundle)
+        var result = await acquirer.RefreshStoredAsync(Secret, new CredentialBundle(RefreshToken: "RT"));
+
+        Assert.Equal(OAuthAcquireStatus.Error, result.Status);
+        Assert.Equal(0, transport.Calls);
+        Assert.Null(writer.LastBundle);
+    }
+
     private sealed class CapturingWriter : ICredentialWriter
     {
         public string? LastName { get; private set; }

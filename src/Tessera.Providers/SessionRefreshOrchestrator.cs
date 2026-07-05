@@ -40,6 +40,12 @@ public sealed class SessionRefreshOrchestrator
     // Optional + best-effort: a metadata write never affects a rotation pass.
     private readonly IConnectionHealthStore? _health;
 
+    // The OAuth-MCP acquirer that rotates an `oauth-mcp` binding from the refresh context
+    // stamped in its stored bundle (null ⇒ oauth-mcp recipes are not rotated). Optional so a
+    // build without the OAuth path — or a test — can construct the orchestrator with only the
+    // SessionRefresher.
+    private readonly OAuthMcp.OAuthMcpAcquirer? _oauthAcquirer;
+
     /// <summary>Creates the orchestrator over a live policy source, the store (read), and the refresher (write).</summary>
     /// <param name="policy">
     /// A source of the <em>current</em> policy, read fresh on every pass — so a
@@ -49,7 +55,8 @@ public sealed class SessionRefreshOrchestrator
     /// <param name="store">The credential store (read).</param>
     /// <param name="refresher">The session refresher (write-back).</param>
     /// <param name="health">Optional liveness store: the pass records rotated⇒alive / dead⇒dead.</param>
-    public SessionRefreshOrchestrator(Func<LoadedPolicy> policy, ICredentialStore store, SessionRefresher refresher, IConnectionHealthStore? health = null)
+    /// <param name="oauthAcquirer">Optional OAuth-MCP acquirer: rotates an <c>oauth-mcp</c> binding from its stored refresh context; null ⇒ oauth-mcp recipes are skipped.</param>
+    public SessionRefreshOrchestrator(Func<LoadedPolicy> policy, ICredentialStore store, SessionRefresher refresher, IConnectionHealthStore? health = null, OAuthMcp.OAuthMcpAcquirer? oauthAcquirer = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(store);
@@ -58,11 +65,12 @@ public sealed class SessionRefreshOrchestrator
         _store = store;
         _refresher = refresher;
         _health = health;
+        _oauthAcquirer = oauthAcquirer;
     }
 
     /// <summary>Convenience overload over a fixed policy snapshot (tests / static policies).</summary>
-    public SessionRefreshOrchestrator(LoadedPolicy policy, ICredentialStore store, SessionRefresher refresher, IConnectionHealthStore? health = null)
-        : this(() => policy, store, refresher, health)
+    public SessionRefreshOrchestrator(LoadedPolicy policy, ICredentialStore store, SessionRefresher refresher, IConnectionHealthStore? health = null, OAuthMcp.OAuthMcpAcquirer? oauthAcquirer = null)
+        : this(() => policy, store, refresher, health, oauthAcquirer)
     {
         ArgumentNullException.ThrowIfNull(policy);
     }
@@ -115,27 +123,64 @@ public sealed class SessionRefreshOrchestrator
                     continue;
                 }
 
-                var result = await _refresher
-                    .RefreshAsync(recipe, recipe.Refresh, binding.Credential, current, cancellationToken)
-                    .ConfigureAwait(false);
-
-                switch (result.Status)
+                // An oauth-mcp binding rotates through the OAuth token endpoint
+                // (grant_type=refresh_token), driven from the refresh context stamped in the
+                // stored bundle — a different request shape from the SessionRefresher
+                // header-injection path, so it routes to the acquirer. Both run under the same
+                // single-writer lease (ADR 0026).
+                bool? alive;
+                if (recipe.OAuthMcp is not null)
                 {
-                    case RefreshStatus.Rotated: rotated++; break;
-                    case RefreshStatus.Dead: dead++; break;
-                    case RefreshStatus.NotConfigured: skipped++; break;
-                    default: errors++; break;
+                    if (_oauthAcquirer is null)
+                    {
+                        // oauth-mcp ownership declared but no acquirer wired — nothing to rotate.
+                        skipped++;
+                        continue;
+                    }
+
+                    var acquired = await _oauthAcquirer
+                        .RefreshStoredAsync(binding.Credential, current, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    switch (acquired.Status)
+                    {
+                        case OAuthMcp.OAuthAcquireStatus.Acquired: rotated++; break;
+                        case OAuthMcp.OAuthAcquireStatus.Dead: dead++; break;
+                        default: errors++; break;
+                    }
+
+                    alive = acquired.Status switch
+                    {
+                        OAuthMcp.OAuthAcquireStatus.Acquired => true,
+                        OAuthMcp.OAuthAcquireStatus.Dead => false,
+                        _ => null,
+                    };
+                }
+                else
+                {
+                    var result = await _refresher
+                        .RefreshAsync(recipe, recipe.Refresh, binding.Credential, current, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    switch (result.Status)
+                    {
+                        case RefreshStatus.Rotated: rotated++; break;
+                        case RefreshStatus.Dead: dead++; break;
+                        case RefreshStatus.NotConfigured: skipped++; break;
+                        default: errors++; break;
+                    }
+
+                    alive = result.Status switch
+                    {
+                        RefreshStatus.Rotated => true,
+                        RefreshStatus.Dead => false,
+                        _ => null,
+                    };
                 }
 
                 // Fold the rotation-plane verdict into the shared liveness store: a
                 // successful rotation proves the session alive; a dead refresh token
                 // proves it dead. Best-effort + out-of-band (judge C2).
-                bool? alive = result.Status switch
-                {
-                    RefreshStatus.Rotated => true,
-                    RefreshStatus.Dead => false,
-                    _ => null,
-                };
                 if (_health is not null && alive is not null && binding.Principal is not null)
                 {
                     try
@@ -159,6 +204,6 @@ public sealed class SessionRefreshOrchestrator
 
     /// <summary>A recipe Tessera rotates: it both declares ownership and carries a refresh spec.</summary>
     private static bool IsTesseraOwned(Recipe recipe) =>
-        recipe.Refresh is not null
+        (recipe.Refresh is not null || recipe.OAuthMcp is not null)
         && string.Equals(recipe.Rotation?.Owner, "tessera", StringComparison.OrdinalIgnoreCase);
 }
