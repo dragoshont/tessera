@@ -149,6 +149,36 @@ public sealed class OAuthMcpConnectServiceTests
         Assert.Equal(OAuthAcquireStatus.Acquired, real.Status);
     }
 
+    // ── discovery orchestration (BeginForRecipe) ─────────────────────────────────
+
+    [Fact]
+    public async Task BeginForRecipe_discovers_then_returns_an_authorize_url()
+    {
+        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler()));
+        var (svc, store, _, _) = Build();
+
+        var start = await svc.BeginForRecipeAsync(
+            discovery, "https://mob.test/mcp", ["screens.read"], Principal, Target, Secret, Redirect, Client);
+
+        Assert.NotNull(start);
+        Assert.StartsWith("https://as.test/oauth/authorize?", start!.AuthorizeUrl.AbsoluteUri, StringComparison.Ordinal);
+        Assert.Contains($"state={start.State}", start.AuthorizeUrl.Query, StringComparison.Ordinal);
+        Assert.NotNull(store.Take(start.State, DateTimeOffset.UtcNow));   // discovery → stashed
+    }
+
+    [Fact]
+    public async Task BeginForRecipe_returns_null_when_the_target_is_not_an_oauth_mcp()
+    {
+        // A target that does not answer 401 + resource_metadata is not an OAuth-MCP (fail-safe).
+        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler { ProbeStatus = System.Net.HttpStatusCode.OK }));
+        var (svc, _, _, _) = Build();
+
+        var start = await svc.BeginForRecipeAsync(
+            discovery, "https://mob.test/mcp", ["screens.read"], Principal, Target, Secret, Redirect, Client);
+
+        Assert.Null(start);
+    }
+
     // ── pending store ────────────────────────────────────────────────────────────
 
     [Fact]
@@ -185,6 +215,41 @@ public sealed class OAuthMcpConnectServiceTests
     private static PendingAuthorization Pending(DateTimeOffset expires) => new(
         Principal, Target, Secret,
         new Uri("https://as.test/oauth/token"), Redirect, Client, "https://mob.test/mcp", "verifier", expires);
+
+    // A stub upstream that answers the RFC 9728 probe + serves the RFC 8414 metadata, so
+    // BeginForRecipe's discovery can run offline.
+    private sealed class StubDiscoveryHandler : HttpMessageHandler
+    {
+        public System.Net.HttpStatusCode ProbeStatus { get; init; } = System.Net.HttpStatusCode.Unauthorized;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var url = request.RequestUri!.ToString();
+            if (request.Method == HttpMethod.Post && url == "https://mob.test/mcp")
+            {
+                var res = new HttpResponseMessage(ProbeStatus);
+                if (ProbeStatus == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    res.Headers.TryAddWithoutValidation(
+                        "WWW-Authenticate",
+                        "Bearer resource_metadata=\"https://mob.test/.well-known/oauth-protected-resource\"");
+                }
+                return Task.FromResult(res);
+            }
+            if (url == "https://mob.test/.well-known/oauth-protected-resource")
+            {
+                return Task.FromResult(Json("{\"resource\":\"https://mob.test/mcp\",\"authorization_servers\":[\"https://as.test\"]}"));
+            }
+            if (url == "https://as.test/.well-known/oauth-authorization-server")
+            {
+                return Task.FromResult(Json("{\"issuer\":\"https://as.test\",\"authorization_endpoint\":\"https://as.test/oauth/authorize\",\"token_endpoint\":\"https://as.test/oauth/token\",\"code_challenge_methods_supported\":[\"S256\"]}"));
+            }
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
+        }
+
+        private static HttpResponseMessage Json(string body) =>
+            new(System.Net.HttpStatusCode.OK) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
+    }
 
     private sealed class CapturingWriter : ICredentialWriter
     {

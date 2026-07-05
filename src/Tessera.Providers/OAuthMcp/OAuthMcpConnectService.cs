@@ -104,6 +104,43 @@ public sealed class OAuthMcpConnectService
     }
 
     /// <summary>
+    /// Begin a connect by first DISCOVERING the OAuth-MCP (RFC 9728 probe → RFC 8414 metadata) and
+    /// then calling <see cref="Begin"/>. Returns null when the target is not a usable OAuth-MCP —
+    /// it did not answer 401 + <c>resource_metadata</c>, or its authorization server exposes no
+    /// token endpoint — which the caller surfaces as a 502. <paramref name="discovery"/> MUST be
+    /// built over an SSRF-guarded <see cref="System.Net.Http.HttpClient"/> (ADR 0027 §5): the probe
+    /// URL and the advertised authorization server are untrusted upstream input.
+    /// </summary>
+    public async Task<OAuthMcpConnectStart?> BeginForRecipeAsync(
+        OAuthMcpDiscovery discovery,
+        string mcpUrl,
+        IReadOnlyList<string> scopes,
+        string principal,
+        string target,
+        string secretName,
+        Uri redirectUri,
+        string clientId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(discovery);
+        ArgumentException.ThrowIfNullOrWhiteSpace(mcpUrl);
+
+        var probe = await discovery.ProbeAsync(mcpUrl, cancellationToken).ConfigureAwait(false);
+        if (!probe.IsOAuthMcp || probe.ResourceMetadataUrl is null)
+        {
+            return null; // not an OAuth-MCP (fail-safe: unknown ⇒ not one)
+        }
+
+        var endpoints = await discovery.DiscoverAsync(probe.ResourceMetadataUrl, scopes, cancellationToken).ConfigureAwait(false);
+        if (endpoints is null)
+        {
+            return null; // no usable authorization server / token endpoint
+        }
+
+        return Begin(endpoints, principal, target, secretName, redirectUri, clientId);
+    }
+
+    /// <summary>
     /// Complete the connect: look up the single-use <paramref name="state"/> and, if it is live,
     /// redeem <paramref name="code"/> for tokens at the stashed token endpoint (with the stashed
     /// PKCE verifier, redirect URI, client id and resource) and write the per-principal bundle. An
