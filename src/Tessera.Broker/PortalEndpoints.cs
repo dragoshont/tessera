@@ -461,7 +461,7 @@ internal static class PortalEndpoints
     /// a dev shortcut is tolerated only where the broker itself tolerates unverified
     /// callers (loopback dev mode), never on a real network bind.
     /// </summary>
-    private static async Task<string?> ResolvePrincipalAsync(HttpContext ctx, ITokenValidator validator, TesseraConfig config)
+    internal static async Task<string?> ResolvePrincipalAsync(HttpContext ctx, ITokenValidator validator, TesseraConfig config)
     {
         if (config.Identity.Mode == "dev" && config.Server.IsLoopback)
         {

@@ -159,6 +159,12 @@ public static class ConfigLoader
             Audit = config.Audit,
             Egress = egress,
             Portal = portal,
+            // Pass through the sections the environment overrides never touch — omitting one here
+            // silently resets it to its default (the bug that disabled oauthMcp after load).
+            LiveView = config.LiveView,
+            Refresh = config.Refresh,
+            Freshness = config.Freshness,
+            OAuthMcp = config.OAuthMcp,
         };
     }
 

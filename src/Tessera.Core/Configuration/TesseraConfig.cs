@@ -251,6 +251,24 @@ public sealed class FreshnessOptions
     public int MaxAgeSeconds { get; init; } = 43200;
 }
 
+/// <summary>
+/// OAuth-MCP fronting (ADR 0027): the per-user connect + token acquisition for upstream
+/// MCP servers that ship their own OAuth (e.g. Mobbin). OFF by default — enabling maps the
+/// interactive connect + callback endpoints and lets the rotation owner refresh oauth-mcp
+/// sessions. The redirect URI is Tessera's OWN callback, registered with the upstream AS.
+/// </summary>
+public sealed class OAuthMcpOptions
+{
+    /// <summary>Whether the OAuth-MCP connect endpoints + rotation run. OFF = no OAuth-MCP acquisition.</summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>Tessera's own OAuth callback URL, registered with the upstream AS as the redirect_uri.</summary>
+    public string RedirectUri { get; init; } = "";
+
+    /// <summary>The OAuth client id Tessera presents (a public client — PKCE, no secret).</summary>
+    public string ClientId { get; init; } = "";
+}
+
 /// <summary>The full broker configuration, with fail-closed validation.</summary>
 public sealed class TesseraConfig
 {
@@ -280,6 +298,9 @@ public sealed class TesseraConfig
 
     /// <summary>Connection-health freshness (the <c>live</c> → <c>unverified</c> decay bound).</summary>
     public FreshnessOptions Freshness { get; init; } = new();
+
+    /// <summary>OAuth-MCP fronting (ADR 0027): per-user OAuth connect + rotation for oauth-mcp upstreams.</summary>
+    public OAuthMcpOptions OAuthMcp { get; init; } = new();
 
     /// <summary>
     /// Returns a list of problems. Empty list == valid. These checks encode the
@@ -362,6 +383,25 @@ public sealed class TesseraConfig
             if (!Refresh.AcknowledgeSingleWriter)
             {
                 problems.Add("refresh.enabled is true but refresh.acknowledgeSingleWriter is false — the Mode U refresher is the sole session owner and there is no leader election; set acknowledgeSingleWriter=true to assert the broker runs as exactly one replica.");
+            }
+        }
+
+        if (OAuthMcp.Enabled)
+        {
+            if (string.IsNullOrWhiteSpace(OAuthMcp.RedirectUri)
+                || !Uri.TryCreate(OAuthMcp.RedirectUri, UriKind.Absolute, out _))
+            {
+                problems.Add("oauthMcp.enabled is true but oauthMcp.redirectUri is not a valid absolute URL (Tessera's own OAuth callback registered with the upstream AS).");
+            }
+
+            if (string.IsNullOrWhiteSpace(OAuthMcp.ClientId))
+            {
+                problems.Add("oauthMcp.enabled is true but oauthMcp.clientId is empty (the OAuth client id Tessera presents).");
+            }
+
+            if (!Egress.Enabled)
+            {
+                problems.Add("oauthMcp.enabled is true but egress.enabled is false — the connect flow egresses to the discovered authorization/token endpoints (enable egress, or turn oauthMcp off).");
             }
         }
 

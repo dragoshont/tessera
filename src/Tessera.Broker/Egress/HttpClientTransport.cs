@@ -23,8 +23,19 @@ public sealed class HttpClientTransport : IHttpTransport, IDisposable
     /// <summary>Creates the transport over an address guard (defaults to loopback-blocked).</summary>
     public HttpClientTransport(AddressGuard? addressGuard = null)
     {
+        _client = CreateGuardedHttpClient(addressGuard);
+    }
+
+    /// <summary>
+    /// Builds the same hardened, SSRF/rebind-guarded <see cref="HttpClient"/> the provider egress
+    /// uses (no proxy, no auto-redirect, no ambient cookies, connect-time <see cref="AddressGuard"/>
+    /// IP pinning). Reused for the OAuth-MCP discovery client so that RFC 9728/8414 probing of an
+    /// untrusted upstream gets the identical connect-time SSRF defense.
+    /// </summary>
+    public static HttpClient CreateGuardedHttpClient(AddressGuard? addressGuard = null)
+    {
         var guard = addressGuard ?? AddressGuard.Default;
-        _client = new HttpClient(new SocketsHttpHandler
+        return new HttpClient(new SocketsHttpHandler
         {
             UseProxy = false,
             AllowAutoRedirect = false,

@@ -1,7 +1,7 @@
 namespace Tessera.Core.Stores;
 
 /// <summary>A dictionary-backed store for tests and offline dev. No network.</summary>
-public sealed class InMemoryCredentialStore : ICredentialStore
+public sealed class InMemoryCredentialStore : ICredentialStore, ICredentialWriter
 {
     private readonly Dictionary<string, CredentialBundle> _bundles;
 
@@ -21,4 +21,11 @@ public sealed class InMemoryCredentialStore : ICredentialStore
     /// <inheritdoc/>
     public Task<CredentialBundle> GetBundleAsync(string name, CancellationToken cancellationToken = default) =>
         Task.FromResult(_bundles.TryGetValue(name, out var bundle) ? bundle : CredentialBundle.Empty);
+
+    /// <inheritdoc/>
+    public Task PutBundleAsync(string name, CredentialBundle bundle, CancellationToken cancellationToken = default)
+    {
+        _bundles[name] = bundle;
+        return Task.CompletedTask;
+    }
 }

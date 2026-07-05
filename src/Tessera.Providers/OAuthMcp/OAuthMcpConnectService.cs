@@ -9,6 +9,20 @@ namespace Tessera.Providers.OAuthMcp;
 /// <param name="State">The opaque anti-forgery state the callback must present back.</param>
 public sealed record OAuthMcpConnectStart(Uri AuthorizeUrl, string State);
 
+/// <summary>The outcome of completing a connect: the acquire status/detail plus, on a KNOWN state,
+/// the binding identity (target/principal/secret) the caller writes on success.</summary>
+/// <param name="Status">The acquisition status (<see cref="OAuthAcquireStatus.Acquired"/> only when tokens were written).</param>
+/// <param name="Detail">A secret-free explanation (never token bytes).</param>
+/// <param name="Target">The recipe target (null when the state was unknown/expired).</param>
+/// <param name="Principal">The per-principal owner (null when the state was unknown/expired).</param>
+/// <param name="SecretName">The store key the bundle was written to (null when unknown/expired).</param>
+public sealed record OAuthMcpCompleteResult(
+    OAuthAcquireStatus Status,
+    string Detail,
+    string? Target,
+    string? Principal,
+    string? SecretName);
+
 /// <summary>
 /// Drives the per-user OAuth-MCP connect handshake (ADR 0027, spec W): the authorization-code
 /// flow with PKCE (RFC 7636) and Resource Indicators (RFC 8707). It is the pure state machine —
@@ -146,20 +160,20 @@ public sealed class OAuthMcpConnectService
     /// PKCE verifier, redirect URI, client id and resource) and write the per-principal bundle. An
     /// unknown or expired state is refused WITHOUT calling the token endpoint.
     /// </summary>
-    public Task<OAuthAcquireResult> CompleteAsync(string state, string code, CancellationToken cancellationToken = default)
+    public async Task<OAuthMcpCompleteResult> CompleteAsync(string state, string code, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(code))
         {
-            return Task.FromResult(OAuthAcquireResult.Failed("callback carried no authorization code"));
+            return new OAuthMcpCompleteResult(OAuthAcquireStatus.Error, "callback carried no authorization code", null, null, null);
         }
 
         var pending = _pending.Take(state, _clock());
         if (pending is null)
         {
-            return Task.FromResult(OAuthAcquireResult.Failed("unknown or expired authorization state"));
+            return new OAuthMcpCompleteResult(OAuthAcquireStatus.Error, "unknown or expired authorization state", null, null, null);
         }
 
-        return _acquirer.AcquireAsync(
+        var acquire = await _acquirer.AcquireAsync(
             pending.TokenEndpoint,
             pending.ClientId,
             pending.RedirectUri,
@@ -167,7 +181,11 @@ public sealed class OAuthMcpConnectService
             pending.Verifier,
             pending.Resource,
             pending.SecretName,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
+
+        // The pending's identity rides back so the caller can create the per-principal binding —
+        // only after a real acquisition (the endpoint checks Status == Acquired).
+        return new OAuthMcpCompleteResult(acquire.Status, acquire.Detail, pending.Target, pending.Principal, pending.SecretName);
     }
 
     private static string NewState()

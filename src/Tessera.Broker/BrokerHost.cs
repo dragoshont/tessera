@@ -41,6 +41,12 @@ public sealed record BrokerHostOptions
     /// <summary>Override the YARP forwarder (tests) — record or short-circuit the proxy forward.</summary>
     public IHttpForwarder? ForwarderOverride { get; init; }
 
+    /// <summary>Override the OAuth-MCP discovery client (tests) — stub the RFC 9728/8414 probe.</summary>
+    public Tessera.Core.OAuthMcp.OAuthMcpDiscovery? OAuthMcpDiscoveryOverride { get; init; }
+
+    /// <summary>Override the OAuth-MCP connect service (tests) — stub the code→token exchange.</summary>
+    public Tessera.Providers.OAuthMcp.OAuthMcpConnectService? OAuthMcpConnectServiceOverride { get; init; }
+
     /// <summary>Override the environment (tests).</summary>
     public IReadOnlyDictionary<string, string?>? Environment { get; init; }
 }
@@ -173,7 +179,8 @@ public static class BrokerHost
         // Provider egress (ADR 0014): the real HTTP transport + the gateway the MCP
         // surface uses to inject a credential by identity. Disabled (every call
         // refused) until egress.enabled — so deploying never opens an upstream path.
-        services.AddSingleton<Tessera.Providers.IHttpTransport>(new Egress.HttpClientTransport());
+        var httpTransport = new Egress.HttpClientTransport();
+        services.AddSingleton<Tessera.Providers.IHttpTransport>(httpTransport);
         services.AddSingleton<Tessera.Mcp.IProviderGateway>(sp => BrokerProviderGateway.Build(
             config, pdp, resolver, policy.Recipes, sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), audit,
             // A writable store lets a recipe with absorbSetCookie write a rotated
@@ -206,6 +213,32 @@ public static class BrokerHost
         services.AddSingleton<Tessera.Core.Portal.ILiveViewProvider>(
             BuildLiveViewProvider(config, options));
 
+        // OAuth-MCP fronting (ADR 0027, spec W): the per-user acquire flow. Built once and
+        // shared by the connect endpoints and the rotation owner, ONLY when enabled + the store
+        // can write the issued bundle. Discovery + token egress reuse the data egress's SSRF
+        // allow-list AND the connect-time address guard. A test may inject stubs for the two.
+        Tessera.Providers.OAuthMcp.OAuthMcpAcquirer? oauthAcquirer = null;
+        if (config.OAuthMcp.Enabled)
+        {
+            services.AddSingleton(options.OAuthMcpDiscoveryOverride
+                ?? new Tessera.Core.OAuthMcp.OAuthMcpDiscovery(Egress.HttpClientTransport.CreateGuardedHttpClient()));
+
+            var connectService = options.OAuthMcpConnectServiceOverride;
+            if (connectService is null && store is ICredentialWriter oauthWriter)
+            {
+                var oauthGuard = new Tessera.Core.Egress.SsrfGuard(config.Egress.AllowedHosts, config.Egress.AllowPlainHttp);
+                oauthAcquirer = new Tessera.Providers.OAuthMcp.OAuthMcpAcquirer(httpTransport, oauthWriter, oauthGuard);
+                connectService = new Tessera.Providers.OAuthMcp.OAuthMcpConnectService(
+                    new Tessera.Providers.OAuthMcp.InMemoryPendingAuthorizationStore(Math.Max(64, config.Egress.ChallengeCapacity)),
+                    oauthAcquirer);
+            }
+
+            if (connectService is not null)
+            {
+                services.AddSingleton(connectService);
+            }
+        }
+
         // Mode U rotation owner (ADR 0015): a background pass that keeps Tessera-owned
         // sessions warm. Registered ONLY when refresh.enabled (config validation ties
         // that to egress.enabled) AND the store can write back — so deploying never
@@ -227,7 +260,9 @@ public static class BrokerHost
                 new Tessera.Providers.SessionRefresher(
                     sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), writer, refreshGuard),
                 // Harvest the rotation owner's own verdict into the shared liveness store.
-                connectionHealth));
+                connectionHealth,
+                // Rotate oauth-mcp sessions through the token endpoint (W1); null when disabled.
+                oauthAcquirer));
             services.AddHostedService(sp => new SessionRefreshService(
                 sp.GetRequiredService<Tessera.Providers.SessionRefreshOrchestrator>(),
                 TimeSpan.FromSeconds(config.Refresh.IntervalSeconds),
@@ -242,6 +277,10 @@ public static class BrokerHost
         app.MapPortalEndpoints();
         app.MapCallerBroker();
         app.MapEgressProxy();
+        if (config.OAuthMcp.Enabled)
+        {
+            app.MapOAuthMcpConnect();
+        }
         app.MapMcp("/mcp");
 
         // Startup self-test (read-only) — proves the authorize+resolve spine against
