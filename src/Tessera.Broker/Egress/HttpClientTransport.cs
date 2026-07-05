@@ -106,20 +106,27 @@ public sealed class HttpClientTransport : IHttpTransport, IDisposable
         CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(new HttpMethod(method), url);
-        if (body is not null)
-        {
-            request.Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
-        }
 
+        // Honor the caller's Content-Type — the OAuth token exchange is
+        // application/x-www-form-urlencoded, NOT JSON. Defaulting every body to JSON
+        // (the old behavior) silently corrupts a form POST: the upstream can't parse
+        // grant_type and rejects it. Non-Content-Type headers pass through as request headers.
+        string? contentType = null;
         foreach (var (name, value) in headers)
         {
-            // Content-Type is set on the content above; everything else is a request header.
             if (string.Equals(name, "Content-Type", StringComparison.OrdinalIgnoreCase))
             {
-                continue;
+                contentType = value;
             }
+            else
+            {
+                request.Headers.TryAddWithoutValidation(name, value);
+            }
+        }
 
-            request.Headers.TryAddWithoutValidation(name, value);
+        if (body is not null)
+        {
+            request.Content = new StringContent(body, System.Text.Encoding.UTF8, contentType ?? "application/json");
         }
 
         using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
