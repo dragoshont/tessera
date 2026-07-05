@@ -120,15 +120,16 @@ human.
 Recorded as phases are implemented so the reasoning survives the branch.
 
 **Phase ledger (live).** The commit-phases below implement the plan's discovery +
-egress-fronting mechanics; "acquisition + store" (§3 P2) is the next unbuilt phase.
+egress-fronting mechanics + per-user acquisition; the **slim-down (P4)** is the next
+unbuilt phase.
 
 | Phase | Scope | Status | Evidence |
 |---|---|---|---|
 | P1 | RFC 9728/8414 discovery + classifier + `oauth-mcp` recipe shape | ✅ done | `a007c51` |
 | P2a | audience/resource guard wired into egress | ✅ done | `2926b47` |
 | P2b | MCP-aware egress action model (read vs manage from the JSON-RPC method/tool) | ✅ done | `3942865` + fix `0c3bf50` |
-| P3 | per-user OAuth acquisition (auth-code + PKCE + refresh) + per-principal store, single-writer | ⬜ next | — |
-| P4 | slim down Tessera — retire bespoke per-target credential code the generalization replaces | ⬜ | — |
+| P3 | per-user OAuth acquisition (auth-code + PKCE + refresh) + per-principal store, single-writer | ✅ done | `727ca25` |
+| P4 | slim down Tessera — retire bespoke per-target credential code the generalization replaces | ⬜ next | — |
 | — | homelab rollout (§4) | ⛔ out of scope this run (pre-rollout only) | plan-only |
 
 > Vocabulary note: original §3 numbered the phases P1–P4 (discovery → acquisition →
@@ -160,6 +161,30 @@ egress-fronting mechanics; "acquisition + store" (§3 P2) is the next unbuilt ph
   declared read forwards; declared write and undeclared tool step up — 409, not forwarded;
   a `manage:` tool without step-up still holds; audience guard blocks an off-resource
   replay). Full suite 491 green (Core 290, Broker 123).
+- **P3 done** (`727ca25`): per-user OAuth acquisition — the last mechanic before the
+  slim-down. `Pkce` (S256-only, RFC 7636; `plain` never emitted per OAuth 2.1; fresh
+  verifier per request, off the front channel) + `OAuthAuthorizeUrl` (pure builder:
+  OAuth 2.1 + PKCE + RFC 8707 `resource`, carrying only the S256 challenge; `resource`
+  is the **same** audience the P2a egress guard enforces, so the confused-deputy gap is
+  closed end to end; `state` is the caller's CSRF nonce, verified at the callback, not
+  minted here) in `Tessera.Core`, and `OAuthMcpAcquirer` in `Tessera.Providers` owning
+  **both** token legs as one back-channel `application/x-www-form-urlencoded` POST —
+  `authorization_code` (with the PKCE verifier) and `refresh_token`. **Secretless**
+  (writes the bundle via `ICredentialWriter`, never returns token bytes — ADR 0014);
+  **SSRF-guarded** token endpoint checked before any request (no unguarded ctor);
+  **preserves the current refresh token** when the AS omits one (RFC 6749 §6); an
+  `invalid_grant` on 400/401 ⇒ **dead grant reported, never an auto-login** (single-
+  writer per ADR 0026, the RM double-spend lesson). Deliberately **not** the
+  `SessionRefresher` header-injection path — it shares the store + `SsrfGuard` + token
+  parse, not the request shape. **Adversarial review: PASS** (no defects; unlike P2b
+  there was no misclassification bug — the design is standard-grounded and fail-safe).
+  Two **deliberate** scope choices, recorded so they are not mistaken for gaps: (a)
+  `expires_in`/`token_type` are **not** persisted — refresh is liveness/401-driven
+  (ADR 0024/0025 oracle model), not expiry-timer-driven, so an expiry clock would be
+  dead weight; (b) **public-client + PKCE only** — no `client_secret` (MCP OAuth uses
+  public clients + dynamic client registration); confidential-client
+  (`client_secret_basic`) is out of scope until a target needs it. 16 tests; full suite
+  **507 green** (Core 297, Providers 58).
 
 ## 7. Non-goals (this iteration)
 
