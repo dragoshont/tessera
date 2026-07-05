@@ -51,7 +51,7 @@ public static class McpActionClassifier
 
             var method = m.GetString()!;
             string? tool = null;
-            if (method == "tools/call"
+            if (string.Equals(method, "tools/call", StringComparison.OrdinalIgnoreCase)
                 && doc.RootElement.TryGetProperty("params", out var p)
                 && p.ValueKind == JsonValueKind.Object
                 && p.TryGetProperty("name", out var n)
@@ -81,7 +81,7 @@ public static class McpActionClassifier
         ArgumentNullException.ThrowIfNull(call);
         ArgumentNullException.ThrowIfNull(declaredTools);
 
-        if (call.Method != "tools/call")
+        if (!string.Equals(call.Method, "tools/call", StringComparison.OrdinalIgnoreCase))
         {
             return McpAccess.Read;
         }

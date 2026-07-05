@@ -154,7 +154,7 @@ public sealed class OAuthMcpConnectServiceTests
     [Fact]
     public async Task BeginForRecipe_discovers_then_returns_an_authorize_url()
     {
-        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler()));
+        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler()), new SsrfGuard(["mob.test", "as.test"]));
         var (svc, store, _, _) = Build();
 
         var start = await svc.BeginForRecipeAsync(
@@ -170,7 +170,7 @@ public sealed class OAuthMcpConnectServiceTests
     public async Task BeginForRecipe_returns_null_when_the_target_is_not_an_oauth_mcp()
     {
         // A target that does not answer 401 + resource_metadata is not an OAuth-MCP (fail-safe).
-        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler { ProbeStatus = System.Net.HttpStatusCode.OK }));
+        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler { ProbeStatus = System.Net.HttpStatusCode.OK }), new SsrfGuard(["mob.test", "as.test"]));
         var (svc, _, _, _) = Build();
 
         var start = await svc.BeginForRecipeAsync(

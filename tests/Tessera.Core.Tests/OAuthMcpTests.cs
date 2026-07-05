@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using Tessera.Core.Configuration;
+using Tessera.Core.Egress;
 using Tessera.Core.OAuthMcp;
 using Tessera.Core.Recipes;
 using Xunit;
@@ -102,7 +103,7 @@ public class OAuthMcpTests
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        var discovery = new OAuthMcpDiscovery(new HttpClient(handler));
+        var discovery = new OAuthMcpDiscovery(new HttpClient(handler), new SsrfGuard(["mob.test", "as.test"]));
 
         var probe = await discovery.ProbeAsync("https://mob.test/mcp");
         Assert.True(probe.IsOAuthMcp);
@@ -121,9 +122,33 @@ public class OAuthMcpTests
     {
         var handler = new StubHandler(req =>
             Json("{\"resource\":\"https://mob.test/mcp\",\"authorization_servers\":[]}"));
-        var discovery = new OAuthMcpDiscovery(new HttpClient(handler));
+        var discovery = new OAuthMcpDiscovery(new HttpClient(handler), new SsrfGuard(["mob.test", "as.test"]));
         var endpoints = await discovery.DiscoverAsync("https://mob.test/.well-known/oauth-protected-resource");
         Assert.Null(endpoints);
+    }
+
+    [Fact]
+    public async Task Discovery_refuses_an_authorization_server_off_the_allow_list()
+    {
+        // A hostile upstream points its authorization server at an off-allow-list host: discovery
+        // must refuse (finding D1) rather than fetch it or hand back its endpoints.
+        var handler = new StubHandler(_ =>
+            Json("{\"resource\":\"https://mob.test/mcp\",\"authorization_servers\":[\"https://evil.test\"]}"));
+        var discovery = new OAuthMcpDiscovery(new HttpClient(handler), new SsrfGuard(["mob.test"]));   // evil.test NOT allowed
+        Assert.Null(await discovery.DiscoverAsync("https://mob.test/.well-known/oauth-protected-resource"));
+    }
+
+    [Fact]
+    public async Task Discovery_refuses_an_authorize_endpoint_off_the_allow_list()
+    {
+        // The AS host is allow-listed, but it advertises an authorize endpoint on a DIFFERENT,
+        // off-list host — the browser-redirect target. Discovery must refuse it (finding D1).
+        var handler = new StubHandler(req =>
+            req.RequestUri!.AbsolutePath.EndsWith("oauth-protected-resource", StringComparison.Ordinal)
+                ? Json("{\"resource\":\"https://mob.test/mcp\",\"authorization_servers\":[\"https://as.test\"]}")
+                : Json("{\"issuer\":\"https://as.test\",\"authorization_endpoint\":\"https://evil.test/authorize\",\"token_endpoint\":\"https://as.test/token\",\"code_challenge_methods_supported\":[\"S256\"]}"));
+        var discovery = new OAuthMcpDiscovery(new HttpClient(handler), new SsrfGuard(["mob.test", "as.test"]));   // evil.test NOT allowed
+        Assert.Null(await discovery.DiscoverAsync("https://mob.test/.well-known/oauth-protected-resource"));
     }
 
     // --- the oauth-mcp recipe shape (parse + round-trip through the loader) --
@@ -223,5 +248,17 @@ public class OAuthMcpTests
         Assert.Equal(McpAccess.Write, McpActionClassifier.Classify(new McpCall("tools/call", "delete_board"), declared));
         Assert.Equal(McpAccess.Write, McpActionClassifier.Classify(new McpCall("tools/call", "unknown_tool"), declared));  // undeclared => fail-safe
         Assert.Equal(McpAccess.Write, McpActionClassifier.Classify(new McpCall("tools/call", null), declared));            // malformed => fail-safe
+    }
+
+    [Fact]
+    public void Mcp_classify_is_case_insensitive_for_tools_call()
+    {
+        // A lenient upstream that executes "Tools/Call" must not slip a mutating call past as a
+        // read: any casing of tools/call is a tool call (finding AC2).
+        var declared = new Dictionary<string, bool>(StringComparer.Ordinal) { ["delete_board"] = true };
+        Assert.Equal(McpAccess.Write, McpActionClassifier.Classify(new McpCall("Tools/Call", "delete_board"), declared));
+        Assert.Equal(McpAccess.Write, McpActionClassifier.Classify(new McpCall("TOOLS/CALL", "unknown"), declared));
+        var call = McpActionClassifier.Parse("{\"method\":\"Tools/Call\",\"params\":{\"name\":\"delete_board\"}}");
+        Assert.Equal("delete_board", call!.ToolName);
     }
 }

@@ -1,4 +1,5 @@
 using System.Net.Http;
+using Tessera.Core.Egress;
 
 namespace Tessera.Core.OAuthMcp;
 
@@ -29,16 +30,22 @@ public sealed record OAuthMcpEndpoints(
 /// posture as <c>InjectionEgress</c>, ADR 0014) so a hostile upstream cannot steer
 /// discovery at an internal address.
 /// </remarks>
-public sealed class OAuthMcpDiscovery(HttpClient http)
+public sealed class OAuthMcpDiscovery(HttpClient http, SsrfGuard guard)
 {
     private const string InitializeBody =
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}";
 
     private readonly HttpClient _http = http;
+    private readonly SsrfGuard _guard = guard;
 
     /// <summary>Probe the MCP endpoint (unauthenticated) and classify it (RFC 9728).</summary>
     public async Task<OAuthMcpProbe> ProbeAsync(string mcpUrl, CancellationToken ct = default)
     {
+        if (!IsAllowed(mcpUrl))
+        {
+            return new OAuthMcpProbe(false, null);   // off the SSRF allow-list ⇒ not usable
+        }
+
         using var req = new HttpRequestMessage(HttpMethod.Post, mcpUrl)
         {
             Content = new StringContent(InitializeBody),
@@ -65,6 +72,12 @@ public sealed class OAuthMcpDiscovery(HttpClient http)
         IReadOnlyList<string>? preferredScopes = null,
         CancellationToken ct = default)
     {
+        // The resource_metadata URL comes from the upstream's 401 challenge — UNTRUSTED.
+        if (!IsAllowed(resourceMetadataUrl))
+        {
+            return null;
+        }
+
         var prJson = await _http.GetStringAsync(resourceMetadataUrl, ct).ConfigureAwait(false);
         var pr = ProtectedResourceMetadata.FromJson(prJson);
         var servers = pr?.AuthorizationServers;
@@ -75,9 +88,25 @@ public sealed class OAuthMcpDiscovery(HttpClient http)
         }
 
         var asUrl = issuer.TrimEnd('/') + "/.well-known/oauth-authorization-server";
+        if (!IsAllowed(asUrl))   // the authorization server comes from the (untrusted) resource doc
+        {
+            return null;
+        }
+
         var asJson = await _http.GetStringAsync(asUrl, ct).ConfigureAwait(false);
         var asMeta = AuthorizationServerMetadata.FromJson(asJson);
         if (asMeta?.TokenEndpoint is null)
+        {
+            return null;
+        }
+
+        // The endpoints Tessera will ACT ON must be allow-listed too: the token endpoint
+        // (back-channel exchange) and — critically — the authorization endpoint, where the
+        // user's BROWSER is redirected. A hostile upstream must not steer that redirect off the
+        // allow-list (host + scheme enforced by the guard).
+        if (asMeta.AuthorizationEndpoint is null
+            || !IsAllowed(asMeta.AuthorizationEndpoint)
+            || !IsAllowed(asMeta.TokenEndpoint))
         {
             return null;
         }
@@ -87,4 +116,9 @@ public sealed class OAuthMcpDiscovery(HttpClient http)
             : pr.ScopesSupported ?? [];
         return new OAuthMcpEndpoints(pr.Resource, asMeta, scopes);
     }
+
+    /// <summary>True when <paramref name="url"/> is an absolute URL whose host + scheme pass the
+    /// SSRF allow-list — applied to every untrusted discovery URL and the endpoints we act on.</summary>
+    private bool IsAllowed(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && _guard.IsAllowed(uri);
 }

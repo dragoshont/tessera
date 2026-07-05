@@ -48,6 +48,34 @@ public sealed class ConfigTests
     }
 
     [Fact]
+    public void OAuthMcp_enabled_requires_https_redirect_unless_loopback()
+    {
+        // An http (non-loopback) OAuth callback risks authorization-code interception (RFC 8252 §7.3).
+        var http = new TesseraConfig
+        {
+            Egress = new EgressOptions { Enabled = true, AllowedHosts = ["mob.test"] },
+            OAuthMcp = new OAuthMcpOptions { Enabled = true, RedirectUri = "http://tessera.example/cb", ClientId = "t" },
+        };
+        Assert.Contains(http.Validate(), p => p.Contains("https", StringComparison.Ordinal));
+
+        // loopback http is allowed for local dev.
+        var loopback = new TesseraConfig
+        {
+            Egress = new EgressOptions { Enabled = true, AllowedHosts = ["mob.test"] },
+            OAuthMcp = new OAuthMcpOptions { Enabled = true, RedirectUri = "http://127.0.0.1:8080/cb", ClientId = "t" },
+        };
+        Assert.Empty(loopback.Validate());
+
+        // https is always fine.
+        var https = new TesseraConfig
+        {
+            Egress = new EgressOptions { Enabled = true, AllowedHosts = ["mob.test"] },
+            OAuthMcp = new OAuthMcpOptions { Enabled = true, RedirectUri = "https://tessera.example/cb", ClientId = "t" },
+        };
+        Assert.Empty(https.Validate());
+    }
+
+    [Fact]
     public void Refresh_enabled_requires_egress_enabled()
     {
         // The rotation owner can't reach an upstream with egress off — reject the

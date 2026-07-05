@@ -83,7 +83,7 @@ public sealed class OAuthMcpConnectEndpointTests
     public async Task Begin_then_callback_acquires_and_binds_the_per_user_credential()
     {
         var store = new InMemoryCredentialStore();
-        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler()));
+        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler()), new SsrfGuard(["mob.test", "as.test"]));
         var acquirer = new OAuthMcpAcquirer(
             new StubTransport("{\"access_token\":\"AT-alice\",\"refresh_token\":\"RT-alice\"}"),
             store, new SsrfGuard(["as.test"]));
@@ -120,7 +120,7 @@ public sealed class OAuthMcpConnectEndpointTests
     public async Task Callback_with_an_unknown_state_creates_no_binding()
     {
         var store = new InMemoryCredentialStore();
-        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler()));
+        var discovery = new OAuthMcpDiscovery(new HttpClient(new StubDiscoveryHandler()), new SsrfGuard(["mob.test", "as.test"]));
         var acquirer = new OAuthMcpAcquirer(
             new StubTransport("{\"access_token\":\"AT\"}"), store, new SsrfGuard(["as.test"]));
         var connect = new OAuthMcpConnectService(new InMemoryPendingAuthorizationStore(), acquirer);

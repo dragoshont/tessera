@@ -220,13 +220,16 @@ public static class BrokerHost
         Tessera.Providers.OAuthMcp.OAuthMcpAcquirer? oauthAcquirer = null;
         if (config.OAuthMcp.Enabled)
         {
+            // The OAuth-MCP egress (discovery + token) reuses the data-egress SSRF allow-list;
+            // discovery is now host-guarded too so a hostile upstream can't steer the browser
+            // redirect / metadata fetches off the allow-list (finding D1).
+            var oauthGuard = new Tessera.Core.Egress.SsrfGuard(config.Egress.AllowedHosts, config.Egress.AllowPlainHttp);
             services.AddSingleton(options.OAuthMcpDiscoveryOverride
-                ?? new Tessera.Core.OAuthMcp.OAuthMcpDiscovery(Egress.HttpClientTransport.CreateGuardedHttpClient()));
+                ?? new Tessera.Core.OAuthMcp.OAuthMcpDiscovery(Egress.HttpClientTransport.CreateGuardedHttpClient(), oauthGuard));
 
             var connectService = options.OAuthMcpConnectServiceOverride;
             if (connectService is null && store is ICredentialWriter oauthWriter)
             {
-                var oauthGuard = new Tessera.Core.Egress.SsrfGuard(config.Egress.AllowedHosts, config.Egress.AllowPlainHttp);
                 oauthAcquirer = new Tessera.Providers.OAuthMcp.OAuthMcpAcquirer(httpTransport, oauthWriter, oauthGuard);
                 connectService = new Tessera.Providers.OAuthMcp.OAuthMcpConnectService(
                     new Tessera.Providers.OAuthMcp.InMemoryPendingAuthorizationStore(Math.Max(64, config.Egress.ChallengeCapacity)),

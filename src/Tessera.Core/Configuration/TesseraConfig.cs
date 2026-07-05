@@ -389,9 +389,13 @@ public sealed class TesseraConfig
         if (OAuthMcp.Enabled)
         {
             if (string.IsNullOrWhiteSpace(OAuthMcp.RedirectUri)
-                || !Uri.TryCreate(OAuthMcp.RedirectUri, UriKind.Absolute, out _))
+                || !Uri.TryCreate(OAuthMcp.RedirectUri, UriKind.Absolute, out var redirectUri))
             {
                 problems.Add("oauthMcp.enabled is true but oauthMcp.redirectUri is not a valid absolute URL (Tessera's own OAuth callback registered with the upstream AS).");
+            }
+            else if (redirectUri.Scheme != Uri.UriSchemeHttps && !redirectUri.IsLoopback)
+            {
+                problems.Add("oauthMcp.redirectUri must be https — an http OAuth callback risks authorization-code interception (RFC 8252 §7.3). Only loopback http is allowed (local dev).");
             }
 
             if (string.IsNullOrWhiteSpace(OAuthMcp.ClientId))
