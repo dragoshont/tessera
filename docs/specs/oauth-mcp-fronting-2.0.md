@@ -120,8 +120,9 @@ human.
 Recorded as phases are implemented so the reasoning survives the branch.
 
 **Phase ledger (live).** The commit-phases below implement discovery, egress-fronting,
-per-user acquisition, and the full acquisition WIRING (W1+W2a+W2b); **conformance (C)**
-is the next unbuilt slice.
+per-user acquisition, the full acquisition WIRING (W1+W2a+W2b), a security-review pass, and
+**acquisition conformance (C1)** against the real clone; **egress conformance (C2)** is the
+next unbuilt slice.
 
 | Phase | Scope | Status | Evidence |
 |---|---|---|---|
@@ -134,7 +135,8 @@ is the next unbuilt slice.
 | W1 | oauth-mcp **rotation** wired into the refresh orchestrator (acquirer stamps the refresh context in the bundle; orchestrator routes an oauth-mcp binding to `RefreshStoredAsync`) | ✅ done | `75ddbc4` |
 | W2a | **connect state machine** — pending-authorization store (single-use/TTL state) + `OAuthMcpConnectService` (Begin/CompleteAsync) + discovery-orchestrating `BeginForRecipeAsync` | ✅ done | `b340271` + `3637e27` |
 | W2b | **Broker host wiring** — `oauthMcp` config (client id + redirect URI), an SSRF-guarded discovery `HttpClient`, DI (pending store + acquirer + connect service; acquirer into the orchestrator), and the `POST /oauth/mcp/connect` + `GET /oauth/mcp/callback` endpoints (+ per-principal binding) | ✅ done | `f26ab77` |
-| C | **conformance** (plan §3 P4) — front `mobbin-clone` `/mcp` through Tessera end-to-end (`tools/list` + a tool call return inline images, client holds no token) + the 402→200 entitlement demo (AS now hosted by the clone) | ⬜ next | — |
+| C1 | **acquisition conformance** — Tessera's real discovery + PKCE auth-code + refresh against the REAL running clone AS (opt-in in-process test) | ✅ done | `575d107` |
+| C2 | **egress conformance** (plan §3 P4) — `tools/list` + a tool call return inline images THROUGH Tessera (client holds no token) + the 402→200 entitlement demo | ⬜ next | — |
 | — | homelab rollout (§4) | ⛔ out of scope this run (pre-rollout only) | plan-only |
 
 > Vocabulary note: original §3 numbered the phases P1–P4 (discovery → acquisition →
@@ -261,6 +263,23 @@ is the next unbuilt slice.
   unauthenticated=401, non-oauth=400, cross-principal=403, bad-callback=400, and the full
   begin→callback→binding path against a stub AS). Full suite **534 green**. **W is complete
   end to end; C (conformance) is next.**
+- **Security review pass** (`ac092d4`): a fresh adversarial audit of P1..W (5 lenses). No
+  CRITICAL. Three MINOR (defense-in-depth) fixed + tested: D1 (discovery + the browser
+  authorize-redirect are now host-allow-list guarded, not just IP-guarded — a hostile upstream
+  can't steer them off-list); AC2 (the MCP action classifier detects `tools/call`
+  case-insensitively, so a lenient upstream can't slip a mutating call past as a read); CFG1
+  (`oauthMcp.redirectUri` must be https unless loopback, RFC 8252). NITs recorded.
+- **C1 done** (`575d107`): acquisition conformance against the REAL clone. An opt-in in-process
+  test (`TESSERA_CONFORMANCE=1`) spawns the `mobbin-clone` (AS enabled) and runs Tessera's REAL
+  discovery + connect + acquirer + refresh against it — no fakes on the OAuth path. It
+  **immediately caught a CRITICAL bug the fake-transport unit tests missed** (RC-15
+  green-but-dead): `HttpClientTransport` hard-coded `Content-Type: application/json` for every
+  body, so the form-urlencoded OAuth token exchange was unparseable by the AS (400) —
+  acquisition would NEVER have worked against a real AS. Fixed (honor the caller's content-type)
+  + a hermetic CI regression guard. Now green end to end: RFC 9728/8414 discovery, the auth-code
+  + PKCE round trip, the per-principal bundle write, and a rotating refresh — all against the
+  clone's real endpoints. **C2 (egress conformance: tools/list + a tool call THROUGH Tessera,
+  client holds no token, + 402→200) is next.**
 
 ## 7. Non-goals (this iteration)
 
