@@ -136,7 +136,7 @@ next unbuilt slice.
 | W2a | **connect state machine** — pending-authorization store (single-use/TTL state) + `OAuthMcpConnectService` (Begin/CompleteAsync) + discovery-orchestrating `BeginForRecipeAsync` | ✅ done | `b340271` + `3637e27` |
 | W2b | **Broker host wiring** — `oauthMcp` config (client id + redirect URI), an SSRF-guarded discovery `HttpClient`, DI (pending store + acquirer + connect service; acquirer into the orchestrator), and the `POST /oauth/mcp/connect` + `GET /oauth/mcp/callback` endpoints (+ per-principal binding) | ✅ done | `f26ab77` |
 | C1 | **acquisition conformance** — Tessera's real discovery + PKCE auth-code + refresh against the REAL running clone AS (opt-in in-process test) | ✅ done | `575d107` |
-| C2 | **egress conformance** (plan §3 P4) — `tools/list` + a tool call return inline images THROUGH Tessera (client holds no token) + the 402→200 entitlement demo | ⬜ next | — |
+| C2 | **egress conformance** (plan §3 P4) — `tools/list` + a tool call return inline images THROUGH Tessera (client holds no token) + the 402→200 entitlement demo | ✅ done (deterministic); ⏳ two-family judge gate pending | working tree (2.0-beta) |
 | — | homelab rollout (§4) | ⛔ out of scope this run (pre-rollout only) | plan-only |
 
 > Vocabulary note: original §3 numbered the phases P1–P4 (discovery → acquisition →
@@ -278,8 +278,36 @@ next unbuilt slice.
   acquisition would NEVER have worked against a real AS. Fixed (honor the caller's content-type)
   + a hermetic CI regression guard. Now green end to end: RFC 9728/8414 discovery, the auth-code
   + PKCE round trip, the per-principal bundle write, and a rotating refresh — all against the
-  clone's real endpoints. **C2 (egress conformance: tools/list + a tool call THROUGH Tessera,
-  client holds no token, + 402→200) is next.**
+  clone's real endpoints.
+- **C2 done** (deterministic gate green; two-family judge gate pending — see *Gate status* below):
+  egress conformance. A new opt-in in-process test (`TESSERA_CONFORMANCE=1`,
+  `Tessera_fronts_the_clone_mcp_end_to_end_and_the_client_never_holds_a_token`) spawns the clone
+  with its entitlement gate live (`MCP_EXPECTED_TOKEN` + `MCP_FREE_TIER_TOKEN`) and drives a REAL
+  `ModelContextProtocol` client — holding ONLY its caller token — through Tessera's `/v1/egress`:
+  `tools/list` returns the real three-tool surface, `search_screens` returns inline images +
+  `mobbin_url` metadata, and a free→entitled **402→200** swap (client headers constant, only the
+  SERVER-SIDE stored token changes) proves the upstream credential lives server-side. Like C1, the
+  REAL forward **caught green-but-dead**: the `/v1/egress` proxy was built for CalDAV/public-SaaS,
+  so it hard-blocked any non-default upstream port (`!upstream.IsDefaultPort → 403`) — which would
+  block both a loopback clone AND the in-cluster `svc:8080` target. Fixed at the CAUSE — the
+  default-port heuristic is **skipped for `oauth-mcp` recipes** (`EgressProxyEndpoint.cs`), because
+  the ADR-0027 §4 audience guard (`OAuthMcpAudience.IsBound`) already pins the exact
+  scheme+host+**port**+path to the recipe's resource (strictly stronger than "default port only");
+  the CalDAV/proxy path is unchanged (still default-port-only, still `AddressGuard.PublicOnly`). A
+  hermetic regression test (`Mcp_oauth_recipe_on_a_non_default_port_is_forwarded`) guards it in
+  normal CI. Loopback reach for the conformance test uses a test-only
+  `BrokerHostOptions.AddressGuardOverride` (mirrors the `ForwarderOverride`/`StoreOverride` seams;
+  production stays `PublicOnly`). Full suite **543 green**; the 2 conformance tests pass with the flag.
+  - **Known follow-up (§4 rollout, NOT this slice):** the proxy egress still uses
+    `AddressGuard.PublicOnly`, which blocks a **private** in-cluster ClusterIP. An in-cluster
+    `oauth-mcp` upstream would need the proxy egress to use `AddressGuard.Default` for `oauth-mcp`
+    recipes (private reachable; loopback/link-local/metadata still refused). Deferred with the rest
+    of §4 and documented here so the rollout is not attempted assuming C2 made an in-cluster private
+    target reachable. The port-gate fix above is necessary-but-not-sufficient for that target.
+  - **Gate status:** deterministic (build + 543 hermetic + the 2 conformance tests) is GREEN. The
+    plan §6 **semantic Adversarial-Judge gate could not be executed in this environment** (the judge
+    sub-agent runtime failed to spawn); a rigorous adversarial self-review found no defects, but the
+    independent two-family judge + human review remain required before merge to `main`.
 
 ## 7. Non-goals (this iteration)
 

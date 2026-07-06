@@ -41,6 +41,12 @@ public sealed record BrokerHostOptions
     /// <summary>Override the YARP forwarder (tests) — record or short-circuit the proxy forward.</summary>
     public IHttpForwarder? ForwarderOverride { get; init; }
 
+    /// <summary>Override the proxy egress connect-time IP guard (tests) — pass a loopback-permitting
+    /// guard so a cross-repo conformance test can forward to a clone on 127.0.0.1. Production leaves
+    /// this null, so the proxy egress keeps its default <c>AddressGuard.PublicOnly</c> posture
+    /// (loopback AND private/internal ranges refused even on a DNS rebind).</summary>
+    public Tessera.Core.Egress.AddressGuard? AddressGuardOverride { get; init; }
+
     /// <summary>Override the OAuth-MCP discovery client (tests) — stub the RFC 9728/8414 probe.</summary>
     public Tessera.Core.OAuthMcp.OAuthMcpDiscovery? OAuthMcpDiscoveryOverride { get; init; }
 
@@ -175,7 +181,8 @@ public static class BrokerHost
             services.AddSingleton<IHttpForwarder>(options.ForwarderOverride);
         }
 
-        services.AddSingleton(sp => new InjectionEgress(config.Egress, sp.GetRequiredService<IHttpForwarder>()));
+        services.AddSingleton(sp => new InjectionEgress(
+            config.Egress, sp.GetRequiredService<IHttpForwarder>(), options.AddressGuardOverride));
         // Provider egress (ADR 0014): the real HTTP transport + the gateway the MCP
         // surface uses to inject a credential by identity. Disabled (every call
         // refused) until egress.enabled — so deploying never opens an upstream path.

@@ -340,6 +340,24 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
         Assert.False(_forwarder.Forwarded);
     }
 
+    [Fact]
+    public async Task Mcp_oauth_recipe_on_a_non_default_port_is_forwarded()
+    {
+        // ADR 0027: an OAuth-MCP resource may legitimately live on a NON-default port (a corp
+        // MCP on :8443, an in-cluster MCP on :8080). The CalDAV/public-SaaS "default port only"
+        // rule must NOT apply — the audience guard pins the exact authority (host + PORT) instead,
+        // which is strictly stronger. (Contrast A_non_default_upstream_port_is_403 above: the
+        // non-oauth apple-caldav recipe on a non-default port is STILL 403.)
+        var resp = await _client.SendAsync(Build(
+            "POST", target: "mobbin-hp", upstream: "https://mob.test:8443/mcp",
+            body: "{\"method\":\"tools/list\"}"));
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.True(_forwarder.Forwarded);
+        // the recipe's bearer is injected and the destination is pinned to the :8443 resource.
+        Assert.Equal("Bearer upstream-bearer", _forwarder.Captured!.Headers.Authorization?.ToString());
+        Assert.Equal(new Uri("https://mob.test:8443/mcp"), _forwarder.Captured.RequestUri);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static HttpRequestMessage Build(
@@ -419,11 +437,14 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
                 { "caller": "{{CallerId}}", "onBehalfOf": "alice@example.com",
                   "target": "apple-caldav", "actions": ["read:dav", "manage:dav"] },
                 { "caller": "{{CallerId}}", "onBehalfOf": "alice@example.com",
-                  "target": "mobbin", "actions": ["read:mcp", "manage:mcp"] }
+                  "target": "mobbin", "actions": ["read:mcp", "manage:mcp"] },
+                { "caller": "{{CallerId}}", "onBehalfOf": "alice@example.com",
+                  "target": "mobbin-hp", "actions": ["read:mcp"] }
               ],
               "bindings": [
                 { "target": "apple-caldav", "onBehalfOf": "alice@example.com", "credential": "apple-account-a" },
-                { "target": "mobbin", "onBehalfOf": "alice@example.com", "credential": "mobbin-token" }
+                { "target": "mobbin", "onBehalfOf": "alice@example.com", "credential": "mobbin-token" },
+                { "target": "mobbin-hp", "onBehalfOf": "alice@example.com", "credential": "mobbin-token" }
               ],
               "recipes": [
                 { "target": "apple-caldav", "egress": "proxy", "injection": "basic" },
@@ -433,6 +454,11 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
                     { "name": "search_screens", "action": "read:mcp", "path": "/mcp" },
                     { "name": "delete_board", "action": "manage:mcp", "path": "/mcp", "stepUp": true },
                     { "name": "archive_board", "action": "manage:mcp", "path": "/mcp" }
+                  ] },
+                { "target": "mobbin-hp", "egress": "proxy", "injection": "bearer",
+                  "oauthMcp": { "mcpUrl": "https://mob.test:8443/mcp" },
+                  "tools": [
+                    { "name": "search_screens", "action": "read:mcp", "path": "/mcp" }
                   ] }
               ]
             }

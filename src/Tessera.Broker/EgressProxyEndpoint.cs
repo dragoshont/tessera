@@ -137,7 +137,13 @@ internal static class EgressProxyEndpoint
         // reach a non-standard port on an allow-listed host (OWASP SSRF: restrict the
         // port, not just the host) — the connect-time guard already blocks private IPs,
         // this closes a blind port-probe / non-443 service on an allow-listed host.
-        if (!upstream.IsDefaultPort)
+        // EXCEPTION — an OAuth-MCP recipe (ADR 0027): its upstream is pinned to the recipe's
+        // declared resource (scheme+host+PORT+path) by the audience guard just below, which is
+        // strictly stronger than "default port only". A legitimate OAuth-MCP resource may live on
+        // a non-default port (a corp MCP on :8443, an in-cluster MCP on :8080), so the blanket
+        // default-port rule — a CalDAV/public-SaaS heuristic — does not apply here. The caller
+        // still cannot probe a different port: only the recipe's exact resource passes IsBound.
+        if (recipe.OAuthMcp is null && !upstream.IsDefaultPort)
         {
             return Results.Json(
                 new { error = $"upstream port {upstream.Port} is not permitted (default port only)" },
