@@ -48,36 +48,58 @@ public sealed class InjectionEgress : IDisposable
     private readonly EgressOptions _options;
     private readonly SsrfGuard _guard;
     private readonly IHttpForwarder _forwarder;
-    private readonly HttpMessageInvoker _invoker;
+    // Two connect-time postures, selected per recipe in ForwardAsync: the CalDAV/public-SaaS proxy
+    // reaches only public providers (PublicOnly — loopback + private refused), while an oauth-mcp
+    // recipe may front an INTERNAL/in-cluster MCP (Default — private ClusterIP reachable;
+    // loopback/link-local/metadata still refused), matching the provider path (HttpClientTransport).
+    private readonly HttpMessageInvoker _proxyInvoker;
+    private readonly HttpMessageInvoker _oauthMcpInvoker;
 
     /// <summary>Creates the egress over the configured options + a forwarder.</summary>
     /// <param name="options">The egress settings (enabled flag + SSRF host allow-list).</param>
     /// <param name="forwarder">The YARP forwarder.</param>
-    /// <param name="addressGuard">
-    /// The connect-time IP guard (defaults to <see cref="AddressGuard.PublicOnly"/> —
-    /// this path reaches only public SaaS, so loopback <em>and</em> private/internal
-    /// ranges are refused even on a rebind). Tests pass a permissive guard.
+    /// <param name="oauthMcpAddressGuard">
+    /// Test-only override of the connect-time IP guard for the OAUTH-MCP egress path (the conformance
+    /// forward to a loopback clone). Null in production → oauth-mcp uses <see cref="AddressGuard.Default"/>
+    /// (private in-cluster reachable; loopback/link-local/metadata refused) and the proxy/CalDAV path
+    /// uses <see cref="AddressGuard.PublicOnly"/> (loopback AND private refused). It never relaxes the
+    /// proxy path.
     /// </param>
-    public InjectionEgress(EgressOptions options, IHttpForwarder forwarder, AddressGuard? addressGuard = null)
+    public InjectionEgress(EgressOptions options, IHttpForwarder forwarder, AddressGuard? oauthMcpAddressGuard = null)
     {
         _options = options;
         _guard = new SsrfGuard(options.AllowedHosts, options.AllowPlainHttp);
         _forwarder = forwarder;
-        var address = addressGuard ?? AddressGuard.PublicOnly;
-        _invoker = new HttpMessageInvoker(new SocketsHttpHandler
+        _proxyInvoker = BuildInvoker(ConnectGuardFor(isOAuthMcp: false, oauthMcpAddressGuard));
+        _oauthMcpInvoker = BuildInvoker(ConnectGuardFor(isOAuthMcp: true, oauthMcpAddressGuard));
+    }
+
+    /// <summary>
+    /// The connect-time IP guard for an egress class (ADR 0027 §4 / OWASP SSRF). A CalDAV/public-SaaS
+    /// proxy recipe reaches only public providers, so it uses <see cref="AddressGuard.PublicOnly"/>
+    /// (loopback AND private refused). An oauth-mcp recipe may legitimately front an internal/in-cluster
+    /// MCP, so it uses <see cref="AddressGuard.Default"/> (private/ClusterIP reachable; loopback/
+    /// link-local/metadata still refused) — the same posture the provider path (<c>HttpClientTransport</c>)
+    /// already uses for in-cluster targets. The SSRF host allow-list and the audience guard still gate
+    /// WHICH host. A test may pass an <paramref name="oauthMcpOverride"/> (e.g. loopback-permitting) for
+    /// the conformance forward; it applies ONLY to the oauth-mcp path, never the proxy path.
+    /// </summary>
+    internal static AddressGuard ConnectGuardFor(bool isOAuthMcp, AddressGuard? oauthMcpOverride) =>
+        isOAuthMcp ? (oauthMcpOverride ?? AddressGuard.Default) : AddressGuard.PublicOnly;
+
+    private static HttpMessageInvoker BuildInvoker(AddressGuard address) =>
+        new(new SocketsHttpHandler
         {
             UseProxy = false,
             AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.None,
             UseCookies = false,
             ConnectTimeout = TimeSpan.FromSeconds(15),
-            // Connect-time SSRF pin: resolve the host once, validate the *resolved* IP,
-            // and connect to that pinned address — a DNS rebind can't swap in an internal
-            // address between the host allow-list check and the socket (HttpClientTransport
-            // does the same for the recipe-tool path; this closes it for the proxy path).
+            // Connect-time SSRF pin: resolve the host once, validate the *resolved* IP, and connect to
+            // that pinned address — a DNS rebind can't swap in a blocked address between the host
+            // allow-list check and the socket (HttpClientTransport does the same for the recipe-tool path).
             ConnectCallback = (context, ct) => ConnectAsync(address, context, ct),
         });
-    }
 
     /// <summary>
     /// Resolves the target host, rejects any address the <see cref="AddressGuard"/>
@@ -182,14 +204,21 @@ public sealed class InjectionEgress : IDisposable
         var headers = CredentialInjector.BuildHeaders(bundle, recipe.Injection);
         var destinationPrefix = upstream.GetLeftPart(UriPartial.Authority);
         var transformer = new InjectingTransformer(headers, upstream);
+        // OAuth-MCP recipes may front an internal/in-cluster MCP (private ClusterIP); the CalDAV proxy
+        // path reaches only public SaaS. Pick the matching connect-guard posture.
+        var invoker = recipe.OAuthMcp is not null ? _oauthMcpInvoker : _proxyInvoker;
         var error = await _forwarder
-            .SendAsync(context, destinationPrefix, _invoker, ForwarderRequestConfig.Empty, transformer)
+            .SendAsync(context, destinationPrefix, invoker, ForwarderRequestConfig.Empty, transformer)
             .ConfigureAwait(false);
         return new EgressOutcome(EgressDisposition.Forwarded, error);
     }
 
     /// <inheritdoc/>
-    public void Dispose() => _invoker.Dispose();
+    public void Dispose()
+    {
+        _proxyInvoker.Dispose();
+        _oauthMcpInvoker.Dispose();
+    }
 
     /// <summary>
     /// Fixes the destination to the validated upstream, strips the caller's token and

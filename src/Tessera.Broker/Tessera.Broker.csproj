@@ -30,5 +30,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Tessera.Broker.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tessera.Broker.Tests" />
+  </ItemGroup>
 
 </Project>

@@ -41,10 +41,11 @@ public sealed record BrokerHostOptions
     /// <summary>Override the YARP forwarder (tests) — record or short-circuit the proxy forward.</summary>
     public IHttpForwarder? ForwarderOverride { get; init; }
 
-    /// <summary>Override the proxy egress connect-time IP guard (tests) — pass a loopback-permitting
-    /// guard so a cross-repo conformance test can forward to a clone on 127.0.0.1. Production leaves
-    /// this null, so the proxy egress keeps its default <c>AddressGuard.PublicOnly</c> posture
-    /// (loopback AND private/internal ranges refused even on a DNS rebind).</summary>
+    /// <summary>Override the OAUTH-MCP egress connect-time IP guard (tests) — pass a loopback-permitting
+    /// guard so a cross-repo conformance test can forward to a clone on 127.0.0.1. Production leaves this
+    /// null, so oauth-mcp egress uses <c>AddressGuard.Default</c> (private in-cluster reachable) and the
+    /// proxy/CalDAV path uses <c>AddressGuard.PublicOnly</c> (loopback AND private refused). It never
+    /// relaxes the proxy path.</summary>
     public Tessera.Core.Egress.AddressGuard? AddressGuardOverride { get; init; }
 
     /// <summary>Override the OAuth-MCP discovery client (tests) — stub the RFC 9728/8414 probe.</summary>

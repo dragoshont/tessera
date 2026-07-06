@@ -298,12 +298,17 @@ next unbuilt slice.
   normal CI. Loopback reach for the conformance test uses a test-only
   `BrokerHostOptions.AddressGuardOverride` (mirrors the `ForwarderOverride`/`StoreOverride` seams;
   production stays `PublicOnly`). Full suite **543 green**; the 2 conformance tests pass with the flag.
-  - **Known follow-up (§4 rollout, NOT this slice):** the proxy egress still uses
-    `AddressGuard.PublicOnly`, which blocks a **private** in-cluster ClusterIP. An in-cluster
-    `oauth-mcp` upstream would need the proxy egress to use `AddressGuard.Default` for `oauth-mcp`
-    recipes (private reachable; loopback/link-local/metadata still refused). Deferred with the rest
-    of §4 and documented here so the rollout is not attempted assuming C2 made an in-cluster private
-    target reachable. The port-gate fix above is necessary-but-not-sufficient for that target.
+  - **Private-range posture (§4 code prerequisite) — DONE (deterministic; judge pending).** The proxy
+    egress now selects the connect guard per recipe: an `oauth-mcp` recipe uses `AddressGuard.Default`
+    (private/in-cluster ClusterIP reachable; loopback/link-local/metadata still refused), while the
+    CalDAV/public-SaaS proxy keeps `AddressGuard.PublicOnly` — parity with the provider path
+    (`HttpClientTransport`), no CalDAV regression. `InjectionEgress.ConnectGuardFor` centralises the
+    choice (3 unit tests, `InternalsVisibleTo`); the test override now relaxes ONLY the oauth-mcp path.
+    Full suite **546 green**; C1+C2 conformance still green. **What remains for §4 (human-applied):**
+    deploy `mobbin-clone` in-cluster + the Tessera `oauth-mcp` recipe/grant/binding + netpol + edge,
+    then re-run C2 conformance against the LIVE in-cluster (private-IP) target to validate the
+    Default-guard path end-to-end (the port-gate + private-range fixes are both necessary; only a live
+    target proves them together). Two-family judge + human review still required before merge to main.
   - **Gate status:** deterministic (build + 543 hermetic + the 2 conformance tests) is GREEN. The
     plan §6 **semantic Adversarial-Judge gate could not be executed in this environment** (the judge
     sub-agent runtime failed to spawn); a rigorous adversarial self-review found no defects, but the
