@@ -1,3 +1,4 @@
+using System.Net;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Tessera.Core.Product;
@@ -365,14 +366,14 @@ internal sealed class PluginIntegrationCatalogSource(
                 value.RepositoryOrPackage,
                 value.Version,
                 value.License,
-                value.TrustLevel,
+                "UNTRUSTED",
                 value.CapabilitiesSummary,
                 value.AuthTypes,
                 CatalogSensitivity.Classify($"{value.Name} {value.Description}"),
-                value.InstallationMode,
-                value.InstallState,
-                value.Installed,
-                value.InspectUrl))
+                "SERVER_REVIEW_REQUIRED",
+                "REVIEW_REQUIRED",
+                false,
+                SafeInspectUrl(value.InspectUrl)))
             .ToArray();
         _cache[cacheKey] = new(DateTimeOffset.UtcNow.Add(plugin.CatalogSource.CacheDuration), items);
         return items;
@@ -381,6 +382,18 @@ internal sealed class PluginIntegrationCatalogSource(
     private sealed record CacheEntry(
         DateTimeOffset ExpiresAt,
         IReadOnlyList<IntegrationCatalogItem> Items);
+
+    private static string? SafeInspectUrl(string? value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps
+            || !uri.IsDefaultPort
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase)
+            || IPAddress.TryParse(uri.Host, out _)) return null;
+        return uri.AbsoluteUri;
+    }
 }
 
 internal static class CatalogSensitivity

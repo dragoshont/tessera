@@ -34,6 +34,18 @@
       "reuses": ["AppShell"],
       "states": ["Empty", "Configured", "Loading", "Error", "ConfigurationRequired"]
     },
+    "SetupCenter": {
+      "story": "Product/SetupCenter",
+      "code": "web/src/components/product/SetupCenter.tsx",
+      "reuses": ["AppShell"],
+      "states": ["ReadyToConnect", "Connecting", "Error"]
+    },
+    "IntegrationSearchPanel": {
+      "story": "Product/IntegrationSearchPanel",
+      "code": "web/src/components/product/IntegrationSearchPanel.tsx",
+      "reuses": ["AppShell"],
+      "states": ["Results", "Searching", "Empty", "SourceDegraded"]
+    },
     "ActionApprovalCard": {
       "story": "Product/ActionApprovalCard",
       "code": "web/src/components/product/R2ProductComponents.tsx",

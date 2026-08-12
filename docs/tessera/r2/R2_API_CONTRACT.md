@@ -62,6 +62,13 @@ EvidenceCitationDto   { evidenceId, sourceType, sourceLocator, observedAt, sourc
 ActivityDto           { id, kind, occurredAt, summary, state|null, resourceType, resourceId, evidenceRefs: string[] }
 SettingsDto            { defaultChatModelProfileId|null, defaultLightweightModelProfileId|null, timezone, approvalDefaults, memoryControls, version }
 ModelProfileDto        { id, accountId, adapterKind, endpoint, model, contextLimit, supportsStreaming, supportsTools, enabled, createdAt, updatedAt, version }
+SetupStatusDto          { server: SetupServerDto, ai: SetupAiDto, integrations: SetupIntegrationDto[], canOpenChat, requiredActionCount }
+SetupServerDto          { state, displayName, version }
+SetupAiDto              { state, gatewayId|null, displayName|null, model|null, profileId|null, detailCode|null }
+SetupIntegrationDto     { id, name, state, runtimeState, accountId|null, accountHealth|null, detailCode|null, connectPath|null }
+IntegrationSourceDto    { id, name, state, errorCode|null }
+IntegrationCatalogDto   { id, name, description, source, publisher, runtime, repositoryOrPackage|null, version, license|null, trustLevel, capabilitiesSummary: string[], authTypes: string[], sensitivity, installationMode, installState, installed, inspectUrl|null }
+IntegrationSearchDto    { items: IntegrationCatalogDto[], sources: IntegrationSourceDto[] }
 ```
 
 `ExecutionEventDto.data` is type-specific and strict: `status` has `{ label }`; `text` has `{ delta }`; `capability_requested` has `{ capabilityCallId, capabilityId, accountId|null }`; `approval_required` has `{ actionId }`; `capability_result` has `{ capabilityResultId, summary, evidenceRefs }`; `failure` has `{ code, retryable }`; `completed` has `{ messageId }`. No hidden prompt or reasoning field exists.
@@ -121,6 +128,10 @@ ModelProfileDto        { id, accountId, adapterKind, endpoint, model, contextLim
 | `PATCH /settings` | partial settings + `expectedVersion` | `200 SettingsDto` | referenced profiles owner/enabled |
 | `GET /settings/model-profiles` | `enabled?, cursor?, limit?` | `200 Page<ModelProfileDto>` | owner profiles sorted `(updatedAt DESC,id)`; endpoint is non-secret and secret input is never returned |
 | `POST /settings/model-profiles` | `{ accountId, adapterKind, endpoint, model, contextLimit }` + idempotency | `201 ModelProfileDto` | account owner/CONNECTED and adapter kind allowed; `422 configuration_required/invalid_model` |
+| `GET /setup/status` | none | `200 SetupStatusDto` | derives model/account/plugin readiness from canonical state and provider-owned runtime descriptors |
+| `POST /setup/bootstrap` | `{}` + idempotency | `200 SetupStatusDto` | per-owner serialized convergence; validates the configured gateway/model, custody and canonical bindings; `400 invalid_idempotency_key`, `422 model_gateway_*` |
+| `GET /integrations/sources` | none | `200 { items: IntegrationSourceDto[] }` | source metadata only; no public source executes code |
+| `GET /integrations/search` | `query, limit?` | `200 IntegrationSearchDto` | query 2-100 chars, limit 1-50; local hash-validated packages plus cached public metadata; source failures degrade independently |
 
 GET list/detail routes return their named DTOs/Page DTOs and `404 not_found` without cross-owner disclosure. Endpoint-specific failures supplement the common authentication, validation, storage, and version errors.
 
@@ -131,6 +142,8 @@ List filters reject unknown enum values and malformed timestamps with `400 inval
 ## Idempotency
 
 Creation, dispatch, approval, validation, retry, and run-now require `Idempotency-Key` (1-128 visible ASCII). Scope is `(owner, route family, key)`. The server hashes canonical method, route resource IDs, and RFC 8785-style property-sorted JSON after validation; secret input is represented by its SHA-256 only in the transient hash computation and is never persisted. Exact replay returns the original status and exact documented response body and sets `Idempotency-Replayed: true`; an initial response sets `Idempotency-Replayed: false`. This header keeps entity DTO response bodies exact. Operations whose documented body is `MutationReceipt` also populate its `replayed` member consistently. A changed request returns `409 idempotency_conflict`. Receipts are retained at least as long as the referenced product record and never expire while an external outcome can be reconciled.
+
+Setup bootstrap is a deterministic convergence operation rather than an external dispatch: it requires a valid key, serializes by owner in the one-writer server, rechecks canonical state inside that gate, uses deterministic account/profile IDs, and returns current setup state. Concurrent client calls cannot compensate or erase a winning credential. A later call repairs missing custody from server-owned configuration only after the real gateway/model probe succeeds.
 
 ## Credential Custody Transaction
 

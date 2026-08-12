@@ -46,7 +46,7 @@ data:
         "actionCredentialRef": "regina-maria-tessera-action-token",
         "connectors": [
           { "id": "account-a", "displayName": "My Regina Maria", "endpoint": "http://reginamaria-mcp.default.svc.cluster.local:8080/mcp" },
-          { "id": "account-b", "displayName": "Wife - Regina Maria", "endpoint": "http://reginamaria-mcp-manuela.default.svc.cluster.local:8080/mcp" }
+          { "id": "account-b", "displayName": "Secondary Regina Maria", "endpoint": "http://reginamaria-mcp-secondary.default.svc.cluster.local:8080/mcp" }
         ]
       },
       "gmailOAuth": {

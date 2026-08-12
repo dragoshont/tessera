@@ -23,4 +23,4 @@ Accounts now separately show integration runtime readiness and user authorizatio
 
 ## Unavoidable Auth
 
-User OAuth/provider consent remains explicit. Gmail and each Regina Maria identity retain separate Connect/Reauthenticate flows. The user's wife is never bootstrapped or marked connected from another account's state.
+User OAuth/provider consent remains explicit. Gmail and each Regina Maria identity retain separate Connect/Reauthenticate flows. A secondary account is never bootstrapped or marked connected from another account's state.

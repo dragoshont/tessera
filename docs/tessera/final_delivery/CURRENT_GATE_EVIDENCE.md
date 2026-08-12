@@ -4,7 +4,7 @@ Worktree-bound continuation checkpoint, 2026-08-12. Baseline `611af03`; branch `
 
 | Gate | Command | Result |
 |---|---|---|
-| Backend | `dotnet test Tessera.slnx --no-restore` | 779/779 PASS |
+| Backend | `dotnet test Tessera.slnx --no-restore` | 780/780 PASS |
 | Shared client | `npm --prefix packages/tessera-client test` | 19/19 PASS |
 | Shared typecheck | `npm --prefix packages/tessera-client run typecheck` | PASS |
 | Web | `npm --prefix web test -- --pool=threads --maxWorkers=1` | 105/105 PASS |

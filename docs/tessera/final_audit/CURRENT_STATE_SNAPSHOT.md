@@ -14,7 +14,7 @@ Captured 2026-08-12 before the reality-audit implementation.
 ## Running Reality At Capture
 
 - Stable URL: `https://tessera.hont.ro`
-- Local split DNS: `192.168.1.201`
+- Local split DNS: private Traefik LAN address (value kept in private operations config).
 - `GET /.well-known/tessera`: HTTP 200 `text/html`, 457-byte SPA index, proving the descriptor release is not deployed.
 - Last recorded Tessera image: `sha256:582231318e739de0ab6141027209a4140b17c55e1123c79bd87ef117b4c10e91`, source `f869d76`.
 - Last recorded GitOps revision: `1a584f8`.
@@ -42,7 +42,7 @@ Captured 2026-08-12 before the reality-audit implementation.
 - LiteLLM: recorded real completion; actual deployed gateway/model/default-profile state must be queried.
 - GitHub: user reports already configured; canonical ConnectedAccount/health bridge must be audited.
 - Google OAuth/Gmail: user reports configured; distinguish OAuth app readiness from user ConnectedAccount authorization.
-- Wife Regina Maria: must remain independently authorized and must not be inferred connected from plugin health.
+- Secondary Regina Maria account: must remain independently authorized and must not be inferred connected from plugin health.
 
 ## Audit Work Queue
 

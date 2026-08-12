@@ -26,7 +26,7 @@ The current macOS Electron product was repackaged, verified, installed in `/Appl
 
 - Gmail user consent if no valid account session exists.
 - User Regina Maria authentication/reauthentication if required.
-- Wife Regina Maria authentication/MFA, independently performed.
+- Secondary Regina Maria account authentication/MFA, independently performed by its holder.
 - Physical iPhone signing/device/cellular verification if unavailable to automation.
 
 This file must be updated after cutover. `DELIVERED_ENGINEERING_AUTH_CHECKPOINTS_REMAIN` may be used only when every engineering-controlled item above is closed; `DELIVERED_E2E` additionally requires the real provider and cross-client scenarios.

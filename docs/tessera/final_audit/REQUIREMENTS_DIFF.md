@@ -13,6 +13,6 @@
 | iOS loads | bounded offline against stale server | authenticated product | Deploy and run | Engineering | descriptor/release build | simulator/live | READY |
 | Packaged macOS current | current Alpha packaged and installed | repack current Web | None before live server E2E | Engineering | Electron package | verify/package/install smoke | PASS |
 | Real provider reads | runtime configured, accounts absent | safe reads after consent | User/provider auth | Shared | existing Connect flows | authenticated E2E | AUTH CHECKPOINT |
-| Wife account isolation | separate connectors | independent consent/state | None | Shared | no inferred Connected state | account E2E | PASS/UNAUTHORIZED |
+| Secondary account isolation | separate connectors | independent consent/state | None | Shared | no inferred Connected state | account E2E | PASS/UNAUTHORIZED |
 
 `READY` means implementation and deterministic checks pass but the authorized live cutover remains to be executed; it is not a final delivery claim.

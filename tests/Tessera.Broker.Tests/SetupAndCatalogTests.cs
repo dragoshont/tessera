@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Tessera.Core.Configuration;
 using Tessera.Core.Kernel;
+using Tessera.Core.Product;
 using Tessera.Core.Stores;
 using Tessera.Persistence.Sqlite;
 using Tessera.Plugin.Abstractions;
@@ -14,7 +16,7 @@ namespace Tessera.Broker.Tests;
 public sealed class SetupAndCatalogTests
 {
     [Fact]
-    public async Task Model_bootstrap_is_idempotent_and_sets_canonical_defaults()
+    public async Task Model_bootstrap_is_concurrency_safe_repairs_custody_and_sets_canonical_defaults()
     {
         var directory = Directory.CreateTempSubdirectory("tessera-setup-test");
         try
@@ -29,41 +31,29 @@ public sealed class SetupAndCatalogTests
                 DateTimeOffset.UtcNow);
             await store.AddAsync(principal);
             var custody = new InMemoryCredentialStore();
-            var config = new TesseraConfig
-            {
-                ModelGateways = new ModelGatewayOptions
-                {
-                    Enabled = true,
-                    Endpoints = [new ModelGatewayEndpointOptions
-                    {
-                        Id = "homelab",
-                        DisplayName = "Homelab LiteLLM",
-                        Endpoint = "http://litellm.test/v1",
-                        AutoConnect = true,
-                        DefaultModel = "claude-haiku-4.5",
-                        DefaultContextLimit = 200_000,
-                        CredentialEnvironmentVariable = "TESSERA_LITELLM_MASTER_KEY",
-                    }],
-                    AllowPlainHttp = true,
-                },
-            };
+            var config = ModelConfig();
+            var probeCalls = 0;
             var service = new ModelGatewayBootstrapService(
                 config,
                 store,
                 custody,
                 new DelegateTransport((method, url) =>
-                    new(
+                {
+                    probeCalls++;
+                    return new(
                         200,
                         new Dictionary<string, string>(),
-                        "{\"data\":[{\"id\":\"claude-haiku-4.5\"}]}")),
+                        "{\"data\":[{\"id\":\"claude-haiku-4.5\"}]}");
+                }),
                 name => name == "TESSERA_LITELLM_MASTER_KEY" ? "server-owned-secret" : null);
 
             Assert.Equal("READY_TO_CONNECT", (await service.GetStateAsync(principal.PrincipalId, default)).State);
-            var first = await service.BootstrapAsync(principal.PrincipalId, default);
-            var second = await service.BootstrapAsync(principal.PrincipalId, default);
+            var states = await Task.WhenAll(Enumerable.Range(0, 8)
+                .Select(_ => service.BootstrapAsync(principal.PrincipalId, default)));
 
-            Assert.Equal("CONNECTED", first.State);
-            Assert.Equal(first.ProfileId, second.ProfileId);
+            Assert.All(states, state => Assert.Equal("CONNECTED", state.State));
+            Assert.Single(states.Select(state => state.ProfileId).Distinct(StringComparer.Ordinal));
+            Assert.Equal(1, probeCalls);
             var accounts = await store.ListConnectedAccountsAsync(principal.PrincipalId);
             var profiles = await store.ListModelProfilesAsync(principal.PrincipalId);
             Assert.Single(accounts);
@@ -73,7 +63,79 @@ public sealed class SetupAndCatalogTests
             Assert.Equal(profiles[0].ProfileId, settings.DefaultChatModelProfileId);
             Assert.Equal(profiles[0].ProfileId, settings.DefaultLightweightModelProfileId);
             Assert.DoesNotContain("server-owned-secret", accounts[0].NonSecretConfigJson, StringComparison.Ordinal);
-            Assert.NotNull(await custody.GetBundleAsync(accounts[0].CredentialRef));
+            Assert.False((await custody.GetBundleAsync(accounts[0].CredentialRef)).IsEmpty);
+
+            custody.Put(accounts[0].CredentialRef, CredentialBundle.Empty);
+            var stale = await service.GetStateAsync(principal.PrincipalId, default);
+            Assert.Equal("READY_TO_CONNECT", stale.State);
+            Assert.Equal("model_profile_repair_required", stale.DetailCode);
+
+            var repaired = await service.BootstrapAsync(principal.PrincipalId, default);
+            Assert.Equal("CONNECTED", repaired.State);
+            Assert.Equal(2, probeCalls);
+            Assert.False((await custody.GetBundleAsync(accounts[0].CredentialRef)).IsEmpty);
+
+            var current = await store.GetConnectedAccountAsync(principal.PrincipalId, accounts[0].AccountId)
+                ?? throw new InvalidOperationException("Expected model account.");
+            await new R2ConnectedAccountService(store, custody)
+                .RevokeAsync(principal.PrincipalId, current.AccountId, current.Version);
+            var revoked = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => service.BootstrapAsync(principal.PrincipalId, default));
+            Assert.Equal("gateway_binding_conflict", revoked.Message);
+            Assert.True((await custody.GetBundleAsync(accounts[0].CredentialRef)).IsEmpty);
+        }
+        finally
+        {
+            Directory.Delete(directory.FullName, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Model_bootstrap_rejects_conflicting_deterministic_account_binding()
+    {
+        var directory = Directory.CreateTempSubdirectory("tessera-setup-conflict-test");
+        try
+        {
+            var store = new SqliteKernelStore(Path.Combine(directory.FullName, "product.db"));
+            await store.InitializeAsync();
+            var owner = PrincipalRef.Create(
+                "https://issuer.example",
+                "tenant",
+                "conflict-subject",
+                "owner@example.com",
+                DateTimeOffset.UtcNow);
+            await store.AddAsync(owner);
+            var custody = new InMemoryCredentialStore();
+            var accountId = StableId(owner.PrincipalId, "model-account", "homelab");
+            await new R2ConnectedAccountService(store, custody).ConnectAsync(
+                owner.PrincipalId,
+                accountId,
+                "openai-compatible",
+                "model-provider",
+                "1.0.0",
+                "Conflicting gateway",
+                "{}",
+                new CredentialBundle(AccessToken: "existing-secret"),
+                [],
+                [new("model-provider", "1.0.0", "model.chat.complete", "1")]);
+            var service = new ModelGatewayBootstrapService(
+                ModelConfig(),
+                store,
+                custody,
+                new DelegateTransport((_, _) => new(
+                    200,
+                    new Dictionary<string, string>(),
+                    "{\"data\":[{\"id\":\"claude-haiku-4.5\"}]}")),
+                name => name == "TESSERA_LITELLM_MASTER_KEY" ? "server-owned-secret" : null);
+
+            var conflict = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => service.BootstrapAsync(owner.PrincipalId, default));
+
+            Assert.Equal("gateway_binding_conflict", conflict.Message);
+            var account = await store.GetConnectedAccountAsync(owner.PrincipalId, accountId);
+            Assert.NotNull(account);
+            Assert.Equal(AccountLifecycle.Connecting, account.Lifecycle);
+            Assert.Equal("existing-secret", (await custody.GetBundleAsync(account.CredentialRef)).AccessToken);
         }
         finally
         {
@@ -218,6 +280,7 @@ public sealed class SetupAndCatalogTests
         Assert.Equal("REVIEW_REQUIRED", item.InstallState);
         Assert.False(item.Installed);
         Assert.Equal("MIT", item.License);
+        Assert.Null(item.InspectUrl);
         Assert.Equal(first, second);
         Assert.Equal(1, plugin.Calls);
     }
@@ -252,17 +315,41 @@ public sealed class SetupAndCatalogTests
                     "https://code.example/homeassistant-ai/ha-mcp",
                     "main",
                     "MIT",
-                    "UNTRUSTED",
+                    "BUILT_IN",
                     ["Home Assistant MCP server"],
                     [],
-                    "SERVER_REVIEW_REQUIRED",
-                    "REVIEW_REQUIRED",
-                    false,
-                    "https://code.example/homeassistant-ai/ha-mcp")
+                    "SERVER_INSTALLED",
+                    "INSTALLED",
+                    true,
+                    "http://127.0.0.1/admin")
             ];
             return Task.FromResult(items);
         }
     }
+
+    private static TesseraConfig ModelConfig()
+        => new()
+        {
+            ModelGateways = new ModelGatewayOptions
+            {
+                Enabled = true,
+                Endpoints = [new ModelGatewayEndpointOptions
+                {
+                    Id = "homelab",
+                    DisplayName = "Homelab LiteLLM",
+                    Endpoint = "http://litellm.test/v1",
+                    AutoConnect = true,
+                    DefaultModel = "claude-haiku-4.5",
+                    DefaultContextLimit = 200_000,
+                    CredentialEnvironmentVariable = "TESSERA_LITELLM_MASTER_KEY",
+                }],
+                AllowPlainHttp = true,
+            },
+        };
+
+    private static string StableId(string owner, string kind, string value)
+        => Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes($"{owner}\n{kind}\n{value}")));
 
     private sealed class DelegateTransport(
         Func<string, string, TransportResponse> response) : IHttpTransport

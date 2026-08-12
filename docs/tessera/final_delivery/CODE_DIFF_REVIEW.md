@@ -4,14 +4,14 @@ Comparison baseline: `611af03`.
 
 | Class | Change | Review |
 |---|---|---|
-| server/core | stable `serverIdentity`, strict validation, public cache-disabled descriptor, assembly-derived version | additive; no schema/data/provider change |
-| plugins/MCP | no provider implementation changes | boundary preserved |
-| Web | R2 types/problem/idempotency transport moved to `@tessera/client`; existing auth/origin injected | focused 4/4 tests and production build pass |
-| macOS | no Electron-native change; packaged renderer consumes the rebuilt shared Web bundle | requires repack only after deployed release |
+| server/core | stable `serverIdentity`, strict validation, public cache-disabled descriptor, setup/bootstrap and provider-neutral catalog projection | additive; no schema migration |
+| plugins/MCP | provider-owned setup descriptors and public repository catalog adapter | provider endpoints/parsing stay outside Core/Broker; public metadata centrally downgraded |
+| Web | shared client adoption, automatic Setup, truthful integration readiness and searchable Plugins | 105 unit and 42 desktop/phone E2E pass; Setup/Search stories build |
+| macOS | no Electron-native change; packaged renderer consumes the rebuilt shared Web bundle | repackaged, installed and renderer-ready smoke passes |
 | iOS | new Expo SDK 57 native client: five tabs, OIDC PKCE, Keychain refresh/fence, app lock, resumable SSE, Jobs, Accounts/connect, Plugins, Memory/Why, Activity, exact Action review, diagnostics, allowlisted deep links | TS clean; Expo Doctor 20/20; CocoaPods; Debug+Release build; standalone render/restart |
-| deployment | stable Tessera Home UUID added to K8s config; example retains an invalid all-zero sentinel | render/validate before release; not applied |
-| security | TLS+UUID route trust, no auth before verification, bounded descriptor, safe failover, no unkeyed mutation replay | 8 shared route tests pass |
-| tests | Core/Broker descriptor tests, empty UUID, route/browser transport, timeout/race/fence/navigation suites | Core 23/23, Broker 6/6, shared client 19/19 |
+| deployment | public K8s identity remains fail-closed; standalone example uses an allowlisted non-zero placeholder; private GitOps owns the real UUID | public 7/7 schema-valid; private rollout prepared, not yet applied |
+| security | TLS+UUID route trust, no auth before verification, bounded responses, safe failover, keyed/serialized setup, central catalog downgrade | shared 19/19 plus concurrent bootstrap/malicious catalog regressions |
+| tests | full backend/plugin/architecture, shared routing, Web, native Release, Electron and deployment suites | backend 780, shared 19, Web 105 + E2E 42; all current gates pass |
 | docs | ADR 0034, contracts, snapshot and final diff set | no secret/PII evidence |
 
 The change adds no database migration, provider-specific Broker capability, client scheduler, client canonical database, arbitrary endpoint editor, certificate bypass, WebView, or offline mutation queue.

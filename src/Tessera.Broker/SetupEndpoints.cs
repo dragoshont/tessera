@@ -58,6 +58,8 @@ internal static class SetupEndpoints
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (boundary.Error is not null) return boundary.Error;
+                if (!TryIdempotencyKey(context))
+                    return Problem(StatusCodes.Status400BadRequest, "invalid_idempotency_key");
                 try
                 {
                     await services.GetRequiredService<ModelGatewayBootstrapService>()
@@ -222,6 +224,13 @@ internal static class SetupEndpoints
             statusCode: status,
             title: code,
             extensions: new Dictionary<string, object?> { ["code"] = code });
+
+    private static bool TryIdempotencyKey(HttpContext context)
+    {
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        return key is { Length: > 0 and <= 128 }
+            && key.All(character => character is >= '!' and <= '~');
+    }
 
     private sealed record Boundary(string? Owner, IResult? Error);
 }

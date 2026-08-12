@@ -22,7 +22,7 @@ export default function SettingsScreen() {
     try {
       const value = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowBadge: true, allowSound: false } })
       setNotificationStatus(value.status)
-      if (value.granted) await Notifications.scheduleNotificationAsync({ content: { title: 'Tessera notifications ready', body: 'Action and Job links will open directly in Tessera.', data: { url: '/(tabs)/more' } }, trigger: null })
+      if (value.granted) await Notifications.scheduleNotificationAsync({ content: { title: 'Tessera test notification', body: 'Local notifications work on this device.', data: { url: '/settings' } }, trigger: null })
     } finally { setBusy(false) }
   }
   const confirmSignOut = () => Alert.alert('Sign out of Tessera?', 'This removes the session from Keychain. Server-side Jobs and canonical data are not affected.', [{ text: 'Stay signed in', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: () => void session.signOut() }])
@@ -46,7 +46,7 @@ export default function SettingsScreen() {
         <DiagnosticRow label="Role" value={session.principal?.role ?? 'Unknown'} />
       </Card>
       <SectionTitle>Notifications</SectionTitle>
-      <Card><View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>Action and Job alerts</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>Permission: {notificationStatus}</Text></View><Status value={notificationStatus} /></View><Button label="Enable notifications" icon="bell.badge" busy={busy} onPress={() => void requestNotifications()} /></Card>
+      <Card><View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>Local notification test</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>Permission: {notificationStatus}</Text></View><Status value={notificationStatus} /></View><Button label="Send test notification" icon="bell.badge" busy={busy} onPress={() => void requestNotifications()} /></Card>
       <SectionTitle>Session</SectionTitle>
       <Button label="Sign out" icon="rectangle.portrait.and.arrow.right" tone="danger" onPress={confirmSignOut} />
     </ScrollView>

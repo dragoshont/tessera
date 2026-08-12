@@ -52,7 +52,7 @@ spec:
             matchExpressions:
               - key: app
                 operator: In
-                values: [reginamaria-mcp, reginamaria-mcp-manuela]
+                values: [reginamaria-mcp, reginamaria-mcp-secondary]
       ports:
         - { port: 8080, protocol: TCP }
     - to:

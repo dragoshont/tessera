@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -26,23 +27,86 @@ internal sealed class ModelGatewayBootstrapService(
     IHttpTransport transport,
     Func<string, string?> environment)
 {
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _ownerGates = new(StringComparer.Ordinal);
+
     public async Task<ModelGatewaySetupState> GetStateAsync(
+        string owner,
+        CancellationToken cancellationToken)
+    {
+        var ownerGate = _ownerGates.GetOrAdd(owner, _ => new SemaphoreSlim(1, 1));
+        await ownerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await GetStateCoreAsync(owner, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ownerGate.Release();
+        }
+    }
+
+    private async Task<ModelGatewaySetupState> GetStateCoreAsync(
         string owner,
         CancellationToken cancellationToken)
     {
         var profiles = await store.ListModelProfilesAsync(owner, cancellationToken)
             .ConfigureAwait(false);
         var configured = profiles.FirstOrDefault(profile => profile.Enabled);
-        if (configured is not null)
-            return new(
-                "CONNECTED",
-                GatewayId(configured),
-                configured.AdapterKind,
-                configured.Model,
-                configured.ProfileId,
-                null);
-
         var gateway = AutoGateway();
+        if (configured is not null)
+        {
+            if (gateway is not null
+                && configured.ProfileId == StableId(owner, "model-profile", $"{gateway.Id}\n{gateway.DefaultModel}")
+                && !Matches(configured, gateway, StableId(owner, "model-account", gateway.Id)))
+                return new(
+                    "DEGRADED",
+                    gateway.Id,
+                    gateway.DisplayName,
+                    gateway.DefaultModel,
+                    configured.ProfileId,
+                    "gateway_binding_conflict");
+            var account = await store.GetConnectedAccountAsync(owner, configured.AccountId, cancellationToken)
+                .ConfigureAwait(false);
+            if (account is not null
+                && account.Lifecycle == AccountLifecycle.Connected
+                && account.Health == AccountHealth.Healthy)
+            {
+                try
+                {
+                    var credentialRef = R2ConnectedAccountService.ValidateCredentialRef(account);
+                    var bundle = await custody.GetBundleAsync(credentialRef, cancellationToken).ConfigureAwait(false);
+                    if (!bundle.IsEmpty)
+                        return new(
+                            "CONNECTED",
+                            GatewayId(configured),
+                            configured.AdapterKind,
+                            configured.Model,
+                            configured.ProfileId,
+                            null);
+                }
+                catch (InvalidDataException)
+                {
+                    return new(
+                        "DEGRADED",
+                        GatewayId(configured),
+                        configured.AdapterKind,
+                        configured.Model,
+                        configured.ProfileId,
+                        "model_gateway_credential_ref_invalid");
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    return new(
+                        "DEGRADED",
+                        GatewayId(configured),
+                        configured.AdapterKind,
+                        configured.Model,
+                        configured.ProfileId,
+                        "model_gateway_custody_unavailable");
+                }
+            }
+        }
+
         if (gateway is null)
             return new("CONFIGURATION_REQUIRED", null, null, null, null, "model_gateway_not_configured");
         var secret = environment(gateway.CredentialEnvironmentVariable);
@@ -60,14 +124,30 @@ internal sealed class ModelGatewayBootstrapService(
                 gateway.DisplayName,
                 gateway.DefaultModel,
                 null,
-                null);
+                configured is null ? null : "model_profile_repair_required");
     }
 
     public async Task<ModelGatewaySetupState> BootstrapAsync(
         string owner,
         CancellationToken cancellationToken)
     {
-        var current = await GetStateAsync(owner, cancellationToken).ConfigureAwait(false);
+        var ownerGate = _ownerGates.GetOrAdd(owner, _ => new SemaphoreSlim(1, 1));
+        await ownerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await BootstrapCoreAsync(owner, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ownerGate.Release();
+        }
+    }
+
+    private async Task<ModelGatewaySetupState> BootstrapCoreAsync(
+        string owner,
+        CancellationToken cancellationToken)
+    {
+        var current = await GetStateCoreAsync(owner, cancellationToken).ConfigureAwait(false);
         if (current.State == "CONNECTED") return current;
         var gateway = AutoGateway()
             ?? throw new InvalidOperationException("model_gateway_not_configured");
@@ -122,6 +202,9 @@ internal sealed class ModelGatewayBootstrapService(
         {
             if (!string.Equals(account.NonSecretConfigJson, configuration, StringComparison.Ordinal))
                 throw new InvalidOperationException("gateway_binding_conflict");
+            if (account.Lifecycle == AccountLifecycle.Revoked)
+                throw new InvalidOperationException("gateway_binding_conflict");
+            _ = R2ConnectedAccountService.ValidateCredentialRef(account);
             await writer.PutBundleAsync(
                     credentialRef,
                     new CredentialBundle(AccessToken: secret),
@@ -165,6 +248,14 @@ internal sealed class ModelGatewayBootstrapService(
                         1),
                     cancellationToken)
                 .ConfigureAwait(false);
+        }
+        else if (!Matches(profile, gateway, accountId))
+        {
+            throw new InvalidOperationException("gateway_binding_conflict");
+        }
+        else if (!profile.Enabled)
+        {
+            throw new InvalidOperationException("model_profile_disabled");
         }
 
         var settings = await store.GetSettingsAsync(owner, cancellationToken).ConfigureAwait(false);
@@ -213,4 +304,14 @@ internal sealed class ModelGatewayBootstrapService(
     private static string StableId(string owner, string kind, string value)
         => Convert.ToHexStringLower(
             SHA256.HashData(Encoding.UTF8.GetBytes($"{owner}\n{kind}\n{value}")));
+
+    private static bool Matches(
+        ModelProfile profile,
+        ModelGatewayEndpointOptions gateway,
+        string accountId)
+        => profile.AccountId == accountId
+            && profile.AdapterKind == "openai-compatible-local"
+            && profile.Endpoint == gateway.Endpoint
+            && profile.Model == gateway.DefaultModel
+            && profile.ContextLimit == gateway.DefaultContextLimit;
 }

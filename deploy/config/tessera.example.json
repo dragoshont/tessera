@@ -1,7 +1,7 @@
 {
   "server": { "host": "0.0.0.0", "port": 8080 },
   "serverIdentity": {
-    "id": "00000000-0000-0000-0000-000000000000",
+    "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     "displayName": "Tessera Home",
     "apiVersion": "v1",
     "protocolVersion": 1

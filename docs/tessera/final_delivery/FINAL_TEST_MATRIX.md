@@ -2,7 +2,7 @@
 
 | Lane | Current result |
 |---|---|
-| Backend | 779 PASS |
+| Backend | 780 PASS |
 | Shared TypeScript client | 19 PASS |
 | Web unit/build | 105 PASS; production build PASS |
 | iOS typecheck / Expo Doctor | PASS; 20/20 |

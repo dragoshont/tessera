@@ -10,7 +10,7 @@ Pre-cutover state. `CONNECTED` is never inferred from configuration alone.
 | Gmail account | No persisted account at audit | None | Connect required | Existing OAuth flow remains canonical |
 | Regina Maria MCP | Yes; two isolated connectors healthy | Plugin installed, no canonical accounts | Runtime Ready | Setup descriptor derives actual host configuration |
 | My Regina Maria | Connector exists; account authorization not inferred | None | Connect/Reauthenticate | Per-account provider flow creates canonical state only after verification |
-| Wife Regina Maria | Separate connector exists; no consent inferred | None | `NOT_CONNECTED`/auth checkpoint | Preserve isolated authorization and credential custody |
+| Secondary Regina Maria account | Separate connector exists; no consent inferred | None | `NOT_CONNECTED`/auth checkpoint | Preserve isolated authorization and credential custody |
 | Cloudflare Tunnel | Existing platform tunnel; no Tessera hostname at audit | N/A | Route missing | Private GitOps ingress plus managed hostname cutover |
 
 The existing LiteLLM key is migrated to Azure Key Vault and projected through External Secrets without storing or printing it. Provider secrets never enter the product database or these audit artifacts.
