@@ -1,16 +1,23 @@
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 
 const root = path.resolve(__dirname, '../..')
 const packaged = process.env.TESSERA_PACKAGED_APP
 
 test('real Electron shell launches with hardened renderer and narrow bridge', async () => {
-  const application = await electron.launch(
-    packaged
-      ? { executablePath: packaged }
-      : { args: [root], cwd: root },
-  )
+  const userData = await mkdtemp(path.join(os.tmpdir(), 'tessera-electron-test-'))
+  let application: ElectronApplication | undefined
   try {
+    const launchOptions = {
+      env: { ...process.env, TESSERA_ELECTRON_TEST_USER_DATA: userData },
+    }
+    application = await electron.launch(
+      packaged
+        ? { ...launchOptions, executablePath: packaged }
+        : { ...launchOptions, args: [root], cwd: root },
+    )
     const window = await application.firstWindow()
     await expect(window).toHaveTitle('Tessera')
     const renderer = await window.evaluate(() => ({
@@ -45,6 +52,7 @@ test('real Electron shell launches with hardened renderer and narrow bridge', as
       webviewTag: false,
     })
   } finally {
-    await application.close()
+    await application?.close()
+    await rm(userData, { recursive: true, force: true })
   }
 })

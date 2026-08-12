@@ -41,6 +41,8 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
+const testUserData = process.env.TESSERA_ELECTRON_TEST_USER_DATA
+if (testUserData) app.setPath('userData', testUserData)
 if (!app.requestSingleInstanceLock()) app.quit()
 
 let mainWindow: BrowserWindow | null = null
@@ -59,7 +61,7 @@ app.on('second-instance', (_event, argv) => {
 
 void app.whenReady().then(async () => {
   app.setName('Tessera')
-  app.setAsDefaultProtocolClient('tessera')
+  if (!testUserData) app.setAsDefaultProtocolClient('tessera')
   authStore = new AuthStore()
   oidc = new OidcCoordinator(authStore)
   registerAppProtocol(path.join(__dirname, '..', 'renderer'))
