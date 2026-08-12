@@ -1,3 +1,3 @@
 # Final Backup and Restore
 
-The deployed CronJob produced `/backup/tessera-product-20260812T030117Z.db`; verification reported integrity OK and schema v15. The backup and live database persisted through a full Deployment restart. Off-node restic coverage includes the host root, but a fresh snapshot and isolated execution-disabled restore remain pending. Pending or unknown Actions must not replay provider writes.
+The final deployed CronJob produced `/backup/tessera-product-20260812T035604Z.db`; verification reported integrity OK and schema v15. The backup and live database persisted through a full Deployment restart. Off-node restic coverage includes the host root, but a fresh snapshot and isolated execution-disabled restore remain pending. Pending or unknown Actions must not replay provider writes.

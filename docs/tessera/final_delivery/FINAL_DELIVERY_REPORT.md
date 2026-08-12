@@ -7,9 +7,10 @@ Repository Web/Desktop implementation, private GitOps deployment, persistence, b
 Actual current values:
 
 - Deployed URL: `https://tessera.hont.ro`
-- Deployed image: `sha256:3545c49d83a5aa43c3ab013bed2d804d0e31d8bfbe4f9c2428efc4f80da64c57`
-- Backend source: `f9ff112`, schema v15
-- Homelab GitOps: `fb60061`, Flux Ready
+- Deployed image: `sha256:582231318e739de0ab6141027209a4140b17c55e1123c79bd87ef117b4c10e91`
+- Backend source: `f869d76`, schema v15
+- RM image: v0.5.38 / `sha256:b51b7f13670bb1018b69fb335b176716b320122b82c200358bef78922035217a`
+- Homelab GitOps: `1a584f8`, Flux Ready
 - Desktop: Alpha 0.1.0
 - Desktop artifacts: `desktop/release/Tessera-Alpha-0.1.0-arm64.{dmg,zip}`
 - Installed app: `/Applications/Tessera.app`
