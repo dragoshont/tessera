@@ -1,3 +1,3 @@
 # Regina Maria E2E
 
-Mode: `REUSE_LOCAL_MCP`, pinned server contract `reginamaria-mcp/0.5.36`. Both isolated deployments are healthy and reachable from Tessera. Both rolled cleanly with the Key Vault-backed exact-action token configured; no token value was exposed. User/wife ConnectedAccounts remain separate, and account B still requires its holder's independent login/MFA. Real owner-authorized reads and Action execution remain pending.
+Mode: `REUSE_LOCAL_MCP`, pinned server contract `reginamaria-mcp/0.5.37`. The release requires both the operator mutation switch and Tessera's exact-action token before any provider write. Both isolated deployments are configured through Key Vault; no token value is exposed. User/wife ConnectedAccounts remain separate, and account B still requires its holder's independent login/MFA. Post-rollout no-token rejection and real owner-authorized reads remain required.

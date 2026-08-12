@@ -2,7 +2,7 @@
 
 ## Regina Maria MCP
 
-- Source: local `reginamaria-mcp`; Apache-2.0; base commit `697a2a052a6b3e5fd2fb92680cd87b624ab07373`; working tree currently dirty.
+- Source: private local `reginamaria-mcp`; Apache-2.0; v0.5.37 tag at clean commit `a2ce5b4`.
 - Transport: Streamable HTTP; one account/session per deployment.
 - Credentials: RM session, APIM app value, optional Key Vault; mutation action token.
 - Network: RM API/site plus configured identity/secret endpoints.
