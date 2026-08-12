@@ -165,9 +165,10 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
         var forbidden = await _client.SendAsync(As(Member, HttpMethod.Get, $"/portal/connections?principal={Admin}"));
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
 
-        // …but an operator can.
-        var ok = await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/connections?principal={Member}"));
-        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        // Operators also need the owner's canonical identity; display-name admin
+        // status does not grant cross-person personal-data access.
+        var operatorAttempt = await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/connections?principal={Member}"));
+        Assert.Equal(HttpStatusCode.Forbidden, operatorAttempt.StatusCode);
     }
 
     [Fact]
@@ -196,6 +197,16 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Continuity_fails_closed_when_local_storage_is_not_configured()
+    {
+        var response = await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/continuity/follow-ups"));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("continuity_unavailable", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task Recipes_list_the_providers_for_the_wizard()
     {
         using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/recipes"))).Content.ReadAsStringAsync());
@@ -204,26 +215,17 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Adding_a_connection_makes_a_new_person_and_connection_appear()
+    public async Task Adding_a_self_owned_connection_appears_immediately()
     {
-        // The "add a person to the portal" path: an operator connects a new person
-        // (carol) to a provider. She wasn't in any grant/binding before.
-        const string newPerson = "carol@example.com";
         var add = await _client.SendAsync(AsJson(Admin, HttpMethod.Post, "/portal/connections",
-            new { provider = "health-portal", principal = newPerson, credential = "hp-carol" }));
+            new { provider = "health-portal", principal = Admin }));
         Assert.Equal(HttpStatusCode.Created, add.StatusCode);
 
         using var created = JsonDocument.Parse(await add.Content.ReadAsStringAsync());
-        Assert.Equal($"health-portal:{newPerson}", created.RootElement.GetProperty("connectionId").GetString());
-        // No bundle for hp-carol yet → honestly "absent", not faked live.
+        Assert.Equal($"health-portal:{Admin}", created.RootElement.GetProperty("connectionId").GetString());
         Assert.Equal("absent", created.RootElement.GetProperty("status").GetString());
 
-        // She now shows up in the Users view …
-        using var people = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, "/portal/people"))).Content.ReadAsStringAsync());
-        Assert.Contains(people.RootElement.EnumerateArray(), p => p.GetProperty("principal").GetString() == newPerson);
-
-        // … and her connection is listable.
-        using var conns = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/connections?principal={newPerson}"))).Content.ReadAsStringAsync());
+        using var conns = JsonDocument.Parse(await (await _client.SendAsync(As(Admin, HttpMethod.Get, $"/portal/connections?principal={Admin}"))).Content.ReadAsStringAsync());
         Assert.Contains(conns.RootElement.EnumerateArray(), c => c.GetProperty("provider").GetString() == "health-portal");
     }
 
@@ -243,15 +245,15 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
     [Fact]
     public async Task Adding_a_connection_persists_to_the_policy_document()
     {
-        const string newPerson = "dave@example.com";
         var add = await _client.SendAsync(AsJson(Admin, HttpMethod.Post, "/portal/connections",
-            new { provider = "health-portal", principal = newPerson, credential = "hp-dave" }));
+            new { provider = "health-portal", principal = Admin, credential = "attacker-selected-key" }));
         Assert.Equal(HttpStatusCode.Created, add.StatusCode);
 
         // Files stay the source of truth: the binding is written back to grants.json.
         var doc = await File.ReadAllTextAsync(Path.Combine(_dir, "grants.json"));
-        Assert.Contains("hp-dave", doc, StringComparison.Ordinal);
-        Assert.Contains(newPerson, doc, StringComparison.Ordinal);
+        Assert.DoesNotContain("attacker-selected-key", doc, StringComparison.Ordinal);
+        Assert.Contains("tessera-ref-", doc, StringComparison.Ordinal);
+        Assert.Contains(Admin, doc, StringComparison.Ordinal);
 
         // The recipe's rotation descriptor must survive the persist round-trip
         // (ToDocument), or a reload would silently lose "who owns rotation".
@@ -263,7 +265,15 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
     public async Task A_member_cannot_add_a_connection_for_someone_else()
     {
         var response = await _client.SendAsync(AsJson(Member, HttpMethod.Post, "/portal/connections",
-            new { provider = "health-portal", principal = Admin, credential = "hp-x" }));
+            new { provider = "health-portal", principal = Admin }));
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task An_admin_cannot_manufacture_another_users_canonical_binding()
+    {
+        var response = await _client.SendAsync(AsJson(Admin, HttpMethod.Post, "/portal/connections",
+            new { provider = "health-portal", principal = Member }));
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
@@ -271,7 +281,7 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
     public async Task A_member_can_add_their_own_connection()
     {
         var response = await _client.SendAsync(AsJson(Member, HttpMethod.Post, "/portal/connections",
-            new { provider = "health-portal", principal = Member, credential = "hp-bob-2" }));
+            new { provider = "health-portal", principal = Member }));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
@@ -282,7 +292,7 @@ public sealed class PortalEndpointsTests : IAsyncLifetime
     {
         // The member seeds their own login → a consent receipt is recorded.
         var add = await _client.SendAsync(AsJson(Member, HttpMethod.Post, "/portal/connections",
-            new { provider = "health-portal", principal = Member, credential = "hp-bob-consent" }));
+            new { provider = "health-portal", principal = Member }));
         Assert.Equal(HttpStatusCode.Created, add.StatusCode);
 
         using var doc = JsonDocument.Parse(await (await _client.SendAsync(As(Member, HttpMethod.Get, "/portal/consents"))).Content.ReadAsStringAsync());

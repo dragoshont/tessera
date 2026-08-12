@@ -1,0 +1,34 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "20260810-r2-usable-alpha",
+  "status": "passed",
+  "startedAt": "2026-08-10T09:02:20Z",
+  "phases": [
+    { "phase": 1, "name": "Contracts and persistence", "status": "completed", "result": "PASS: dual proposal judges; SQLite 33/33; run validation" },
+    { "phase": 2, "name": "Accounts, plugins, model and GitHub", "status": "completed", "result": "PASS: adapters 4/4; registry 4/4; custody 1/1; live external blocked by configuration" },
+    { "phase": 3, "name": "Coordinator and approvals", "status": "completed", "result": "PASS: Core 335/335; coordinator 1/1" },
+    { "phase": 4, "name": "Chat, context, memory and SSE", "status": "completed", "result": "PASS: async queue, Stop/SSE, retry/restart, tool loop and reviewed Memory" },
+    { "phase": 5, "name": "Jobs and scheduler", "status": "completed", "result": "PASS backend: approval continuation, reconciliation, dispatch dependency checks, and hosted scheduling" },
+    { "phase": 6, "name": "Product API and UI", "status": "completed", "result": "PASS: web 100, lint/build/Storybook, Playwright 26" },
+    { "phase": 7, "name": "Security and architecture remediation", "status": "completed", "result": "PASS deterministic: atomic dispatch, DLP, recovery, custody and plugin integrity" },
+    { "phase": 8, "name": "Reliability and final adversaries", "status": "completed", "result": "Backend 672, web 100, browser 26 and all deterministic gates PASS; Product/Architecture/Security PASS; live providers BLOCKED_EXTERNAL" }
+  ],
+  "completedAt": "2026-08-10T19:10:00Z",
+  "artifacts": {
+    "intake": ".architrave/runs/20260810-r2-usable-alpha/intake.md",
+    "tournament": ".architrave/runs/20260810-r2-usable-alpha/tournament.md",
+    "recommendedPlan": ".architrave/runs/20260810-r2-usable-alpha/recommended-plan.md",
+    "phaseLedger": ".architrave/runs/20260810-r2-usable-alpha/phase-ledger.md",
+    "deterministicGates": ".architrave/runs/20260810-r2-usable-alpha/deterministic-gates.md",
+    "judgePre": ".architrave/runs/20260810-r2-usable-alpha/judge-pre.md",
+    "judgePost": ".architrave/runs/20260810-r2-usable-alpha/judge-post.md",
+    "runtimeObserver": ".architrave/runs/20260810-r2-usable-alpha/runtime-observer.md"
+    ,"phase6ContractMatrix": ".architrave/runs/20260810-r2-usable-alpha/phase6-contract-matrix.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 0,
+    "promotionsProposed": 0
+  }
+}

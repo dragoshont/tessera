@@ -14,7 +14,8 @@ test('accounts view shows honest health — Unverified, never a false Live', asy
   await page.goto('/')
   await page.getByLabel('Developer sign-in (local only)').fill('alice@example.com')
   await page.getByRole('button', { name: /continue/i }).click()
-  await expect(page).toHaveURL(/\/accounts$/)
+  await expect(page).toHaveURL(/\/chat$/)
+  await page.goto('/settings/admin/legacy-accounts')
 
   // The honest state is shown: present-but-unverified -> amber "Unverified".
   await expect(page.getByLabel('Health: Unverified').first()).toBeVisible()

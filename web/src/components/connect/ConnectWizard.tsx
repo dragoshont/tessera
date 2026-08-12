@@ -3,8 +3,6 @@ import {
   ArrowRight,
   Check,
   ChevronLeft,
-  Info,
-  KeyRound,
   RotateCw,
   Search,
   X,
@@ -29,9 +27,9 @@ import { ProviderIcon } from '../common/ProviderIcon'
 
 // The connect-account wizard: one decision per step, resumable-friendly. The
 // component is presentational — it takes recipes + the signed-in identity and a
-// pair of async actions (seed attempt, create) and drives the 5 steps. Stories
+// pair of async actions (seed attempt, create) and drives the 4 steps. Stories
 // inject `initialState` to render any step/seed/error without a backend.
-export type WizardStep = 'provider' | 'person' | 'credential' | 'seed' | 'finish'
+export type WizardStep = 'provider' | 'person' | 'seed' | 'finish'
 
 interface WizardDraft {
   /** Provider slug the broker keys on (e.g. "health"). */
@@ -40,8 +38,6 @@ interface WizardDraft {
   displayName: string
   /** The principal the connection acts as. */
   principal: string
-  /** The NAME of the vault secret holding the session bundle — never a value. */
-  credential: string
 }
 
 type SeedPhase = 'idle' | 'loading' | 'unavailable' | 'ready'
@@ -86,7 +82,6 @@ export interface ConnectWizardProps {
 const STEPS: { key: WizardStep; label: string }[] = [
   { key: 'provider', label: 'Provider' },
   { key: 'person', label: 'Person' },
-  { key: 'credential', label: 'Credential' },
   { key: 'seed', label: 'Seed' },
   { key: 'finish', label: 'Finish' },
 ]
@@ -100,7 +95,24 @@ function readPersisted(key: string): PersistedDraft | null {
   if (typeof window === 'undefined') return null
   try {
     const raw = window.sessionStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as PersistedDraft) : null
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as {
+      step?: string
+      draft?: Partial<WizardDraft> & { credential?: string }
+    }
+    const step = parsed.step === 'credential'
+      ? 'seed'
+      : STEPS.some((entry) => entry.key === parsed.step)
+        ? parsed.step as WizardStep
+        : 'provider'
+    return {
+      step,
+      draft: {
+        provider: parsed.draft?.provider ?? '',
+        displayName: parsed.draft?.displayName ?? '',
+        principal: parsed.draft?.principal ?? '',
+      },
+    }
   } catch {
     return null
   }
@@ -168,8 +180,6 @@ export function ConnectWizard({
   recipesError = false,
   onRetryRecipes,
   currentPrincipal,
-  isAdmin,
-  people,
   requestSeed,
   createConnection,
   onCreated,
@@ -189,10 +199,9 @@ export function ConnectWizard({
   const [draft, setDraft] = useState<WizardDraft>({
     provider: '',
     displayName: '',
-    principal: currentPrincipal,
-    credential: '',
     ...persisted?.draft,
     ...initialState?.draft,
+    principal: initialState?.draft?.principal ?? currentPrincipal,
   })
   const [seed, setSeed] = useState<SeedState>(initialState?.seed ?? { phase: 'idle' })
   const [submitting, setSubmitting] = useState(false)
@@ -207,9 +216,6 @@ export function ConnectWizard({
 
   const connectionId = `${draft.provider}:${draft.principal}`
   const isSelf = draft.principal.trim() === currentPrincipal
-  const localPart = (draft.principal.split('@')[0] || 'user').replace(/[^a-z0-9]+/gi, '-')
-  const credentialSuggestion = draft.provider ? `${draft.provider}-${localPart}-session` : ''
-
   const filteredRecipes = useMemo(() => {
     const query = search.trim().toLowerCase()
     if (!query) return recipes
@@ -223,7 +229,6 @@ export function ConnectWizard({
   const canAdvance: Record<WizardStep, boolean> = {
     provider: draft.provider !== '',
     person: draft.principal.trim() !== '',
-    credential: draft.credential.trim() !== '',
     seed: true,
     finish: true,
   }
@@ -268,7 +273,6 @@ export function ConnectWizard({
       const connection = await createConnection({
         provider: draft.provider,
         principal: draft.principal.trim(),
-        credential: draft.credential.trim(),
       })
       if (persistKey) clearPersisted(persistKey)
       onCreated(connection)
@@ -320,20 +324,7 @@ export function ConnectWizard({
 
         {step === 'person' ? (
           <PersonStep
-            isAdmin={isAdmin}
-            people={people}
-            currentPrincipal={currentPrincipal}
             principal={draft.principal}
-            isSelf={isSelf}
-            onPrincipal={(principal) => setDraft((current) => ({ ...current, principal }))}
-          />
-        ) : null}
-
-        {step === 'credential' ? (
-          <CredentialStep
-            value={draft.credential}
-            suggestion={credentialSuggestion}
-            onChange={(credential) => setDraft((current) => ({ ...current, credential }))}
           />
         ) : null}
 
@@ -351,7 +342,6 @@ export function ConnectWizard({
             displayName={draft.displayName}
             principal={draft.principal}
             isSelf={isSelf}
-            credential={draft.credential}
             seeded={seed.phase === 'ready'}
             submitError={submitError}
           />
@@ -482,21 +472,10 @@ function ProviderStep({
 }
 
 function PersonStep({
-  isAdmin,
-  people,
-  currentPrincipal,
   principal,
-  isSelf,
-  onPrincipal,
 }: {
-  isAdmin: boolean
-  people?: Person[]
-  currentPrincipal: string
   principal: string
-  isSelf: boolean
-  onPrincipal: (value: string) => void
 }) {
-  const quickPicks = (people ?? []).map((person) => person.principal)
   return (
     <div className="flex flex-col gap-4">
       <div className="space-y-1">
@@ -506,26 +485,9 @@ function PersonStep({
         </p>
       </div>
 
-      {isAdmin && quickPicks.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {quickPicks.map((candidate) => (
-            <Button
-              key={candidate}
-              type="button"
-              size="sm"
-              variant={candidate === principal ? 'default' : 'outline'}
-              onClick={() => onPrincipal(candidate)}
-            >
-              {candidate}
-              {candidate === currentPrincipal ? ' (you)' : ''}
-            </Button>
-          ))}
-        </div>
-      ) : null}
-
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="connect-principal">
-          Person {isSelf ? <span className="text-muted-foreground">(you)</span> : null}
+          Person <span className="text-muted-foreground">(you)</span>
         </Label>
         <Input
           id="connect-principal"
@@ -533,72 +495,12 @@ function PersonStep({
           inputMode="email"
           autoComplete="off"
           value={principal}
-          disabled={!isAdmin}
-          onChange={(event) => onPrincipal(event.target.value)}
-          placeholder="bob@example.com"
+          disabled
         />
         <p className="text-xs text-muted-foreground">
-          {isAdmin
-            ? 'As an admin you can connect an account for another person (e.g. a family member).'
-            : 'Members can only connect their own accounts.'}
+          The account owner must sign in and establish their own canonical identity.
         </p>
       </div>
-    </div>
-  )
-}
-
-function CredentialStep({
-  value,
-  suggestion,
-  onChange,
-}: {
-  value: string
-  suggestion: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="space-y-1">
-        <h2 className="text-base font-medium">Name the stored credential</h2>
-        <p className="text-sm text-muted-foreground">
-          This is the name of the secret in your vault that holds (or will hold) the session
-          bundle — never a password.
-        </p>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="connect-credential">Stored credential name</Label>
-        <div className="flex items-center gap-2">
-          <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-          <Input
-            id="connect-credential"
-            type="text"
-            autoComplete="off"
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder={suggestion || 'health-portal-bob-session'}
-          />
-        </div>
-        {suggestion && value !== suggestion ? (
-          <button
-            type="button"
-            onClick={() => onChange(suggestion)}
-            className="self-start text-xs font-medium text-accent hover:underline"
-          >
-            Use “{suggestion}”
-          </button>
-        ) : null}
-      </div>
-
-      <Alert className="text-left">
-        <AlertDescription className="flex items-start gap-2 text-muted-foreground">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <span>
-            Tessera stores the session in your vault under this name and only ever learns that it's
-            present. <span className="text-foreground">Tessera can't show this — that's the point.</span>
-          </span>
-        </AlertDescription>
-      </Alert>
     </div>
   )
 }
@@ -670,14 +572,12 @@ function FinishStep({
   displayName,
   principal,
   isSelf,
-  credential,
   seeded,
   submitError,
 }: {
   displayName: string
   principal: string
   isSelf: boolean
-  credential: string
   seeded: boolean
   submitError: string | null
 }) {
@@ -693,7 +593,7 @@ function FinishStep({
       <dl className="divide-y divide-border rounded-xl border border-border">
         <SummaryRow term="Provider" detail={displayName || '—'} />
         <SummaryRow term="Person" detail={`${principal}${isSelf ? ' (you)' : ''}`} />
-        <SummaryRow term="Stored credential" detail={credential || '—'} />
+        <SummaryRow term="Credential reference" detail="Allocated securely by Tessera" />
         <SummaryRow
           term="Status after connect"
           detail={seeded ? 'Seeding started — verifying' : 'Absent — seed a session to go live'}

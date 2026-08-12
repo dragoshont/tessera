@@ -36,32 +36,8 @@ function renderWizard(overrides: Partial<ConnectWizardProps> = {}) {
   return props
 }
 
-describe('ConnectWizard — never-reveal invariant', () => {
-  it('the stored-credential field is a name, not a secret value', () => {
-    renderWizard({
-      initialState: {
-        step: 'credential',
-        draft: { provider: 'health', displayName: 'Health Portal', principal: 'bob@example.com' },
-      },
-    })
-
-    const field = screen.getByLabelText('Stored credential name')
-    expect(field).toHaveAttribute('type', 'text')
-    expect(document.querySelectorAll('input[type="password"]')).toHaveLength(0)
-
-    // The never-reveal line is present verbatim.
-    expect(screen.getByText("Tessera can't show this — that's the point.")).toBeInTheDocument()
-
-    // No reveal / copy affordance anywhere.
-    for (const control of screen.queryAllByRole('button')) {
-      const label = (control.getAttribute('aria-label') ?? control.textContent ?? '').toLowerCase()
-      expect(label).not.toMatch(/reveal|show secret|show value|copy|unmask|view value/)
-    }
-  })
-})
-
 describe('ConnectWizard — connect flow', () => {
-  it('walks provider → person → credential → seed → finish and POSTs the binding', async () => {
+  it('walks provider → person → seed → finish without accepting a credential key', async () => {
     const user = userEvent.setup()
     const props = renderWizard()
 
@@ -72,9 +48,6 @@ describe('ConnectWizard — connect flow', () => {
     expect(screen.getByLabelText(/^Person/)).toHaveValue('alice@example.com')
     await user.click(screen.getByRole('button', { name: /next/i }))
 
-    await user.type(screen.getByLabelText('Stored credential name'), 'health-alice-session')
-    await user.click(screen.getByRole('button', { name: /next/i }))
-
     // Seed is the fail-closed normal case; skip and continue.
     await user.click(screen.getByRole('button', { name: /skip — i'll seed later/i }))
 
@@ -83,7 +56,6 @@ describe('ConnectWizard — connect flow', () => {
     expect(props.createConnection).toHaveBeenCalledWith({
       provider: 'health',
       principal: 'alice@example.com',
-      credential: 'health-alice-session',
     })
     expect(props.onCreated).toHaveBeenCalledTimes(1)
   })
@@ -98,7 +70,6 @@ describe('ConnectWizard — connect flow', () => {
           provider: 'health',
           displayName: 'Health Portal',
           principal: 'alice@example.com',
-          credential: 'health-alice-session',
         },
       },
     })
@@ -122,7 +93,7 @@ describe('ConnectWizard — connect flow', () => {
     })
 
     expect(screen.getByLabelText(/^Person/)).toBeDisabled()
-    expect(screen.getByText(/members can only connect their own accounts/i)).toBeInTheDocument()
+    expect(screen.getByText(/account owner must sign in/i)).toBeInTheDocument()
   })
 
   it('surfaces a 403 from the broker as an inline message, not a crash', async () => {
@@ -139,7 +110,6 @@ describe('ConnectWizard — connect flow', () => {
           provider: 'health',
           displayName: 'Health Portal',
           principal: 'carol@example.com',
-          credential: 'health-carol-session',
         },
       },
     })

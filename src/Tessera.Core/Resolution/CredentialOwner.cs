@@ -22,7 +22,7 @@ public enum CredentialOwner
 
     /// <summary>
     /// The person's own login that Tessera holds for them (their medical portal,
-    /// Gmail, Apple). The owner knows it; "never reveal" protects it from agents and
+    /// user-owned external accounts). The owner knows it; "never reveal" protects it from agents and
     /// from other users — not from the owner.
     /// </summary>
     User,

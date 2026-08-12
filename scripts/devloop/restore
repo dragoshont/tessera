@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+BACKUP="${1:-}"
+[[ -n "$BACKUP" ]] || { echo "usage: scripts/devloop/restore BACKUP [DESTINATION]" >&2; exit 2; }
+
+ACTIVE="${TESSERA_PRODUCT_DB_PATH:-$ROOT/.dev/tessera-product.db}"
+DESTINATION="${2:-$ROOT/.dev/restored/tessera-product.db}"
+DOTNET="${DOTNET:-dotnet}"
+mkdir -p "$(dirname "$DESTINATION")"
+
+if [[ "$(cd "$(dirname "$DESTINATION")" 2>/dev/null && pwd)/$(basename "$DESTINATION")" == "$(cd "$(dirname "$ACTIVE")" && pwd)/$(basename "$ACTIVE")" ]]; then
+  echo "restore: refusing the active database path; restore to an isolated path first" >&2
+  echo "restore: verify it, stop Tessera, then replace the database and its -wal/-shm sidecars offline" >&2
+  exit 2
+fi
+
+exec "$DOTNET" run --project "$ROOT/src/Tessera.Cli/Tessera.Cli.csproj" -c Release -- \
+  restore --backup "$BACKUP" --output "$DESTINATION"

@@ -11,8 +11,13 @@ import {
 import type { Person, PortalConfig, SignInError } from '../data/types'
 import { HttpError } from '../api/client'
 import { useTesseraClient } from '../api/hooks'
-import { clearAuthState, getAuthState, setAuthState } from './auth'
+import {
+  clearAuthStateDurable,
+  getAuthState,
+  setAuthStateDurable,
+} from './auth'
 import { beginOidcSignIn, completeOidcSignIn } from './oidc'
+import { isDesktop, signInDesktopOidc } from './runtime'
 
 // The real operator session, backed by GET /portal/config + GET /portal/me.
 //   - loading:       bootstrapping (fetching config, probing /portal/me)
@@ -22,7 +27,7 @@ import { beginOidcSignIn, completeOidcSignIn } from './oidc'
 // auth holder) so a refresh keeps the session and feeds the HTTP client's auth
 // header. The whole app keys off this: admin nav and the identity chip read the
 // real principal + role; never a fixture.
-export type SessionStatus = 'loading' | 'anonymous' | 'authenticated'
+export type SessionStatus = 'loading' | 'anonymous' | 'authenticated' | 'unavailable'
 
 interface SessionContextValue {
   status: SessionStatus
@@ -36,7 +41,7 @@ interface SessionContextValue {
   signInOidc: () => Promise<void>
   /** Finish the OIDC redirect callback: exchange the code, then load /portal/me. */
   completeOidcCallback: () => Promise<void>
-  signOut: () => void
+  signOut: () => Promise<void>
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null)
@@ -90,10 +95,13 @@ export function SessionProvider({
         const me = await client.getCurrentUser()
         setCurrentUser(me)
         setStatus('authenticated')
-      } catch {
-        // A stale/expired credential → drop it and fall back to sign-in, calmly.
-        clearAuthState()
-        setStatus('anonymous')
+      } catch (err) {
+        if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+          await clearAuthStateDurable()
+          setStatus('anonymous')
+        } else {
+          setStatus('unavailable')
+        }
       }
     })()
   }, [client, storyMode])
@@ -110,11 +118,11 @@ export function SessionProvider({
       if (!trimmed) return
       setError(null)
       setSignedOut(false)
-      setAuthState({ kind: 'dev', principal: trimmed })
+      await setAuthStateDurable({ kind: 'dev', principal: trimmed })
       try {
         await loadMe()
       } catch (err) {
-        clearAuthState()
+        await clearAuthStateDurable()
         setStatus('anonymous')
         setError(err instanceof HttpError && err.status === 403 ? 'not-allowed' : 'oidc-failed')
       }
@@ -130,21 +138,27 @@ export function SessionProvider({
       return
     }
     try {
-      await beginOidcSignIn(config.oidc) // navigates away to the IdP
+      if (isDesktop()) {
+        const auth = await signInDesktopOidc(config.oidc)
+        await setAuthStateDurable(auth)
+        await loadMe()
+      } else {
+        await beginOidcSignIn(config.oidc) // navigates away to the IdP
+      }
     } catch {
       setError('oidc-failed')
     }
-  }, [config])
+  }, [config, loadMe])
 
   const completeOidcCallback = useCallback(async () => {
     if (!config?.oidc) throw new Error('OIDC config is not ready')
     const token = await completeOidcSignIn(config.oidc)
-    setAuthState({ kind: 'oidc', token })
+    await setAuthStateDurable({ kind: 'oidc', token })
     await loadMe()
   }, [config, loadMe])
 
-  const signOut = useCallback(() => {
-    clearAuthState()
+  const signOut = useCallback(async () => {
+    await clearAuthStateDurable()
     setCurrentUser(null)
     setStatus('anonymous')
     setSignedOut(true)

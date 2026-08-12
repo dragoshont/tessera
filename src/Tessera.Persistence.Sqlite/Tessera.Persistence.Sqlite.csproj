@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Persistence.Sqlite</RootNamespace>
+    <AssemblyName>Tessera.Persistence.Sqlite</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tessera.Persistence.Sqlite.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Tessera.Core/Tessera.Core.csproj" />
+  </ItemGroup>
+
+</Project>

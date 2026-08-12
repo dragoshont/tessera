@@ -76,7 +76,7 @@ public sealed class TesseraTokenResult
             return null;
         }
 
-        return new EndUserAssertion(subject, Issuer, VerificationMethod.OidcJwt, PreferredUsername);
+        return new EndUserAssertion(subject, Issuer, VerificationMethod.OidcJwt, PreferredUsername, TenantId);
     }
 
     /// <summary>

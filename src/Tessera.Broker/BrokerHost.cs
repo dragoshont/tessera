@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -7,14 +9,20 @@ using Microsoft.Extensions.Logging;
 using Tessera.Core.Audit;
 using Tessera.Core.Broker;
 using Tessera.Core.Configuration;
+using Tessera.Core.Kernel;
 using Tessera.Core.Policy;
 using Tessera.Core.Portal;
+using Tessera.Core.Product;
 using Tessera.Core.Recipes;
 using Tessera.Core.Resolution;
 using Tessera.Core.Stores;
 using Tessera.Broker.Egress;
 using Tessera.Identity;
 using Tessera.Mcp;
+using Tessera.Mcp.Client;
+using Tessera.Persistence.Sqlite;
+using Tessera.Plugin.Abstractions;
+using Tessera.Providers.R2;
 using Tessera.Stores.AzureKeyVault;
 using Yarp.ReverseProxy.Forwarder;
 
@@ -34,6 +42,12 @@ public sealed record BrokerHostOptions
 
     /// <summary>Override the token validator (tests).</summary>
     public ITokenValidator? ValidatorOverride { get; init; }
+
+    /// <summary>Override provider HTTP transport for deterministic tests.</summary>
+    public Tessera.Providers.IHttpTransport? TransportOverride { get; init; }
+
+    /// <summary>Override the fixed internal model-gateway transport (tests only).</summary>
+    public Tessera.Providers.IHttpTransport? InternalTransportOverride { get; init; }
 
     /// <summary>Override the live-view provider (tests) — wire a fake browser worker.</summary>
     public Tessera.Core.Portal.ILiveViewProvider? LiveViewProviderOverride { get; init; }
@@ -56,6 +70,36 @@ public sealed record BrokerHostOptions
 
     /// <summary>Override the environment (tests).</summary>
     public IReadOnlyDictionary<string, string?>? Environment { get; init; }
+
+    /// <summary>
+    /// Explicit local SQLite path for the R1 continuity product slice. Null keeps
+    /// continuity storage uncomposed and its endpoints fail closed with 503.
+    /// </summary>
+    public string? ContinuityDatabasePath { get; init; }
+
+    /// <summary>Enables synthetic R1 source fixtures for deterministic tests only.</summary>
+    public bool EnableContinuityFixtures { get; init; }
+
+    /// <summary>Explicit SQLite path for the R2 product store.</summary>
+    public string? ProductDatabasePath { get; init; }
+
+    /// <summary>Trusted-local plugin package root. Null uses environment/default discovery.</summary>
+    public string? PluginRoot { get; init; }
+
+    /// <summary>SHA-256-pinned trusted plugin catalog path.</summary>
+    public string? PluginCatalogPath { get; init; }
+
+    /// <summary>Directory containing executable first-party plugin assemblies.</summary>
+    public string? PluginModuleRoot { get; init; }
+
+    /// <summary>Operator-owned executable module hash catalog.</summary>
+    public string? PluginModuleCatalogPath { get; init; }
+
+    /// <summary>Optional executable plugin registry override for deterministic tests.</summary>
+    public TesseraPluginRegistry? PluginRegistryOverride { get; init; }
+
+    /// <summary>Optional outbound MCP client override for deterministic tests.</summary>
+    public IMcpClientRuntime? McpClientRuntimeOverride { get; init; }
 }
 
 /// <summary>The broker composition root: config → pipeline → host + endpoints + MCP.</summary>
@@ -147,6 +191,11 @@ public static class BrokerHost
         builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
 
         var services = builder.Services;
+        services.AddCors(options => options.AddPolicy("TesseraDesktop", policy => policy
+            .WithOrigins("app://tessera")
+            .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+            .WithHeaders("Accept", "Authorization", "Content-Type", "Idempotency-Key")
+            .SetPreflightMaxAge(TimeSpan.FromHours(1))));
         services.AddSingleton(config);
         services.AddSingleton(policy);
         services.AddSingleton<IReadOnlyList<Recipe>>(policy.Recipes);
@@ -164,6 +213,77 @@ public static class BrokerHost
         services.AddSingleton(broker);
         services.AddSingleton(validator);
         services.AddSingleton(status);
+        var continuityDatabasePath = options.ContinuityDatabasePath
+            ?? Get(options.Environment, "TESSERA_CONTINUITY_DB_PATH");
+        if (!string.IsNullOrWhiteSpace(continuityDatabasePath))
+        {
+            var continuityStore = new SqliteKernelStore(continuityDatabasePath);
+            await continuityStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            services.AddSingleton<IPrincipalRepository>(continuityStore);
+            services.AddSingleton<IFollowUpRepository>(continuityStore);
+            services.AddSingleton(sp => new FollowUpContinuityService(
+                sp.GetRequiredService<IFollowUpRepository>(),
+                options.EnableContinuityFixtures?new LocalFixtureSourceRecordAdapter():new UnavailableSourceRecordAdapter()));
+        }
+        var productDatabasePath = options.ProductDatabasePath
+            ?? Get(options.Environment, "TESSERA_PRODUCT_DB_PATH");
+        var pluginRegistry = options.PluginRegistryOverride ?? TesseraPluginRegistry.AuthoritativeEmpty;
+        if (!string.IsNullOrWhiteSpace(productDatabasePath))
+        {
+            var productStore = new SqliteKernelStore(productDatabasePath);
+            await productStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            status.ProductConfigured = true;
+            services.AddSingleton(productStore);
+            services.AddSingleton(new R2CursorSigner(RandomNumberGenerator.GetBytes(32)));
+            services.AddSingleton<ICapabilityAvailability>(productStore);
+            var pluginRoot = options.PluginRoot ?? Get(options.Environment, "TESSERA_PLUGIN_ROOT")
+                ?? Path.Combine(AppContext.BaseDirectory, "plugins");
+            if (!Directory.Exists(pluginRoot) && Directory.Exists(Path.GetFullPath("plugins")))
+                pluginRoot = Path.GetFullPath("plugins");
+            var pluginCatalog = options.PluginCatalogPath ?? Get(options.Environment, "TESSERA_PLUGIN_CATALOG")
+                ?? Path.Combine(pluginRoot, "catalog.json");
+            if (Directory.Exists(pluginRoot) && File.Exists(pluginCatalog))
+            {
+                var packageCatalog = new R2PluginCatalog(pluginRoot, pluginCatalog);
+                services.AddSingleton(packageCatalog);
+                if (options.PluginRegistryOverride is null)
+                {
+                    var moduleRoot = options.PluginModuleRoot
+                        ?? Get(options.Environment, "TESSERA_PLUGIN_MODULE_ROOT")
+                        ?? Path.Combine(pluginRoot, "modules");
+                    var moduleCatalog = options.PluginModuleCatalogPath
+                        ?? Get(options.Environment, "TESSERA_PLUGIN_MODULE_CATALOG")
+                        ?? Path.Combine(pluginRoot, "modules.json");
+                    if (File.Exists(moduleCatalog))
+                    {
+                        pluginRegistry = PluginModuleDiscovery.DiscoverArtifacts(
+                            moduleRoot,
+                            PluginModuleDiscovery.LoadArtifactCatalog(moduleCatalog));
+                        packageCatalog.ValidateExecutableModules(pluginRegistry);
+                    }
+                }
+            }
+            services.AddSingleton<IPluginRequestIdentity>(
+                new BrokerPluginRequestIdentity(validator, config, productStore));
+            services.AddSingleton<IPluginAccountRuntime>(
+                new BrokerPluginAccountRuntime(productStore, store, pluginRegistry));
+            var hostConfiguration = new PluginHostConfiguration(
+                options.ConfigPath,
+                name => options.Environment is not null
+                    && options.Environment.TryGetValue(name, out var value)
+                        ? value
+                        : Environment.GetEnvironmentVariable(name));
+            foreach (var hostPlugin in pluginRegistry.ListPlugins().OfType<ITesseraHostPlugin>())
+            {
+                var staged = new ServiceCollection();
+                hostPlugin.ConfigureServices(staged, hostConfiguration);
+                foreach (var descriptor in staged) services.Add(descriptor);
+            }
+            services.AddSingleton<R2ChatExecutionQueue>();
+            services.AddSingleton<R2LiveExecutionEvents>();
+            services.AddHostedService(services=>services.GetRequiredService<R2ChatExecutionQueue>());
+            services.AddHostedService<R2SchedulerService>();
+        }
         // Use-based liveness metadata (ADR 0025 / SDD-01 P4): one shared, non-secret
         // store the egress writes verdicts to and the portal reads them from. In-memory
         // (single replica); a present connection projects as unverified until a real
@@ -187,8 +307,17 @@ public static class BrokerHost
         // Provider egress (ADR 0014): the real HTTP transport + the gateway the MCP
         // surface uses to inject a credential by identity. Disabled (every call
         // refused) until egress.enabled — so deploying never opens an upstream path.
-        var httpTransport = new Egress.HttpClientTransport();
+        var publicHttpTransport = options.TransportOverride ?? new Egress.HttpClientTransport(Tessera.Core.Egress.AddressGuard.PublicOrLoopback);
+        ModelGatewayHttpRuntime? modelGatewayRuntime=null;
+        if(config.ModelGateways.Enabled)modelGatewayRuntime=new(config.ModelGateways,publicHttpTransport,options.InternalTransportOverride,options.TransportOverride is null);
+        var httpTransport=(Tessera.Providers.IHttpTransport?)modelGatewayRuntime??publicHttpTransport;
         services.AddSingleton<Tessera.Providers.IHttpTransport>(httpTransport);
+        services.AddSingleton(pluginRegistry);
+        services.AddSingleton<IMcpClientRuntime>(options.McpClientRuntimeOverride
+            ?? new McpClientRuntime(endpoint => Egress.HttpClientTransport.CreateGuardedHttpClient(
+                endpoint.AllowPrivateNetwork
+                    ? Tessera.Core.Egress.AddressGuard.Default
+                    : Tessera.Core.Egress.AddressGuard.PublicOnly)));
         services.AddSingleton<Tessera.Mcp.IProviderGateway>(sp => BrokerProviderGateway.Build(
             config, pdp, resolver, policy.Recipes, sp.GetRequiredService<Tessera.Providers.IHttpTransport>(), audit,
             // A writable store lets a recipe with absorbSetCookie write a rotated
@@ -283,15 +412,21 @@ public static class BrokerHost
         }
 
         var app = builder.Build();
+        app.UseCors("TesseraDesktop");
         ServePortalSpa(app, config);
         MapEndpoints(app);
         app.MapPortalEndpoints();
+        app.MapContinuityEndpoints();
+        app.MapR2ProductEndpoints();
         app.MapCallerBroker();
         app.MapEgressProxy();
         if (config.OAuthMcp.Enabled)
         {
             app.MapOAuthMcpConnect();
         }
+        app.MapModelGatewayEndpoints();
+        foreach (var hostPlugin in pluginRegistry.ListPlugins().OfType<ITesseraHostPlugin>())
+            hostPlugin.MapEndpoints(app);
         app.MapMcp("/mcp");
 
         // Startup self-test (read-only) — proves the authorize+resolve spine against
@@ -368,15 +503,94 @@ public static class BrokerHost
     {
         app.MapGet("/healthz", () => Results.Json(new { status = "ok" }));
 
-        app.MapGet("/readyz", (BrokerStatus s) =>
-            s.Ready ? Results.Json(new { ready = true }) : Results.Json(new { ready = false }, statusCode: 503));
+        app.MapGet("/readyz", async (BrokerStatus status, IServiceProvider services, CancellationToken token) =>
+        {
+            var product = await GetProductRuntimeStatusAsync(status, services, token).ConfigureAwait(false);
+            var ready = status.Ready && product.Ready;
+            return Results.Json(
+                new { ready, database = product.Database, scheduler = product.Scheduler, modelProvider = product.ModelProvider, pluginRegistry = product.PluginRegistry, accounts = product.Accounts },
+                statusCode: ready ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
+        });
 
-        app.MapGet("/status", (BrokerStatus s) => Results.Json(new StatusResponse(
-            Ready: s.Ready,
-            Store: s.StoreKind,
-            BrokerEndpoint: s.BrokerEndpointEnabled ? "enabled" : "fail-closed",
-            Delegation: s.DelegationEnabled ? "enabled" : "fail-closed (no audience configured)",
-            SelfTest: s.SelfTest)));
+        app.MapGet("/status", async (BrokerStatus status, IServiceProvider services, CancellationToken token) =>
+        {
+            var product = await GetProductRuntimeStatusAsync(status, services, token).ConfigureAwait(false);
+            return Results.Json(new StatusResponse(
+                Ready: status.Ready && product.Ready,
+                Store: status.StoreKind,
+                BrokerEndpoint: status.BrokerEndpointEnabled ? "enabled" : "fail-closed",
+                Delegation: status.DelegationEnabled ? "enabled" : "fail-closed (no audience configured)",
+                SelfTest: status.SelfTest,
+                Database: product.Database,
+                Scheduler: product.Scheduler,
+                ModelProvider: product.ModelProvider,
+                PluginRegistry: product.PluginRegistry,
+                Accounts: product.Accounts,
+                Product: product.Health));
+        });
+    }
+
+    private static async Task<ProductRuntimeStatus> GetProductRuntimeStatusAsync(
+        BrokerStatus status,
+        IServiceProvider services,
+        CancellationToken cancellationToken)
+    {
+        if (!status.ProductConfigured)
+        {
+            var notConfigured = new RuntimeComponentStatus("not-configured", null, null);
+            return new ProductRuntimeStatus(true, notConfigured, notConfigured, notConfigured, notConfigured, notConfigured, null);
+        }
+
+        ProductRuntimeHealth? health = null;
+        RuntimeComponentStatus database;
+        try
+        {
+            var store = services.GetRequiredService<SqliteKernelStore>();
+            health = await store.GetRuntimeHealthAsync(cancellationToken).ConfigureAwait(false);
+            database = new RuntimeComponentStatus("ready", null, DateTimeOffset.UtcNow);
+        }
+        catch (Exception exception) when (exception is SqliteException or InvalidDataException)
+        {
+            database = new RuntimeComponentStatus("unavailable", "database_probe_failed", null);
+        }
+
+        var scheduler = SchedulerStatus(status, DateTimeOffset.UtcNow);
+        var modelProvider = health is null || health.EnabledModelProfiles == 0
+            ? new RuntimeComponentStatus("configuration-required", "model_not_configured", null)
+            : new RuntimeComponentStatus("ready", null, null);
+        var pluginRegistry = health is null || health.EnabledPlugins == 0
+            ? new RuntimeComponentStatus("configuration-required", "plugins_not_installed_for_owner", null)
+            : new RuntimeComponentStatus("ready", null, null);
+        var accounts = health is null || health.ConnectedAccounts == 0
+            ? new RuntimeComponentStatus(health?.AuthRequiredAccounts > 0 ? "auth-required" : "configuration-required",
+                health?.AuthRequiredAccounts > 0 ? "account_auth_required" : "account_not_connected", null)
+            : new RuntimeComponentStatus(health.AuthRequiredAccounts > 0 ? "degraded" : "ready",
+                health.AuthRequiredAccounts > 0 ? "account_auth_required" : null, null);
+        return new ProductRuntimeStatus(
+            database.State == "ready" && scheduler.State == "ready",
+            database,
+            scheduler,
+            modelProvider,
+            pluginRegistry,
+            accounts,
+            health);
+    }
+
+    private static RuntimeComponentStatus SchedulerStatus(BrokerStatus status, DateTimeOffset now)
+    {
+        if (status.SchedulerErrorCode is not null)
+        {
+            return new RuntimeComponentStatus("failed", status.SchedulerErrorCode, status.SchedulerLastSuccess);
+        }
+
+        if (status.SchedulerLastSuccess is null)
+        {
+            return new RuntimeComponentStatus("starting", null, null);
+        }
+
+        return now - status.SchedulerLastSuccess > TimeSpan.FromSeconds(45)
+            ? new RuntimeComponentStatus("stale", "scheduler_heartbeat_stale", status.SchedulerLastSuccess)
+            : new RuntimeComponentStatus("ready", null, status.SchedulerLastSuccess);
     }
 
     /// <summary>
@@ -440,4 +654,22 @@ public sealed record StatusResponse(
     string Store,
     string BrokerEndpoint,
     string Delegation,
-    SelfTestResult? SelfTest);
+    SelfTestResult? SelfTest,
+    RuntimeComponentStatus Database,
+    RuntimeComponentStatus Scheduler,
+    RuntimeComponentStatus ModelProvider,
+    RuntimeComponentStatus PluginRegistry,
+    RuntimeComponentStatus Accounts,
+    ProductRuntimeHealth? Product);
+
+/// <summary>A secret-free runtime component projection.</summary>
+public sealed record RuntimeComponentStatus(string State, string? ErrorCode, DateTimeOffset? LastSuccess);
+
+internal sealed record ProductRuntimeStatus(
+    bool Ready,
+    RuntimeComponentStatus Database,
+    RuntimeComponentStatus Scheduler,
+    RuntimeComponentStatus ModelProvider,
+    RuntimeComponentStatus PluginRegistry,
+    RuntimeComponentStatus Accounts,
+    ProductRuntimeHealth? Health);

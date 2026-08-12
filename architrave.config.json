@@ -8,6 +8,7 @@
     "mcp": "http://localhost:6006/mcp",
     "spec": "docs/ui/tessera-admin-portal-ui-spec.md"
   },
+  "designMap": "docs/ui/tessera-design-map.json",
   "knowledgePack": "web",
   "applyTo": [
     "web/**"
@@ -17,6 +18,23 @@
   "backend": {
     "stack": "dotnet",
     "solution": "Tessera.slnx",
+    "contracts": [
+      "docs/tessera/r2/R2_PRODUCT_SPEC.md",
+      "docs/tessera/r2/R2_API_CONTRACT.md",
+      "docs/tessera/r2/R2_PRODUCT_ARCHITECTURE.md",
+      "docs/tessera/r2/R2_DATA_MODEL.md",
+      "docs/tessera/r2/CHAT_MODEL.md",
+      "docs/tessera/r2/MODEL_PROVIDER_MODEL.md",
+      "docs/tessera/r2/ACCOUNT_MODEL.md",
+      "docs/tessera/r2/PLUGIN_SDK.md",
+      "docs/tessera/r2/CAPABILITY_RUNTIME.md",
+      "docs/tessera/r2/JOB_MODEL.md",
+      "docs/tessera/r2/JOB_SCHEDULER.md",
+      "docs/tessera/r2/MEMORY_IN_CHAT.md",
+      "docs/tessera/r2/ACTION_APPROVAL_UX.md",
+      "docs/tessera/r2/R2_SECURITY_MODEL.md",
+      "docs/tessera/r2/R2_TEST_MATRIX.md"
+    ],
     "architectureDocs": [
       "docs/adr",
       "docs/architecture.md",

@@ -403,6 +403,38 @@ public sealed class PortalServiceTests
     }
 
     [Fact]
+    public async Task Portal_connection_uses_server_reference_and_updates_live_resolver()
+    {
+        var store = new InMemoryCredentialStore();
+        var policy = new LoadedPolicy([], [], [new Recipe("graph-mail", Description: "Mail")]);
+        var resolver = new CredentialResolver(policy.Bindings, store);
+        var portal = new PortalService(policy, resolver, [Admin]);
+        var canonical = Tessera.Core.Kernel.PrincipalRef.Create(
+            "https://issuer.example/v2.0",
+            "tenant-a",
+            Member,
+            Member,
+            DateTimeOffset.UtcNow);
+
+        await portal.AddPortalConnectionAsync("graph-mail", Member, canonical.PrincipalId);
+
+        var request = new Tessera.Core.Model.AccessRequest(
+            new Tessera.Core.Identity.CallerIdentity("portal://tessera", Tessera.Core.Identity.VerificationMethod.Network),
+            "graph-mail",
+            "read:mail.metadata",
+            new Tessera.Core.Identity.EndUserAssertion(
+                Member,
+                "https://issuer.example/v2.0",
+                Tessera.Core.Identity.VerificationMethod.OidcJwt,
+                Member,
+                "tenant-a"));
+        var binding = resolver.BindingFor(request);
+        Assert.NotNull(binding);
+        Assert.StartsWith("tessera-ref-", binding.Credential, StringComparison.Ordinal);
+        Assert.DoesNotContain(Member, binding.Credential, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Dependents_are_derived_from_seeded_guardian_bindings()
     {
         var policy = Policy(

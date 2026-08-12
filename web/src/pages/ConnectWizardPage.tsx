@@ -39,7 +39,7 @@ export function ConnectWizardPage() {
         })
         // Admins adding for someone else land on that person's detail; otherwise My accounts.
         if (isAdmin && connection.ownerPrincipal !== principal) {
-          navigate(`/admin/users/${encodeURIComponent(connection.ownerPrincipal)}`)
+          navigate('/settings/admin/users')
         } else {
           navigate('/accounts')
         }

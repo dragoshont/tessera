@@ -12,6 +12,12 @@ public sealed class TesseraMcpServiceTests
 {
     private const string AliceToken = "alice-token";
     private const string CrawlerToken = "crawler-token";
+    private static readonly string AlicePrincipalId = Tessera.Core.Kernel.PrincipalRef.Create(
+        "https://login.microsoftonline.com/test/v2.0",
+        "test",
+        "oid-alice",
+        "alice@example.com",
+        DateTimeOffset.UnixEpoch).PrincipalId;
 
     private static TesseraMcpService Build(ITokenValidator validator)
     {
@@ -20,12 +26,16 @@ public sealed class TesseraMcpServiceTests
 
         var grants = new[]
         {
-            new Grant("chat://librechat", "health-portal", ["read:*"], "alice@example.com"),
+            new Grant("chat://librechat", "health-portal", ["read:*"], AlicePrincipalId),
             new Grant("app-crawler", "marketplace", ["read:listings"]),
         };
         var pdp = new PolicyDecisionPoint(grants);
         var resolver = new CredentialResolver(
-            [new TargetBinding("health-portal", "health-portal-session", "alice@example.com")],
+            [new TargetBinding(
+                "health-portal",
+                "health-portal-session",
+                "alice@example.com",
+                PrincipalId: AlicePrincipalId)],
             store);
         var broker = new BrokerCore(pdp, resolver);
         var recipes = new List<Recipe>

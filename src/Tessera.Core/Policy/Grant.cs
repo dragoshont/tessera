@@ -97,6 +97,14 @@ public sealed record Grant(
             return false;
         }
 
+        if (user.CanonicalPrincipalId is not null && user.VerifiedVia != VerificationMethod.Dev)
+        {
+            return string.Equals(OnBehalfOf, user.CanonicalPrincipalId, StringComparison.Ordinal);
+        }
+
+        // Legacy compatibility for loopback development and old identity sources
+        // without issuer/tenant/subject context. Tenant-aware signed users never
+        // authorize through display names.
         return string.Equals(OnBehalfOf, user.Subject, StringComparison.Ordinal)
             || string.Equals(OnBehalfOf, user.PreferredUsername, StringComparison.OrdinalIgnoreCase);
     }

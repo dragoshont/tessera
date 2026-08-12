@@ -1,0 +1,30 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "20260810-r1-continuity",
+  "status": "passed",
+  "phases": [
+    { "phase": 1, "name": "Grounding and contract", "status": "completed", "result": "dual-family PASS" },
+    { "phase": 2, "name": "Domain and persistence", "status": "completed", "result": "causal provenance, restart, replay, conflict, and compounding tests PASS" },
+    { "phase": 3, "name": "API and UI", "status": "completed", "result": "complete desktop and phone continuity journey PASS" },
+    { "phase": 4, "name": "Full verification", "status": "completed", "result": "617 backend, 94 web, and 16 browser tests; all deterministic gates PASS" },
+    { "phase": 5, "name": "Independent adversaries", "status": "completed", "result": "product, architecture, security, GPT-family, and Claude-family PASS" }
+  ],
+  "startedAt": "2026-08-09T22:28:04Z",
+  "completedAt": "2026-08-10T00:07:19Z",
+  "artifacts": {
+    "intake": ".architrave/runs/20260810-r1-continuity/intake.md",
+    "tournament": ".architrave/runs/20260810-r1-continuity/tournament.md",
+    "recommendedPlan": ".architrave/runs/20260810-r1-continuity/recommended-plan.md",
+    "phaseLedger": ".architrave/runs/20260810-r1-continuity/phase-ledger.md",
+    "deterministicGates": ".architrave/runs/20260810-r1-continuity/deterministic-gates.md",
+    "judgePre": ".architrave/runs/20260810-r1-continuity/judge-pre.md",
+    "judgePost": ".architrave/runs/20260810-r1-continuity/judge-post.md",
+    "runtimeObserver": ".architrave/runs/20260810-r1-continuity/runtime-observer.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 0,
+    "promotionsProposed": 0
+  }
+}

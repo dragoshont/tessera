@@ -2,6 +2,11 @@ import { createContext, useContext, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { tesseraClient, type TesseraClient } from './client'
 import type { CreateConnectionInput } from '../data/types'
+import type {
+  FollowUpAcceptInput,
+  FollowUpFieldDecisionInput,
+  FollowUpImportInput,
+} from '../data/types'
 
 const TesseraClientContext = createContext<TesseraClient>(tesseraClient)
 
@@ -132,4 +137,72 @@ export function useDenyPendingWrite() {
       void queryClient.invalidateQueries({ queryKey: ['pendingWrites'] })
     },
   })
+}
+
+// ── R1 continuity ────────────────────────────────────────────────────────────
+
+export function useFollowUps(view: 'attention' | 'tracked') {
+  const client = useTesseraClient()
+  return useQuery({
+    queryKey: ['followUps', view],
+    queryFn: () => client.listFollowUps(view),
+  })
+}
+
+export function useFollowUp(followUpId?: string) {
+  const client = useTesseraClient()
+  return useQuery({
+    queryKey: ['followUp', followUpId],
+    queryFn: () => client.getFollowUp(followUpId as string),
+    enabled: Boolean(followUpId),
+  })
+}
+
+export function useFollowUpWhy(followUpId?: string) {
+  const client = useTesseraClient()
+  return useQuery({
+    queryKey: ['followUpWhy', followUpId],
+    queryFn: () => client.getFollowUpWhy(followUpId as string),
+    enabled: Boolean(followUpId),
+  })
+}
+
+function useContinuityMutation<TInput>(
+  mutationFn: (input: TInput) => Promise<unknown>,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['followUps'] })
+      void queryClient.invalidateQueries({ queryKey: ['followUp'] })
+      void queryClient.invalidateQueries({ queryKey: ['followUpWhy'] })
+    },
+  })
+}
+
+export function useImportFollowUpFixture() {
+  const client = useTesseraClient()
+  return useContinuityMutation(
+    ({ fixtureId, input }: { fixtureId: string; input: FollowUpImportInput }) =>
+      client.importFollowUpFixture(fixtureId, input),
+  )
+}
+
+export function useAcceptFollowUp(followUpId?: string) {
+  const client = useTesseraClient()
+  return useContinuityMutation((input: FollowUpAcceptInput) =>
+    client.acceptFollowUp(followUpId as string, input))
+}
+
+export function useCorrectFollowUp(followUpId?: string) {
+  const client = useTesseraClient()
+  return useContinuityMutation((input: FollowUpFieldDecisionInput) =>
+    client.correctFollowUp(followUpId as string, input))
+}
+
+export function useResolveFollowUp(followUpId?: string) {
+  const client = useTesseraClient()
+  return useContinuityMutation((input: FollowUpFieldDecisionInput) =>
+    client.resolveFollowUp(followUpId as string, input))
 }

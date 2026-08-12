@@ -31,7 +31,7 @@ set and the directory exists, the broker serves the portal at `/`:
 ```json
 "portal": {
   "webRoot": "/app/web/dist",
-  "admins": ["alice@example.com"]
+  "admins": ["principal:sha256:<canonical-id>"]
 }
 ```
 
@@ -39,12 +39,12 @@ If `webRoot` is unset, the broker serves the API only — the portal is simply a
 
 ## Step 2 — Set the operators
 
-`portal.admins` is the **only** portal authorisation datum. List the verified principals
-(their `oid` or `preferred_username`, for example an email) who may enter the operator
-surface:
+`portal.admins` is the **only** portal authorisation datum. In OIDC mode list the
+canonical IDs derived from each operator's signed issuer, tenant, and subject. Email,
+`preferred_username`, and a bare `oid` are display/partial identifiers and are refused:
 
 ```json
-"admins": ["alice@example.com", "bob@example.com"]
+"admins": ["principal:sha256:<alice-id>", "principal:sha256:<bob-id>"]
 ```
 
 - Everyone else is a **Member**: they see only their **own** connections.

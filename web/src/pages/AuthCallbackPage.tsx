@@ -17,7 +17,7 @@ export function AuthCallbackPage() {
 
   useEffect(() => {
     if (status === 'authenticated') {
-      navigate('/accounts', { replace: true })
+      navigate('/chat', { replace: true })
       return
     }
     if (!config || started.current) return

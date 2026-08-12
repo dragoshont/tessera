@@ -8,6 +8,56 @@ namespace Tessera.Core.Tests;
 public sealed class ResolverTests
 {
     [Fact]
+    public void Canonical_binding_does_not_match_same_email_in_another_tenant()
+    {
+        const string email = "same@example.com";
+        var tenantA = Tessera.Core.Kernel.PrincipalRef.Create(
+            "https://issuer.example/v2.0", "tenant-a", "subject-a", email, DateTimeOffset.UtcNow);
+        var binding = new TargetBinding(
+            "health-portal",
+            "health-a",
+            email,
+            CredentialOwner.User,
+            PrincipalId: tenantA.PrincipalId);
+        var resolver = new CredentialResolver([binding], new InMemoryCredentialStore());
+        var caller = new Tessera.Core.Identity.CallerIdentity(
+            "caller",
+            Tessera.Core.Identity.VerificationMethod.Network);
+        var tenantBUser = new Tessera.Core.Identity.EndUserAssertion(
+            "subject-b",
+            "https://issuer.example/v2.0",
+            Tessera.Core.Identity.VerificationMethod.OidcJwt,
+            email,
+            "tenant-b");
+
+        var request = new Tessera.Core.Model.AccessRequest(caller, "health-portal", "read:data", tenantBUser);
+
+        Assert.Null(resolver.BindingFor(request));
+    }
+
+    [Fact]
+    public void Tenant_aware_user_cannot_fall_back_to_legacy_email_binding()
+    {
+        const string email = "same@example.com";
+        var resolver = new CredentialResolver(
+            [new TargetBinding("health-portal", "legacy-key", email, CredentialOwner.User)],
+            new InMemoryCredentialStore());
+        var user = new Tessera.Core.Identity.EndUserAssertion(
+            "new-subject",
+            "https://issuer.example/v2.0",
+            Tessera.Core.Identity.VerificationMethod.OidcJwt,
+            email,
+            "tenant-b");
+        var request = new Tessera.Core.Model.AccessRequest(
+            new Tessera.Core.Identity.CallerIdentity("caller", Tessera.Core.Identity.VerificationMethod.Network),
+            "health-portal",
+            "read:data",
+            user);
+
+        Assert.Null(resolver.BindingFor(request));
+    }
+
+    [Fact]
     public void Binding_matches_target_and_principal()
     {
         var binding = new TargetBinding("health-portal", "health-portal-session", "alice@example.com");

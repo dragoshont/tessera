@@ -1,3 +1,6 @@
+
+import { isDesktop, persistDesktopAuth } from './runtime'
+
 // The portal's current credential lives here as a tiny module-level holder so the
 // HTTP client's `authHeader()` can read it per request without a token ever being
 // baked into code. It is persisted to sessionStorage so a refresh keeps the
@@ -13,6 +16,7 @@ const STORAGE_KEY = 'tessera.auth'
 
 function readPersisted(): AuthState {
   if (typeof window === 'undefined') return null
+  if (isDesktop()) return null
   try {
     const raw = window.sessionStorage.getItem(STORAGE_KEY)
     if (!raw) return null
@@ -28,6 +32,7 @@ let current: AuthState = readPersisted()
 
 function persist(next: AuthState): void {
   if (typeof window === 'undefined') return
+  if (isDesktop()) return
   try {
     if (next) window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next))
     else window.sessionStorage.removeItem(STORAGE_KEY)
@@ -44,10 +49,25 @@ export function getAuthState(): AuthState {
 export function setAuthState(next: AuthState): void {
   current = next
   persist(next)
+  void persistDesktopAuth(next)
+}
+
+export async function setAuthStateDurable(next: AuthState): Promise<void> {
+  current = next
+  persist(next)
+  await persistDesktopAuth(next)
+}
+
+export function hydrateAuthState(next: AuthState): void {
+  current = next
 }
 
 export function clearAuthState(): void {
   setAuthState(null)
+}
+
+export async function clearAuthStateDurable(): Promise<void> {
+  await setAuthStateDurable(null)
 }
 
 /** The per-request auth headers for the HTTP client (never a baked-in token). */

@@ -21,6 +21,12 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
     private const string UserAlice = "user-alice-token";   // forwarded end-user token (granted)
     private const string UserBob = "user-bob-token";       // forwarded end-user token (NOT granted)
     private const string DefaultUpstream = "https://caldav.icloud.com/123/calendars/";
+    private static readonly string AlicePrincipalId = Tessera.Core.Kernel.PrincipalRef.Create(
+        "https://login.microsoftonline.com/test/v2.0",
+        "test",
+        "alice-oid",
+        "alice@example.com",
+        DateTimeOffset.UnixEpoch).PrincipalId;
 
     private WebApplication _app = null!;
     private HttpClient _client = null!;
@@ -434,17 +440,17 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
         File.WriteAllText(grantsPath, $$"""
             {
               "grants": [
-                { "caller": "{{CallerId}}", "onBehalfOf": "alice@example.com",
+                { "caller": "{{CallerId}}", "onBehalfOf": "{{AlicePrincipalId}}",
                   "target": "apple-caldav", "actions": ["read:dav", "manage:dav"] },
-                { "caller": "{{CallerId}}", "onBehalfOf": "alice@example.com",
+                { "caller": "{{CallerId}}", "onBehalfOf": "{{AlicePrincipalId}}",
                   "target": "mobbin", "actions": ["read:mcp", "manage:mcp"] },
-                { "caller": "{{CallerId}}", "onBehalfOf": "alice@example.com",
+                { "caller": "{{CallerId}}", "onBehalfOf": "{{AlicePrincipalId}}",
                   "target": "mobbin-hp", "actions": ["read:mcp"] }
               ],
               "bindings": [
-                { "target": "apple-caldav", "onBehalfOf": "alice@example.com", "credential": "apple-account-a" },
-                { "target": "mobbin", "onBehalfOf": "alice@example.com", "credential": "mobbin-token" },
-                { "target": "mobbin-hp", "onBehalfOf": "alice@example.com", "credential": "mobbin-token" }
+                { "target": "apple-caldav", "onBehalfOf": "alice@example.com", "principalId": "{{AlicePrincipalId}}", "credential": "apple-account-a" },
+                { "target": "mobbin", "onBehalfOf": "alice@example.com", "principalId": "{{AlicePrincipalId}}", "credential": "mobbin-token" },
+                { "target": "mobbin-hp", "onBehalfOf": "alice@example.com", "principalId": "{{AlicePrincipalId}}", "credential": "mobbin-token" }
               ],
               "recipes": [
                 { "target": "apple-caldav", "egress": "proxy", "injection": "basic" },
@@ -472,8 +478,8 @@ public sealed class EgressProxyEndpointTests : IAsyncLifetime
 
         var validator = new FakeTokenValidator()
             .AddApp(CallerApp, CallerId)
-            .AddUser(UserAlice, "alice-oid", "alice@example.com")
-            .AddUser(UserBob, "bob-oid", "bob@example.com");
+            .AddUser(UserAlice, "alice-oid", "alice@example.com", tenantId: "test")
+            .AddUser(UserBob, "bob-oid", "bob@example.com", tenantId: "test");
 
         var options = new BrokerHostOptions
         {

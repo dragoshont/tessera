@@ -6,6 +6,29 @@ namespace Tessera.Core.Tests;
 
 public sealed class ModelTests
 {
+    [Fact]
+    public void Canonical_end_user_identity_includes_issuer_tenant_and_subject_not_display_email()
+    {
+        const string email = "same@example.com";
+        var tenantA = new EndUserAssertion(
+            "subject-a", "https://issuer.example/v2.0", VerificationMethod.OidcJwt, email, "tenant-a");
+        var tenantB = new EndUserAssertion(
+            "subject-b", "https://issuer.example/v2.0", VerificationMethod.OidcJwt, email, "tenant-b");
+
+        Assert.NotNull(tenantA.CanonicalPrincipalId);
+        Assert.NotNull(tenantB.CanonicalPrincipalId);
+        Assert.NotEqual(tenantA.CanonicalPrincipalId, tenantB.CanonicalPrincipalId);
+    }
+
+    [Fact]
+    public void Missing_tenant_cannot_create_a_canonical_personal_state_owner()
+    {
+        var user = new EndUserAssertion(
+            "subject-a", "https://issuer.example/v2.0", VerificationMethod.OidcJwt, "user@example.com");
+
+        Assert.Null(user.CanonicalPrincipalId);
+    }
+
     [Theory]
     [InlineData(VerificationMethod.Mtls, true)]
     [InlineData(VerificationMethod.SpiffeSvid, true)]

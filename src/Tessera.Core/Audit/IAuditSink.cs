@@ -40,7 +40,9 @@ public sealed record AuditEntry(
             DateTimeOffset.UtcNow,
             request.Caller.Id,
             request.Caller.IsVerified,
-            request.OnBehalfOf?.PreferredUsername ?? request.OnBehalfOf?.Subject,
+            request.OnBehalfOf?.CanonicalPrincipalId
+                ?? request.OnBehalfOf?.PreferredUsername
+                ?? request.OnBehalfOf?.Subject,
             request.Target,
             request.Action,
             decision.Effect,

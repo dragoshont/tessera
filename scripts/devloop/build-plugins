@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+DOTNET="${DOTNET:-dotnet}"
+OUTPUT="$ROOT/.dev/plugins"
+MODULES="$OUTPUT/modules"
+
+hash_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d ' ' -f 1
+  else
+    shasum -a 256 "$1" | cut -d ' ' -f 1
+  fi
+}
+
+mkdir -p "$MODULES"
+for plugin in Gmail GitHub ReginaMaria; do
+  "$DOTNET" build "$ROOT/src/Tessera.Plugins.$plugin/Tessera.Plugins.$plugin.csproj" \
+    -c Release --nologo
+  cp "$ROOT/src/Tessera.Plugins.$plugin/bin/Release/net10.0/Tessera.Plugins.$plugin.dll" "$MODULES/"
+done
+
+gmail_hash="$(hash_file "$MODULES/Tessera.Plugins.Gmail.dll")"
+github_hash="$(hash_file "$MODULES/Tessera.Plugins.GitHub.dll")"
+rm_hash="$(hash_file "$MODULES/Tessera.Plugins.ReginaMaria.dll")"
+printf '[{"PluginId":"gmail","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.Gmail.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"github","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.GitHub.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"regina-maria","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.ReginaMaria.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"}]\n' \
+  "$gmail_hash" "$github_hash" "$rm_hash" > "$OUTPUT/modules.json"
+
+echo "plugins: $OUTPUT/modules.json"

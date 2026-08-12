@@ -49,8 +49,8 @@ decision per screen. Generous spacing. Light + dark, both first-class.
 | `--card` | white | zinc-900 | tables, drawers, dialogs |
 | `--text` | zinc-900 | zinc-100 | primary text |
 | `--muted` | zinc-500 | zinc-400 | secondary / "~estimated" |
-| `health.live` | emerald-600 | emerald-400 | Live badge |
-| `health.expiring` | amber-600 | amber-400 | Expiring soon |
+| `health.live` | emerald-700 | emerald-400 | Live badge |
+| `health.expiring` | amber-700 | amber-400 | Expiring soon |
 | `health.absent` | zinc-400 | zinc-500 | Absent (neutral, not alarming) |
 | `health.error` | red-600 | red-400 | **Error only** |
 | `accent` | indigo-600 | indigo-400 | primary CTA, "Verifying" |

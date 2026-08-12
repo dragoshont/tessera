@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Routing;
 using Tessera.Core.Audit;
 using Tessera.Core.Configuration;
 using Tessera.Core.Egress;
+using Tessera.Core.Identity;
 using Tessera.Core.Model;
 using Tessera.Core.Portal;
 using Tessera.Identity;
@@ -99,25 +100,28 @@ internal static class PortalEndpoints
             return Results.Json(people.Select(ToDto).ToArray());
         });
 
-        // Connections for a person. A member sees only their own; an admin may pass
-        // ?principal= to view anyone's (the person-detail surface).
+        // Connections are self-scoped by canonical signed identity. An operator
+        // cannot manufacture another person's issuer/tenant/subject context.
         app.MapGet("/portal/connections", async (HttpContext ctx, ITokenValidator validator, PortalService portal, TesseraConfig config, string? principal, CancellationToken ct) =>
         {
-            var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
-            if (caller is null)
+            var user = await ResolveEndUserAsync(ctx, validator, config).ConfigureAwait(false);
+            var caller = user?.PreferredUsername ?? user?.Subject;
+            if (caller is null || user?.CanonicalPrincipalId is null)
             {
-                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+                return Results.Json(new { error = "unauthenticated: canonical issuer, tenant, and subject are required" }, statusCode: 401);
             }
 
             var target = principal ?? caller;
             var isSelf = string.Equals(target, caller, StringComparison.OrdinalIgnoreCase);
-            if (!isSelf && !portal.IsAdmin(caller))
+            if (!isSelf)
             {
-                // Cross-person reads are operator-only (and would be step-up-gated in the UI).
-                return Results.Json(new { error = "forbidden: only an operator may view another person's connections" }, statusCode: 403);
+                return Results.Json(new { error = "forbidden: connection data is self-scoped" }, statusCode: 403);
             }
 
-            var connections = await portal.ListConnectionsAsync(target, ct).ConfigureAwait(false);
+            var principalId = user.VerifiedVia == VerificationMethod.Dev
+                ? null
+                : user.CanonicalPrincipalId;
+            var connections = await portal.ListConnectionsAsync(target, principalId, ct).ConfigureAwait(false);
             return Results.Json(connections.Select(ToDto).ToArray());
         });
 
@@ -385,34 +389,41 @@ internal static class PortalEndpoints
             return Results.Json(ToScheduleDto(schedule));
         });
 
-        // Add (or re-point) a connection — the connect wizard's write. An admin may
-        // add for anyone; a member may add only for themselves. Writes a binding
+        // Add (or re-point) the signed-in person's connection. Cross-person
+        // creation cannot establish the other person's canonical token identity.
+        // Writes a binding
         // (the person + connection appear); authorizing a consumer is a separate
         // grant step, so the new connection is deny-by-default until granted (R3).
         app.MapPost("/portal/connections", async (
             HttpContext ctx, AddConnectionRequest? body, ITokenValidator validator, PortalService portal, TesseraConfig config, CancellationToken ct) =>
         {
-            var caller = await ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
-            if (caller is null)
+            var user = await ResolveEndUserAsync(ctx, validator, config).ConfigureAwait(false);
+            var caller = user?.PreferredUsername ?? user?.Subject;
+            if (caller is null || user?.CanonicalPrincipalId is null)
             {
-                return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
+                return Results.Json(
+                    new { error = "unauthenticated: canonical issuer, tenant, and subject are required" },
+                    statusCode: 401);
             }
 
             if (body is null
                 || string.IsNullOrWhiteSpace(body.Provider)
-                || string.IsNullOrWhiteSpace(body.Principal)
-                || string.IsNullOrWhiteSpace(body.Credential))
+                || string.IsNullOrWhiteSpace(body.Principal))
             {
-                return Results.Json(new { error = "bad request: provider, principal and credential are required" }, statusCode: 400);
+                return Results.Json(new { error = "bad request: provider and principal are required" }, statusCode: 400);
             }
 
             var forSelf = string.Equals(body.Principal, caller, StringComparison.OrdinalIgnoreCase);
-            if (!forSelf && !portal.IsAdmin(caller))
+            if (!forSelf)
             {
-                return Results.Json(new { error = "forbidden: only an operator may add a connection for another person" }, statusCode: 403);
+                return Results.Json(new { error = "forbidden: the connection owner must sign in and connect their own account" }, statusCode: 403);
             }
 
-            var created = await portal.AddConnectionAsync(body.Provider.Trim(), body.Principal.Trim(), body.Credential.Trim(), cancellationToken: ct).ConfigureAwait(false);
+            var created = await portal.AddPortalConnectionAsync(
+                body.Provider.Trim(),
+                body.Principal.Trim(),
+                user.VerifiedVia == VerificationMethod.Dev ? null : user.CanonicalPrincipalId,
+                cancellationToken: ct).ConfigureAwait(false);
             return Results.Json(ToDto(created), statusCode: 201);
         });
 
@@ -463,12 +474,34 @@ internal static class PortalEndpoints
     /// </summary>
     internal static async Task<string?> ResolvePrincipalAsync(HttpContext ctx, ITokenValidator validator, TesseraConfig config)
     {
+        var user = await ResolveEndUserAsync(ctx, validator, config).ConfigureAwait(false);
+        if (user is null)
+        {
+            return null;
+        }
+
+        return user.VerifiedVia == VerificationMethod.Dev
+            ? user.PreferredUsername ?? user.Subject
+            : user.CanonicalPrincipalId;
+    }
+
+    internal static async Task<EndUserAssertion?> ResolveEndUserAsync(
+        HttpContext ctx,
+        ITokenValidator validator,
+        TesseraConfig config)
+    {
         if (config.Identity.Mode == "dev" && config.Server.IsLoopback)
         {
             var dev = ctx.Request.Headers[DevPrincipalHeader].ToString();
             if (!string.IsNullOrWhiteSpace(dev))
             {
-                return dev.Trim();
+                var principal = dev.Trim();
+                return new EndUserAssertion(
+                    principal,
+                    "https://dev.tessera.local",
+                    VerificationMethod.Dev,
+                    principal,
+                    "dev");
             }
         }
 
@@ -487,7 +520,7 @@ internal static class PortalEndpoints
 
         var result = await validator.ValidateAsync(token, ctx.RequestAborted).ConfigureAwait(false);
         var user = result.Succeeded ? result.ToEndUserAssertion() : null;
-        return user?.PreferredUsername ?? user?.Subject;
+        return user;
     }
 
     private static string? OwnerOf(string connectionId)
@@ -636,7 +669,7 @@ internal sealed record OidcConfigDto(string Authority, string ClientId, string S
 internal sealed record RecipeDto(string Provider, string DisplayName);
 
 /// <summary>The connect-wizard write body.</summary>
-internal sealed record AddConnectionRequest(string Provider, string Principal, string Credential);
+internal sealed record AddConnectionRequest(string Provider, string Principal);
 
 /// <summary>A consent receipt row (ADR 0020): who consented to what data class, when, under which ownership.</summary>
 internal sealed record ConsentDto(

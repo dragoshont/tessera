@@ -161,11 +161,11 @@ public sealed class EgressOptions
 public sealed class PortalOptions
 {
     /// <summary>
-    /// The admins allow-list: verified principals (<c>oid</c> / <c>preferred_username</c>,
-    /// e.g. an email) who may enter the operator surface. Everyone else is a Member
-    /// who sees only their own connections. Empty = no operator (the portal is then
-    /// self-service-only). This is the <em>only</em> portal authorization datum, and
-    /// it lives in config so it is a reviewable diff like every other rule (ADR 0008).
+    /// The admins allow-list. In OIDC mode entries are canonical
+    /// <c>principal:sha256:...</c> IDs derived from issuer + tenant + subject, never
+    /// email/display names. Loopback dev mode may use its explicit dev principal.
+    /// Empty = no operator. This is the only portal authorization datum and remains
+    /// reviewable configuration (ADR 0008).
     /// </summary>
     public IReadOnlyList<string> Admins { get; init; } = [];
 
@@ -269,6 +269,21 @@ public sealed class OAuthMcpOptions
     public string ClientId { get; init; } = "";
 }
 
+public sealed class ModelGatewayEndpointOptions
+{
+    public string Id { get; init; } = "";
+    public string DisplayName { get; init; } = "";
+    public string Endpoint { get; init; } = "";
+}
+
+/// <summary>Fixed operator-owned internal OpenAI-compatible gateway inventory.</summary>
+public sealed class ModelGatewayOptions
+{
+    public bool Enabled { get; init; }
+    public bool AllowPlainHttp { get; init; }
+    public IReadOnlyList<ModelGatewayEndpointOptions> Endpoints { get; init; } = [];
+}
+
 /// <summary>The full broker configuration, with fail-closed validation.</summary>
 public sealed class TesseraConfig
 {
@@ -302,6 +317,9 @@ public sealed class TesseraConfig
     /// <summary>OAuth-MCP fronting (ADR 0027): per-user OAuth connect + rotation for oauth-mcp upstreams.</summary>
     public OAuthMcpOptions OAuthMcp { get; init; } = new();
 
+    /// <summary>Preconfigured internal model gateways such as homelab LiteLLM.</summary>
+    public ModelGatewayOptions ModelGateways { get; init; } = new();
+
     /// <summary>
     /// Returns a list of problems. Empty list == valid. These checks encode the
     /// security invariants; the most important: a <c>dev</c> (unverified) identity
@@ -332,6 +350,14 @@ public sealed class TesseraConfig
         if (Identity.Mode == "oidc" && string.IsNullOrWhiteSpace(Identity.Oidc.Issuer))
         {
             problems.Add("identity.mode \"oidc\" requires identity.oidc.issuer");
+        }
+
+        if (Identity.Mode == "oidc"
+            && Portal.Admins.Any(admin => !admin.StartsWith("principal:sha256:", StringComparison.Ordinal)))
+        {
+            problems.Add(
+                "identity.mode \"oidc\" requires every portal.admins entry to be a canonical " +
+                "principal:sha256 ID (issuer + tenant + subject); email and preferred_username are display-only");
         }
 
         if (Policy.Default is not ("deny" or "allow"))
@@ -406,6 +432,20 @@ public sealed class TesseraConfig
             if (!Egress.Enabled)
             {
                 problems.Add("oauthMcp.enabled is true but egress.enabled is false — the connect flow egresses to the discovered authorization/token endpoints (enable egress, or turn oauthMcp off).");
+            }
+        }
+
+        if(ModelGateways.Enabled)
+        {
+            if(ModelGateways.Endpoints.Count is <1 or >8)problems.Add("modelGateways.enabled requires 1-8 fixed endpoints.");
+            if(ModelGateways.Endpoints.Select(item=>item.Id).Distinct(StringComparer.Ordinal).Count()!=ModelGateways.Endpoints.Count)problems.Add("model gateway ids must be unique.");
+            if(ModelGateways.Endpoints.Select(item=>item.Endpoint).Distinct(StringComparer.Ordinal).Count()!=ModelGateways.Endpoints.Count)problems.Add("model gateway endpoints must be unique.");
+            foreach(var gateway in ModelGateways.Endpoints)
+            {
+                if(gateway.Id.Length is <1 or >64||!gateway.Id.All(character=>char.IsAsciiLetterOrDigit(character)||character is '-' or '_'))problems.Add("model gateway ids must contain only 1-64 ASCII letters, digits, '-' or '_'.");
+                if(string.IsNullOrWhiteSpace(gateway.DisplayName)||gateway.DisplayName.Length>128)problems.Add($"model gateway '{gateway.Id}' has an invalid displayName.");
+                if(!Uri.TryCreate(gateway.Endpoint.TrimEnd('/')+"/",UriKind.Absolute,out var endpoint)||endpoint.Scheme is not("http" or "https")||!string.IsNullOrEmpty(endpoint.UserInfo)||!string.IsNullOrEmpty(endpoint.Query)||!string.IsNullOrEmpty(endpoint.Fragment))problems.Add($"model gateway '{gateway.Id}' must be an absolute endpoint without credentials, query, or fragment.");
+                else if(endpoint.Scheme=="http"&&!ModelGateways.AllowPlainHttp)problems.Add($"model gateway '{gateway.Id}' uses http but modelGateways.allowPlainHttp is false.");
             }
         }
 

@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tessera-backup
+  namespace: default
+  labels:
+    app: tessera
+spec:
+  schedule: "17 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: tessera-backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: ghcr.io/dragoshont/tessera:sha-REVIEWED_COMMIT
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - >-
+                  dotnet /app/tessera.dll backup --database /data/tessera-product.db
+                  --output "/backup/tessera-product-$(date -u +%Y%m%dT%H%M%SZ).db"
+                  && find /backup -type f -name 'tessera-product-*.db' -mtime +14 -delete
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                  readOnly: true
+                - name: backups
+                  mountPath: /backup
+              resources:
+                requests: { cpu: 10m, memory: 64Mi }
+                limits: { cpu: 250m, memory: 192Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: tessera-data
+            - name: backups
+              persistentVolumeClaim:
+                claimName: tessera-backups

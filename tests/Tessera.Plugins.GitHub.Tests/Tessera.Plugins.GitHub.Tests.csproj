@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Plugins.GitHub.Tests</RootNamespace>
+    <AssemblyName>Tessera.Plugins.GitHub.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Tessera.Plugins.GitHub/Tessera.Plugins.GitHub.csproj" />
+  </ItemGroup>
+
+</Project>

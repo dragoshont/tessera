@@ -10,7 +10,7 @@ namespace Tessera.Core.Resolution;
 /// </summary>
 public sealed class CredentialResolver
 {
-    private readonly IReadOnlyList<TargetBinding> _bindings;
+    private TargetBinding[] _bindings;
     private readonly ICredentialStore _store;
 
     /// <summary>Creates a resolver over a set of bindings and a store.</summary>
@@ -18,6 +18,16 @@ public sealed class CredentialResolver
     {
         _bindings = bindings.ToArray();
         _store = store;
+    }
+
+    /// <summary>
+    /// Atomically replaces the immutable binding snapshot used by subsequent
+    /// resolutions. Existing requests continue over their captured snapshot.
+    /// </summary>
+    public void ReplaceBindings(IEnumerable<TargetBinding> bindings)
+    {
+        ArgumentNullException.ThrowIfNull(bindings);
+        Interlocked.Exchange(ref _bindings, bindings.ToArray());
     }
 
     /// <summary>Finds the binding that backs <paramref name="request"/>, if any.</summary>
@@ -37,7 +47,8 @@ public sealed class CredentialResolver
         ArgumentNullException.ThrowIfNull(request);
 
         // 1) Exact match — per-principal (the person's own key) or automation.
-        foreach (var binding in _bindings)
+        var bindings = Volatile.Read(ref _bindings);
+        foreach (var binding in bindings)
         {
             if (binding.Matches(request))
             {
@@ -48,7 +59,7 @@ public sealed class CredentialResolver
         // 2) Service-owned fallback for a delegated request with no per-person key.
         if (request.OnBehalfOf is not null)
         {
-            foreach (var binding in _bindings)
+            foreach (var binding in bindings)
             {
                 if (binding.Principal is null
                     && binding.Owner == CredentialOwner.Service

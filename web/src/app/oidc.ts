@@ -1,4 +1,5 @@
 import type { OidcConfig } from '../data/types'
+import { isDesktop } from './runtime'
 
 // Real OIDC sign-in (Authorization Code + PKCE) via oidc-client-ts. The library
 // is loaded with a dynamic import so it only enters the bundle in real OIDC
@@ -7,7 +8,7 @@ import type { OidcConfig } from '../data/types'
 // access token to the auth holder so the broker sees `Authorization: Bearer …`.
 
 function redirectUri(): string {
-  return `${window.location.origin}/auth/callback`
+  return isDesktop() ? 'tessera://auth/callback' : `${window.location.origin}/auth/callback`
 }
 
 async function userManager(oidc: OidcConfig) {
@@ -16,7 +17,9 @@ async function userManager(oidc: OidcConfig) {
     authority: oidc.authority,
     client_id: oidc.clientId,
     redirect_uri: redirectUri(),
-    post_logout_redirect_uri: `${window.location.origin}/sign-in`,
+    post_logout_redirect_uri: isDesktop()
+      ? 'tessera://open/sign-in'
+      : `${window.location.origin}/sign-in`,
     response_type: 'code',
     scope: oidc.scope,
     // Tab-scoped storage, consistent with our sessionStorage auth holder.
@@ -38,7 +41,10 @@ export async function beginOidcSignIn(oidc: OidcConfig): Promise<void> {
  */
 export async function completeOidcSignIn(oidc: OidcConfig): Promise<string> {
   const manager = await userManager(oidc)
-  const user = await manager.signinRedirectCallback()
+  const callbackUrl = isDesktop()
+    ? window.location.href.replace(/^app:\/\/tessera/, 'tessera://auth')
+    : undefined
+  const user = await manager.signinRedirectCallback(callbackUrl)
   if (!user.access_token) throw new Error('OIDC callback returned no access token')
   return user.access_token
 }

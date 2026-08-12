@@ -111,8 +111,8 @@ public sealed class ProviderEgress
 
     /// <summary>
     /// Calls <paramref name="toolName"/> on <paramref name="target"/> for the
-    /// verified caller/end-user. <paramref name="confirmed"/> must be true to run a
-    /// step-up (write) tool; the body is provider JSON the tool forwards.
+    /// verified caller/end-user. <paramref name="confirmed"/> is a legacy wire flag
+    /// and never authorizes a side effect; the body is provider JSON the tool forwards.
     /// </summary>
     public async Task<ProviderCallResult> CallAsync(
         CallerIdentity caller,
@@ -146,12 +146,14 @@ public sealed class ProviderEgress
             return new ProviderCallResult(ProviderCallStatus.Denied, Detail: decision.Reason);
         }
 
-        // Write/booking tools never run autonomously: require an explicit confirm.
-        if ((tool.RequiresConfirmation || decision.Effect == Effect.StepUp) && !confirmed)
+        // A caller-controlled boolean is not authorization. Named writes stay held
+        // until this path is migrated to Tessera's independently issued, exact,
+        // one-time content-bound authorization contract.
+        if (tool.RequiresConfirmation || decision.Effect == Effect.StepUp)
         {
             return new ProviderCallResult(
                 ProviderCallStatus.StepUpRequired,
-                Detail: $"'{toolName}' is a write action and needs explicit confirmation (re-issue with confirm=true after reviewing the request)");
+            Detail: $"'{toolName}' is a write action and requires independently issued content-bound approval; caller confirmation flags are not accepted");
         }
 
         // Build the upstream path: fill {placeholders} from the args, and require a

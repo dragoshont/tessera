@@ -149,7 +149,7 @@ internal static class CallerBrokerEndpoint
 /// <param name="Method">The HTTP method (required for <c>invoke</c> — addresses a tool by its HTTP shape).</param>
 /// <param name="Path">The tool's path (required for <c>invoke</c>; matched against the recipe, exact-path only).</param>
 /// <param name="Args">The call arguments as a JSON object (filled into the tool's path/query/body).</param>
-/// <param name="Confirm">True to run a write/booking tool (step-up).</param>
+/// <param name="Confirm">Legacy compatibility flag; never authorizes a write/booking tool.</param>
 public sealed record BrokerCallRequest(
     string? Op,
     string? Target,

@@ -17,8 +17,8 @@
   --border: #e4e4e7;             /* zinc-200 */
   --accent: #4f46e5;             /* indigo-600 */
   --accent-foreground: #ffffff;
-  --health-live: #059669;        /* emerald-600 */
-  --health-expiring: #d97706;    /* amber-600 */
+  --health-live: #047857;        /* emerald-700 */
+  --health-expiring: #b45309;    /* amber-700 */
   --health-absent: #a1a1aa;      /* zinc-400 (neutral, not alarming) */
   --health-error: #dc2626;       /* red-600 (error only) */
   --ring: #4f46e5;

@@ -72,7 +72,7 @@ public sealed class TesseraMcpService
 
     /// <summary>
     /// Calls a provider tool for the current identity. <paramref name="confirmed"/>
-    /// must be true to run a write/booking tool.
+    /// is a legacy wire flag and cannot authorize a write/booking tool.
     /// </summary>
     public async Task<ProviderCallToolResult> CallProviderAsync(
         string? token,

@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="../Tessera.Core/Tessera.Core.csproj" />
     <ProjectReference Include="../Tessera.Broker/Tessera.Broker.csproj" />
+    <ProjectReference Include="../Tessera.Persistence.Sqlite/Tessera.Persistence.Sqlite.csproj" />
   </ItemGroup>
 
 </Project>

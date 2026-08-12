@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Plugin.Abstractions</RootNamespace>
+    <AssemblyName>Tessera.Plugin.Abstractions</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Tessera.Core/Tessera.Core.csproj" />
+    <ProjectReference Include="../Tessera.Mcp.Client/Tessera.Mcp.Client.csproj" />
+    <ProjectReference Include="../Tessera.Providers/Tessera.Providers.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -24,6 +24,10 @@
     <!-- Injection egress reverse proxy — ADR 0001. -->
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
 
+    <!-- Kernel v1 local transactional product-state adapter. -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
+
     <!-- Test stack. -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

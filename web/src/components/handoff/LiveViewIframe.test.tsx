@@ -3,8 +3,12 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { LiveViewIframe } from './LiveViewIframe'
 import { demoLiveViewHandle } from '../../data/fixtures'
 
-function fireWindowMessage(data: unknown) {
-  window.dispatchEvent(new MessageEvent('message', { data }))
+function fireWindowMessage(data: unknown, origin: string, source: MessageEventSource | null) {
+  window.dispatchEvent(new MessageEvent('message', { data, origin, source }))
+}
+
+function iframeWindow() {
+  return (screen.getByTitle('Live remote browser') as HTMLIFrameElement).contentWindow
 }
 
 describe('LiveViewIframe — worker postMessage contract', () => {
@@ -12,7 +16,7 @@ describe('LiveViewIframe — worker postMessage contract', () => {
     const onMessage = vi.fn()
     render(<LiveViewIframe handle={demoLiveViewHandle} onMessage={onMessage} />)
 
-    fireWindowMessage('tessera-session-done')
+    fireWindowMessage('tessera-session-done', window.location.origin, iframeWindow())
 
     expect(onMessage).toHaveBeenCalledWith('tessera-session-done')
   })
@@ -21,7 +25,7 @@ describe('LiveViewIframe — worker postMessage contract', () => {
     const onMessage = vi.fn()
     render(<LiveViewIframe handle={demoLiveViewHandle} onMessage={onMessage} />)
 
-    fireWindowMessage({ type: 'tessera-session-expired' })
+    fireWindowMessage({ type: 'tessera-session-expired' }, window.location.origin, iframeWindow())
 
     expect(onMessage).toHaveBeenCalledWith('tessera-session-expired')
   })
@@ -30,8 +34,26 @@ describe('LiveViewIframe — worker postMessage contract', () => {
     const onMessage = vi.fn()
     render(<LiveViewIframe handle={demoLiveViewHandle} onMessage={onMessage} />)
 
-    fireWindowMessage('some-other-app-event')
-    fireWindowMessage({ type: 'not-ours' })
+    fireWindowMessage('some-other-app-event', window.location.origin, iframeWindow())
+    fireWindowMessage({ type: 'not-ours' }, window.location.origin, iframeWindow())
+
+    expect(onMessage).not.toHaveBeenCalled()
+  })
+
+  it('ignores a valid worker message from another origin', () => {
+    const onMessage = vi.fn()
+    render(<LiveViewIframe handle={demoLiveViewHandle} onMessage={onMessage} />)
+
+    fireWindowMessage('tessera-session-done', 'https://attacker.example', iframeWindow())
+
+    expect(onMessage).not.toHaveBeenCalled()
+  })
+
+  it('ignores a valid worker message from another window', () => {
+    const onMessage = vi.fn()
+    render(<LiveViewIframe handle={demoLiveViewHandle} onMessage={onMessage} />)
+
+    fireWindowMessage('tessera-session-done', window.location.origin, window)
 
     expect(onMessage).not.toHaveBeenCalled()
   })

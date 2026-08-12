@@ -213,11 +213,11 @@ internal static class EgressProxyEndpoint
                         statusCode: StatusCodes.Status403Forbidden);
                 }
 
-                var principal = endUser.PreferredUsername ?? endUser.Subject;
+                var principal = endUser.CanonicalPrincipalId;
                 if (string.IsNullOrWhiteSpace(principal))
                 {
                     return Results.Json(
-                        new { error = "the forwarded end-user has no usable principal to bind an approval to" },
+                        new { error = "the forwarded end-user lacks canonical issuer, tenant, or subject identity" },
                         statusCode: StatusCodes.Status403Forbidden);
                 }
 

@@ -142,7 +142,7 @@ public sealed class CallerBrokerServiceTests
     }
 
     [Fact]
-    public async Task A_write_call_requires_confirmation_then_proceeds()
+    public async Task A_write_call_cannot_be_authorized_by_caller_confirmation()
     {
         var (svc, transport, _) = BuildDispatch();
         var id = await svc.AuthenticateAsync(CallerApp, UserAlice);
@@ -152,9 +152,8 @@ public sealed class CallerBrokerServiceTests
         Assert.Equal(0, transport.Calls); // never reached upstream without confirmation
 
         var confirmed = await svc.CallAsync(id, "sonarr", "sonarr_search", "{}", confirmed: true);
-        Assert.Equal("completed", confirmed.Status);
-        Assert.Equal(1, transport.Calls);
-        Assert.Equal("POST", transport.LastMethod);
+        Assert.Equal("stepup", confirmed.Status);
+        Assert.Equal(0, transport.Calls);
     }
 
     [Fact]
@@ -178,6 +177,42 @@ public sealed class CallerBrokerServiceTests
         Assert.True(id.Authenticated); // authenticated…
         var result = await svc.CallAsync(id, "sonarr", "sonarr_series", null, confirmed: false);
         Assert.Equal("denied", result.Status); // …but not authorized
+        Assert.Equal(0, transport.Calls);
+    }
+
+    [Fact]
+    public async Task Tenant_aware_user_is_denied_by_legacy_email_grant()
+    {
+        var store = new InMemoryCredentialStore();
+        store.Put("sonarr-alice", new CredentialBundle(AccessToken: "AT"));
+        var pdp = new PolicyDecisionPoint([
+            new Grant(CallerId, "sonarr", ["read:*"], "alice@example.com"),
+        ]);
+        var resolver = new CredentialResolver([
+            new TargetBinding("sonarr", "sonarr-alice", "alice@example.com"),
+        ], store);
+        var transport = new FakeTransport();
+        var config = new TesseraConfig
+        {
+            Egress = new EgressOptions { Enabled = true, AllowedHosts = ["sonarr.example"] },
+        };
+        var validator = new FakeTokenValidator()
+            .AddApp(CallerApp, CallerId)
+            .AddUser(UserAlice, "alice-oid", "alice@example.com", tenantId: "tenant-a");
+        var service = new CallerBrokerService(
+            validator,
+            new BrokerCore(pdp, resolver),
+            BrokerProviderGateway.Build(config, pdp, resolver, [SonarrRecipe()], transport));
+        var identity = await service.AuthenticateAsync(CallerApp, UserAlice);
+
+        var result = await service.CallAsync(
+            identity,
+            "sonarr",
+            "sonarr_series",
+            argsJson: null,
+            confirmed: false);
+
+        Assert.Equal("denied", result.Status);
         Assert.Equal(0, transport.Calls);
     }
 
@@ -280,7 +315,7 @@ public sealed class CallerBrokerServiceTests
     }
 
     [Fact]
-    public async Task Invoke_honours_step_up_on_a_write_tool()
+    public async Task Invoke_cannot_self_confirm_a_write_tool()
     {
         var (svc, transport, _) = BuildDispatch();
         var id = await svc.AuthenticateAsync(CallerApp, UserAlice);
@@ -291,8 +326,8 @@ public sealed class CallerBrokerServiceTests
         Assert.Equal(0, transport.Calls);
 
         var confirmed = await svc.InvokeAsync(id, "sonarr", "POST", "/command", "{}", confirmed: true);
-        Assert.Equal("completed", confirmed.Status);
-        Assert.Equal(1, transport.Calls);
+        Assert.Equal("stepup", confirmed.Status);
+        Assert.Equal(0, transport.Calls);
     }
 
     [Fact]

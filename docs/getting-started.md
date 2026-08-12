@@ -161,8 +161,11 @@ extra to deploy. Turn it on with two settings:
 
    ```jsonc
    // in tessera.json
-   "portal": { "admins": ["you@example.com"] }   // verified principals who get the operator view
+  "portal": { "admins": ["principal:sha256:<canonical-id>"] } // issuer+tenant+subject owner IDs
    ```
+
+  Obtain the canonical ID from a validated sign-in/self identity response or the
+  documented principal-ID utility; never place an email address here.
 
 2. **Register the portal's sign-in redirect** — the portal signs in as a **public
    SPA client** reusing the chat app (so its token's `aud` is what the broker

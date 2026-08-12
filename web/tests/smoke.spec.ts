@@ -5,20 +5,12 @@ async function signIn(page: import('@playwright/test').Page) {
   // Demo/dev loopback: the developer card signs in as a chosen principal.
   await page.getByLabel('Developer sign-in (local only)').fill('alice@example.com')
   await page.getByRole('button', { name: /continue/i }).click()
-  await expect(page).toHaveURL(/\/accounts$/)
-}
-
-async function openNav(page: import('@playwright/test').Page) {
-  // The shell must be painted before we probe the (phone-only) hamburger.
-  await expect(page.getByRole('heading', { name: 'My accounts' })).toBeVisible()
-  const menuButton = page.getByRole('button', { name: 'Open navigation' })
-  if (await menuButton.isVisible()) {
-    await menuButton.click()
-  }
+  await expect(page).toHaveURL(/\/chat$/)
 }
 
 test('sign in, read My accounts, open a connection — and reveal no secret', async ({ page }) => {
   await signIn(page)
+  await page.goto('/settings/admin/legacy-accounts')
 
   await expect(page.getByRole('heading', { name: 'My accounts' })).toBeVisible()
   await expect(page.getByText('acting as alice@example.com')).toBeVisible()
@@ -42,8 +34,7 @@ test('sign in, read My accounts, open a connection — and reveal no secret', as
 
 test('Users view shows the operator as Admin and the others as Members', async ({ page }) => {
   await signIn(page)
-  await openNav(page)
-  await page.getByRole('link', { name: 'Users' }).click()
+  await page.goto('/settings/admin/users')
 
   await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
 

@@ -1,7 +1,7 @@
 namespace Tessera.Core.Results;
 
 /// <summary>
-/// The five output classes for personal-data providers like Gmail / Microsoft
+/// The five output classes for personal-data providers
 /// Graph (service-access spec §"Output classes"). They graduate how much of a
 /// person's content crosses into a result, so a search can't accidentally spill a
 /// full mailbox: list/search returns <see cref="Metadata"/> + opaque

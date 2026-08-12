@@ -1,0 +1,73 @@
+{
+  "name": "tessera-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tessera Alpha macOS desktop client",
+  "author": "Tessera",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build:main": "tsc -p tsconfig.json",
+    "build:renderer": "node scripts/build-renderer.mjs",
+    "build": "npm run clean && npm run build:main && npm run build:renderer",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:electron": "npm run build && playwright test",
+    "test:packaged": "node scripts/prepare-test-app.mjs && TESSERA_PACKAGED_APP=$PWD/test-artifacts/Tessera.app/Contents/MacOS/Tessera playwright test",
+    "start": "npm run build && electron .",
+    "package:mac": "npm run build && electron-builder --mac dmg zip --publish never",
+    "verify:package": "node scripts/verify-package.mjs"
+  },
+  "devDependencies": {
+    "@electron/fuses": "2.1.3",
+    "@playwright/test": "1.60.0",
+    "@types/node": "24.12.3",
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "typescript": "6.0.2",
+    "vitest": "4.1.8"
+  },
+  "build": {
+    "appId": "ro.hont.tessera.desktop",
+    "productName": "Tessera",
+    "artifactName": "Tessera-Alpha-${version}-${arch}.${ext}",
+    "asar": true,
+    "compression": "maximum",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/main/**/*",
+      "dist/renderer/**/*",
+      "package.json"
+    ],
+    "afterPack": "scripts/apply-fuses.cjs",
+    "afterSign": "scripts/sign-app.cjs",
+    "protocols": [
+      {
+        "name": "Tessera",
+        "schemes": ["tessera"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "extendInfo": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": false
+        }
+      },
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ]
+    },
+    "dmg": {
+      "sign": false
+    }
+  }
+}

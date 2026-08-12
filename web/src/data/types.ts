@@ -39,17 +39,10 @@ export interface Recipe {
   displayName: string
 }
 
-/**
- * The connect-wizard write (`POST /portal/connections`).
- *
- * IMPORTANT: `credential` is the NAME of the vault secret that holds (or will
- * hold) the session bundle — never a password or secret value. The portal only
- * ever names the store secret; it never carries its contents.
- */
+/** The connect-wizard write. The server allocates the credential reference. */
 export interface CreateConnectionInput {
   provider: string
   principal: string
-  credential: string
 }
 
 export type ConnectionStatus =
@@ -272,4 +265,98 @@ export interface Schedule {
   /** Populated only once Tessera itself owns + tracks rotation (Mode U). */
   lastRotatedAt: string | null
   nextRotationAt: string | null
+}
+
+// ── R1 continuity (provider-neutral FollowUp product slice) ─────────────────
+
+export type FollowUpStatus = 'attention' | 'tracked' | 'conflict' | 'completed'
+export type FollowUpRevisionState =
+  | 'candidate'
+  | 'current'
+  | 'conflicted'
+  | 'superseded'
+  | 'rejected'
+export type FollowUpField = 'deliverable' | 'counterparty' | 'dueAt' | 'completedAt'
+
+export interface FollowUpSummary {
+  followUpId: string
+  status: FollowUpStatus
+  version: number
+  deliverable: string | null
+  counterparty: string | null
+  dueAt: string | null
+  candidateCount: number
+  conflictCount: number
+  updatedAt: string
+}
+
+export interface FollowUpRevision {
+  revisionId: string
+  field: FollowUpField
+  value: string
+  state: FollowUpRevisionState
+  evidenceRefs: string[]
+  sourceTimestamp: string
+  parserVersion: string
+  confidence: number
+  correctionEvidenceRef: string | null
+  lineageRevisionRefs: string[]
+  createdAt: string
+}
+
+export interface FollowUpTimelineEntry {
+  sequence: number
+  kind: string
+  field: FollowUpField | null
+  summary: string
+  evidenceRef: string
+  sourceTimestamp: string
+  recordedAt: string
+}
+
+export interface FollowUpDetail {
+  followUpId: string
+  status: FollowUpStatus
+  version: number
+  createdAt: string
+  updatedAt: string
+  revisions: FollowUpRevision[]
+  timeline: FollowUpTimelineEntry[]
+  timelineTruncated: boolean
+}
+
+export interface FollowUpList {
+  items: FollowUpSummary[]
+  truncated: boolean
+}
+
+export interface FollowUpMutationResult {
+  followUpId: string
+  version: number
+  replayed: boolean
+}
+
+export interface FollowUpImportInput {
+  operationId: string
+  followUpId?: string
+  expectedVersion?: number
+}
+
+export interface FollowUpAcceptInput {
+  operationId: string
+  expectedVersion: number
+  candidateRevisionIds?: string[]
+}
+
+export interface FollowUpFieldDecisionInput {
+  operationId: string
+  expectedVersion: number
+  field: FollowUpField
+  value: string
+}
+
+export interface FollowUpWhy {
+  followUpId: string
+  fields: Partial<Record<FollowUpField, FollowUpRevision[]>>
+  truncated: boolean
 }

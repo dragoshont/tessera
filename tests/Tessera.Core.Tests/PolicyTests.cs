@@ -1,3 +1,4 @@
+using Tessera.Core.Identity;
 using Tessera.Core.Model;
 using Tessera.Core.Policy;
 using Xunit;
@@ -6,6 +7,25 @@ namespace Tessera.Core.Tests;
 
 public sealed class PolicyTests
 {
+    [Fact]
+    public void Tenant_aware_user_cannot_authorize_through_legacy_email_grant()
+    {
+        const string email = "same@example.com";
+        var grant = new Grant("caller", "target", ["read:data"], email);
+        var request = new AccessRequest(
+            new CallerIdentity("caller", VerificationMethod.Network),
+            "target",
+            "read:data",
+            new EndUserAssertion(
+                "subject-b",
+                "https://issuer.example/v2.0",
+                VerificationMethod.OidcJwt,
+                email,
+                "tenant-b"));
+
+        Assert.False(grant.Matches(request));
+    }
+
     private static Grant ChatbotReadsPortal => new(
         Caller: "spiffe://tessera.local/chatbot",
         Target: "health-portal",

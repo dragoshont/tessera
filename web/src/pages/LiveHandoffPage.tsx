@@ -21,15 +21,14 @@ function principalFromConnectionId(connectionId: string): string | undefined {
 
 /**
  * The Live hand-off route (`/handoff/:connectionId`). Wires the broker client and
- * route params to the stage. With `?demo=1` it swaps in a local demo handle so the
- * stage is demoable on fixtures (the real worker is a labeled backend gap); the
- * honest default with no backend is the fail-closed Unavailable state.
+ * route params to the stage. Browser automation can use a local handle only in
+ * Vite's e2e mode; every production build uses the broker and fails closed.
  */
 export function LiveHandoffPage() {
   const { connectionId: rawConnectionId } = useParams()
   const connectionId = rawConnectionId ? decodeURIComponent(rawConnectionId) : ''
   const [searchParams] = useSearchParams()
-  const demo = searchParams.get('demo') === '1'
+  const automatedE2e = import.meta.env.MODE === 'e2e' && navigator.webdriver && searchParams.get('demo') === '1'
   const navigate = useNavigate()
   const client = useTesseraClient()
   const { data: connection } = useConnection(connectionId)
@@ -39,8 +38,8 @@ export function LiveHandoffPage() {
 
   const requestLiveView = useCallback(
     (id: string): Promise<LiveViewResult> =>
-      demo ? Promise.resolve({ handle: demoLiveViewHandle }) : client.requestLiveView(id),
-    [client, demo],
+      automatedE2e ? Promise.resolve({ handle: demoLiveViewHandle }) : client.requestLiveView(id),
+    [automatedE2e, client],
   )
 
   return (

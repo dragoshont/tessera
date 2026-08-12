@@ -30,6 +30,7 @@ internal sealed class BindingDto
     public string? OnBehalfOf { get; init; }
     public string? Owner { get; init; }
     public string? Guardian { get; init; }
+    public string? PrincipalId { get; init; }
 }
 
 internal sealed class RecipeDto
@@ -114,7 +115,13 @@ public sealed record LoadedPolicy(
             .ToArray();
 
         var bindings = dto.Bindings
-            .Select(b => new TargetBinding(b.Target, b.Credential, b.OnBehalfOf, CredentialOwners.Parse(b.Owner), b.Guardian))
+            .Select(b => new TargetBinding(
+                b.Target,
+                b.Credential,
+                b.OnBehalfOf,
+                CredentialOwners.Parse(b.Owner),
+                b.Guardian,
+                b.PrincipalId))
             .ToArray();
 
         var recipes = dto.Recipes
@@ -209,6 +216,7 @@ public sealed record LoadedPolicy(
                 // default) round-trip back to null — a faithful document (ADR 0008).
                 Owner = b.Owner == CredentialOwner.Service ? null : CredentialOwners.ToToken(b.Owner),
                 Guardian = b.Guardian,
+                PrincipalId = b.PrincipalId,
             })
             .ToList(),
         Recipes = Recipes

@@ -1,11 +1,10 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Activity, Inbox, Lock, LogOut, Menu, Radar, ShieldCheck, Users, Wallet } from 'lucide-react'
+import { Activity, Blocks, Bot, Brain, CalendarClock, Lock, LogOut, Menu, Radar, Settings2, Users, Wallet } from 'lucide-react'
 import type { Person } from '../../data/types'
 import { cn } from '../../lib/utils'
 import { useSession } from '../../app/session'
 import { Avatar } from '../ui/avatar'
-import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '../ui/sheet'
 import { TesseraMark } from '../common/TesseraMark'
@@ -29,49 +28,58 @@ function SectionLabel({ children }: { children: ReactNode }) {
 
 export function SidebarNav({
   isAdmin,
-  actionRequiredCount = 0,
   onNavigate,
 }: {
   isAdmin: boolean
-  actionRequiredCount?: number
   onNavigate?: () => void
 }) {
   return (
     <nav className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <SectionLabel>Mine</SectionLabel>
+        <NavLink to="/chat" className={navItemClass} onClick={onNavigate}>
+          <Bot className="h-4 w-4" aria-hidden />
+          Chat
+        </NavLink>
+        <NavLink to="/jobs" className={navItemClass} onClick={onNavigate}>
+          <CalendarClock className="h-4 w-4" aria-hidden />
+          Jobs
+        </NavLink>
         <NavLink to="/accounts" className={navItemClass} onClick={onNavigate}>
           <Wallet className="h-4 w-4" aria-hidden />
-          My accounts
+          Accounts
         </NavLink>
         <NavLink to="/activity" className={navItemClass} onClick={onNavigate}>
           <Activity className="h-4 w-4" aria-hidden />
           Activity &amp; access
         </NavLink>
-        <NavLink to="/pending-writes" className={navItemClass} onClick={onNavigate}>
-          <ShieldCheck className="h-4 w-4" aria-hidden />
-          Pending writes
+        <NavLink to="/plugins" className={navItemClass} onClick={onNavigate}>
+          <Blocks className="h-4 w-4" aria-hidden />
+          Plugins
         </NavLink>
-        <NavLink to="/action-required" className={navItemClass} onClick={onNavigate}>
-          <Inbox className="h-4 w-4" aria-hidden />
-          <span className="flex-1">Action required</span>
-          {actionRequiredCount > 0 ? <Badge variant="secondary">{actionRequiredCount}</Badge> : null}
+        <NavLink to="/memory" className={navItemClass} onClick={onNavigate}>
+          <Brain className="h-4 w-4" aria-hidden />
+          Memory
+        </NavLink>
+        <NavLink to="/settings" className={navItemClass} onClick={onNavigate}>
+          <Settings2 className="h-4 w-4" aria-hidden />
+          Settings
         </NavLink>
       </div>
 
       {isAdmin ? (
         <div className="flex flex-col gap-1">
           <SectionLabel>Admin</SectionLabel>
-          <NavLink to="/admin/users" className={navItemClass} onClick={onNavigate}>
+          <NavLink to="/settings/admin/users" className={navItemClass} onClick={onNavigate}>
             <Users className="h-4 w-4" aria-hidden />
             Users
           </NavLink>
-          <NavLink to="/admin/observability" className={navItemClass} onClick={onNavigate}>
+          <NavLink to="/settings/admin/observability" className={navItemClass} onClick={onNavigate}>
             <Radar className="h-4 w-4" aria-hidden />
             Observability
           </NavLink>
           <NavLink
-            to="/admin/connections"
+            to="/settings/admin/connections"
             className={navItemClass}
             onClick={onNavigate}
             title="Step-up required to enter"

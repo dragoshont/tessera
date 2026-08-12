@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { LiveViewHandle } from '../../data/types'
 import { cn } from '../../lib/utils'
 import { parseLiveViewMessage, type LiveViewMessage } from './live-view-messages'
@@ -23,17 +23,25 @@ export interface LiveViewIframeProps {
  * during login.
  */
 export function LiveViewIframe({ handle, onMessage, onReady, className }: LiveViewIframeProps) {
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const expectedOrigin = useMemo(
+    () => new URL(handle.liveViewUrl, window.location.href).origin,
+    [handle.liveViewUrl],
+  )
+
   useEffect(() => {
     function handleWindowMessage(event: MessageEvent) {
+      if (event.origin !== expectedOrigin || event.source !== iframeRef.current?.contentWindow) return
       const message = parseLiveViewMessage(event.data)
       if (message) onMessage(message)
     }
     window.addEventListener('message', handleWindowMessage)
     return () => window.removeEventListener('message', handleWindowMessage)
-  }, [onMessage])
+  }, [expectedOrigin, onMessage])
 
   return (
     <iframe
+      ref={iframeRef}
       // A generic title — never the worker URL.
       title="Live remote browser"
       src={handle.liveViewUrl}

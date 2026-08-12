@@ -1,0 +1,29 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "20260809-tessera-kernel-docs",
+  "status": "passed",
+  "startedAt": "2026-08-09T20:21:30Z",
+  "completedAt": "2026-08-09T22:04:35Z",
+  "phases": [
+    {"phase": 1, "name": "Grounding and contract", "status": "completed", "result": "Copilot/GPT PASS; Claude Sonnet PASS; deterministic gates green"},
+    {"phase": 2, "name": "Documentation implementation", "status": "completed", "result": "16 required files created; content check passed"},
+    {"phase": 3, "name": "Review and handoff", "status": "completed", "result": "599 backend + 74 web PASS; architecture PASS; security PASS; UTC inventory persisted"}
+  ],
+  "artifacts": {
+    "intake": ".architrave/runs/20260809-tessera-kernel-docs/intake.md",
+    "tournament": ".architrave/runs/20260809-tessera-kernel-docs/tournament.md",
+    "recommendedPlan": ".architrave/runs/20260809-tessera-kernel-docs/recommended-plan.md",
+    "deterministicGates": ".architrave/runs/20260809-tessera-kernel-docs/deterministic-gates.md",
+    "judgePre": ".architrave/runs/20260809-tessera-kernel-docs/judge-pre.md",
+    "judgePost": ".architrave/runs/20260809-tessera-kernel-docs/judge-post.md",
+    "runtimeObserver": ".architrave/runs/20260809-tessera-kernel-docs/runtime-observer.md",
+    "phaseLedger": ".architrave/runs/20260809-tessera-kernel-docs/phase-ledger.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 0,
+    "promotionsProposed": 0,
+    "disposition": "repo profile stale facts refreshed; no repeated lesson promoted; artifacts reviewed for secret values"
+  }
+}

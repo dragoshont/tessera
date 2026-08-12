@@ -43,7 +43,6 @@ const draft = {
   provider: 'health',
   displayName: 'Health Portal',
   principal: 'bob@example.com',
-  credential: 'health-portal-bob-session',
 }
 
 export const Step1Provider: Story = {}
@@ -65,16 +64,7 @@ export const Step2PersonMember: Story = {
   },
 }
 
-export const Step3Credential: Story = {
-  args: {
-    initialState: {
-      step: 'credential',
-      draft: { provider: 'health', displayName: 'Health Portal', principal: 'bob@example.com' },
-    },
-  },
-}
-
-export const Step4SeedUnavailable: Story = {
+export const Step3SeedUnavailable: Story = {
   args: {
     initialState: {
       step: 'seed',
@@ -87,17 +77,17 @@ export const Step4SeedUnavailable: Story = {
   },
 }
 
-export const Step4SeedReady: Story = {
+export const Step3SeedReady: Story = {
   args: {
     initialState: { step: 'seed', draft, seed: { phase: 'ready', handle: demoLiveViewHandle } },
   },
 }
 
-export const Step5Finish: Story = {
+export const Step4Finish: Story = {
   args: { initialState: { step: 'finish', draft } },
 }
 
-export const Step5FinishError: Story = {
+export const Step4FinishError: Story = {
   args: {
     initialState: {
       step: 'finish',

@@ -25,6 +25,12 @@ public sealed class OAuthMcpConnectEndpointTests
     private const string UserAlice = "user-alice-token";
     private const string UserBob = "user-bob-token";
     private const string AdminBoss = "user-boss-token";
+    private static readonly string BossPrincipalId = Tessera.Core.Kernel.PrincipalRef.Create(
+        "https://login.microsoftonline.com/test/v2.0",
+        "test",
+        "boss-oid",
+        "boss@example.com",
+        DateTimeOffset.UnixEpoch).PrincipalId;
 
 
     // ── Tier 1: auth + wiring gates (default services) ──────────────────────────
@@ -161,7 +167,7 @@ public sealed class OAuthMcpConnectEndpointTests
                   "policy": { "default": "deny" },
                   "audit": { "enabled": false },
                   "egress": { "enabled": true, "allowedHosts": ["mob.test", "as.test"] },
-                  "portal": { "admins": ["boss@example.com"] },
+                  "portal": { "admins": ["{{BossPrincipalId}}"] },
                   {{oauthLine}}
                 }
                 """);
@@ -180,9 +186,9 @@ public sealed class OAuthMcpConnectEndpointTests
                 """);
 
             var validator = new FakeTokenValidator()
-                .AddUser(UserAlice, "alice-oid", "alice@example.com")
-                .AddUser(UserBob, "bob-oid", "bob@example.com")
-                .AddUser(AdminBoss, "boss-oid", "boss@example.com");
+                .AddUser(UserAlice, "alice-oid", "alice@example.com", tenantId: "test")
+                .AddUser(UserBob, "bob-oid", "bob@example.com", tenantId: "test")
+                .AddUser(AdminBoss, "boss-oid", "boss@example.com", tenantId: "test");
 
             var options = new BrokerHostOptions
             {

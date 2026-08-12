@@ -1,0 +1,29 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "20260811-plugin-boundary-correction",
+  "status": "blocked",
+  "startedAt": "2026-08-11T15:52:53Z",
+  "completedAt": "2026-08-11T20:17:30Z",
+  "artifacts": {
+    "intake": ".architrave/runs/20260811-plugin-boundary-correction/intake.md",
+    "tournament": ".architrave/runs/20260811-plugin-boundary-correction/tournament.md",
+    "recommendedPlan": ".architrave/runs/20260811-plugin-boundary-correction/recommended-plan.md",
+    "phaseLedger": ".architrave/runs/20260811-plugin-boundary-correction/phase-ledger.md",
+    "deterministicGates": ".architrave/runs/20260811-plugin-boundary-correction/deterministic-gates.md",
+    "judgePre": ".architrave/runs/20260811-plugin-boundary-correction/judge-pre.md",
+    "judgePost": ".architrave/runs/20260811-plugin-boundary-correction/judge-post.md",
+    "runtimeObserver": ".architrave/runs/20260811-plugin-boundary-correction/runtime-observer.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 0,
+    "promotionsProposed": 0
+  },
+  "phases": [
+    { "phase": 1, "name": "Contract and generic runtime", "status": "passed", "result": "real MCP, typed drift, trust and receipt controls pass" },
+    { "phase": 2, "name": "Provider extraction", "status": "passed", "result": "Gmail, GitHub and RM are executable optional plugins" },
+    { "phase": 3, "name": "Boundary proof and stabilization", "status": "passed", "result": "768 backend tests and deterministic repository gates pass" },
+    { "phase": 4, "name": "Homelab and real E2E", "status": "blocked", "result": "human deployment and identity/consent checkpoints remain" }
+  ]
+}

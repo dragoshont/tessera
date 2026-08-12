@@ -82,4 +82,13 @@ public sealed class BrokerStatus
 
     /// <summary>The startup self-test result, if one ran.</summary>
     public SelfTestResult? SelfTest { get; set; }
+
+    /// <summary>True when the R2 product store/scheduler are composed for this host.</summary>
+    public bool ProductConfigured { get; set; }
+
+    /// <summary>Last successful scheduler pass. Null while the scheduler is starting or not configured.</summary>
+    public DateTimeOffset? SchedulerLastSuccess { get; set; }
+
+    /// <summary>Stable secret-free scheduler failure code, if the most recent pass failed.</summary>
+    public string? SchedulerErrorCode { get; set; }
 }

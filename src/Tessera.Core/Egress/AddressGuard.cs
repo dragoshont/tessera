@@ -53,6 +53,29 @@ public sealed class AddressGuard
     /// </summary>
     public static readonly AddressGuard PublicOnly = new(allowLoopback: false, blockPrivateNetworks: true);
 
+    /// <summary>
+    /// Provider guard: public addresses plus explicit loopback development endpoints,
+    /// with private/internal and metadata ranges blocked.
+    /// </summary>
+    public static readonly AddressGuard PublicOrLoopback = new(allowLoopback: true, blockPrivateNetworks: true);
+
+    /// <summary>
+    /// Applies origin-host policy as well as resolved-address policy. Loopback is
+    /// allowed only when the configured origin is explicitly localhost or a
+    /// loopback IP literal, never when an arbitrary DNS name resolves to loopback.
+    /// </summary>
+    public bool IsAllowed(string host, IPAddress address)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(host);
+        ArgumentNullException.ThrowIfNull(address);
+        var normalized = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+        if (!IPAddress.IsLoopback(normalized)) return IsAllowed(normalized);
+        if (!_allowLoopback) return false;
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        return IPAddress.TryParse(host, out var literal)
+            && IPAddress.IsLoopback(literal.IsIPv4MappedToIPv6 ? literal.MapToIPv4() : literal);
+    }
+
     /// <summary>True when <paramref name="address"/> is a safe egress destination.</summary>
     public bool IsAllowed(IPAddress address)
     {

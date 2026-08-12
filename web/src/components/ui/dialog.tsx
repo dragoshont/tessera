@@ -13,7 +13,7 @@ function DialogOverlay({ className, ...props }: ComponentPropsWithoutRef<typeof 
   return (
     <DialogPrimitive.Overlay
       className={cn(
-        'fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] data-[state=open]:animate-in data-[state=closed]:animate-out',
+        'fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] data-[state=open]:animate-in data-[state=closed]:animate-out motion-reduce:animate-none',
         className,
       )}
       {...props}
@@ -31,7 +31,7 @@ export function DialogContent({ className, children, showClose = true, ...props 
       <DialogOverlay />
       <DialogPrimitive.Content
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 flex w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border bg-card p-6 text-foreground shadow-xl',
+          'fixed left-1/2 top-1/2 z-50 flex w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border bg-card p-6 text-foreground shadow-xl motion-reduce:transition-none',
           className,
         )}
         {...props}

@@ -1,0 +1,22 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "20260809-product-mvp-audit",
+  "status": "passed",
+  "startedAt": "2026-08-09T17:19:29Z",
+  "completedAt": "2026-08-09T17:33:38Z",
+  "artifacts": {
+    "intake": ".architrave/runs/20260809-product-mvp-audit/intake.md",
+    "tournament": ".architrave/runs/20260809-product-mvp-audit/tournament.md",
+    "recommendedPlan": ".architrave/runs/20260809-product-mvp-audit/recommended-plan.md",
+    "deterministicGates": ".architrave/runs/20260809-product-mvp-audit/deterministic-gates.md",
+    "judgePre": ".architrave/runs/20260809-product-mvp-audit/judge-pre.md",
+    "judgePost": ".architrave/runs/20260809-product-mvp-audit/judge-post.md",
+    "runtimeObserver": ".architrave/runs/20260809-product-mvp-audit/runtime-observer.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 2,
+    "promotionsProposed": 0
+  }
+}

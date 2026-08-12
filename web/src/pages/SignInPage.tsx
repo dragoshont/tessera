@@ -9,7 +9,7 @@ export function SignInPage() {
 
   // Once /portal/me resolves (dev submit or OIDC callback), leave the sign-in screen.
   useEffect(() => {
-    if (status === 'authenticated') navigate('/accounts', { replace: true })
+    if (status === 'authenticated') navigate('/chat', { replace: true })
   }, [status, navigate])
 
   return (

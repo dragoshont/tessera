@@ -86,6 +86,30 @@ public sealed class EgressGuardTests
         Assert.True(AddressGuard.PublicOnly.IsAllowed(IPAddress.Parse(ip)));
     }
 
+    [Theory]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("::1", true)]
+    [InlineData("8.8.8.8", true)]
+    [InlineData("10.0.0.1", false)]
+    [InlineData("192.168.1.10", false)]
+    [InlineData("169.254.169.254", false)]
+    public void AddressGuard_PublicOrLoopback_allows_local_development_but_blocks_private_networks(string ip,bool expected)
+    {
+        Assert.Equal(expected,AddressGuard.PublicOrLoopback.IsAllowed(IPAddress.Parse(ip)));
+    }
+
+    [Theory]
+    [InlineData("localhost", "127.0.0.1", true)]
+    [InlineData("127.0.0.1", "127.0.0.1", true)]
+    [InlineData("::1", "::1", true)]
+    [InlineData("models.example", "127.0.0.1", false)]
+    [InlineData("models.example", "::1", false)]
+    [InlineData("models.example", "8.8.8.8", true)]
+    public void AddressGuard_PublicOrLoopback_requires_explicit_loopback_origin(string host,string ip,bool expected)
+    {
+        Assert.Equal(expected,AddressGuard.PublicOrLoopback.IsAllowed(host,IPAddress.Parse(ip)));
+    }
+
     // ── SsrfGuard: host allow-list + scheme opt-in ────────────────────────────
 
     [Fact]

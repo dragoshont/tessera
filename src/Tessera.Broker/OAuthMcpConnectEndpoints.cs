@@ -41,8 +41,10 @@ public static class OAuthMcpConnectEndpoints
             IReadOnlyList<Recipe> recipes,
             CancellationToken ct) =>
         {
-            var caller = await PortalEndpoints.ResolvePrincipalAsync(ctx, validator, config).ConfigureAwait(false);
-            if (caller is null)
+            var user = await PortalEndpoints.ResolveEndUserAsync(ctx, validator, config).ConfigureAwait(false);
+            var callerDisplay = user?.PreferredUsername ?? user?.Subject;
+            var caller = user?.CanonicalPrincipalId;
+            if (caller is null || callerDisplay is null)
             {
                 return Results.Json(new { error = "unauthenticated" }, statusCode: 401);
             }
@@ -53,13 +55,16 @@ public static class OAuthMcpConnectEndpoints
             }
 
             var target = body.Target.Trim();
-            var principal = string.IsNullOrWhiteSpace(body.Principal) ? caller : body.Principal.Trim();
-            if (!string.Equals(principal, caller, StringComparison.OrdinalIgnoreCase) && !portal.IsAdmin(caller))
+            if (!string.IsNullOrWhiteSpace(body.Principal)
+                && !string.Equals(body.Principal.Trim(), callerDisplay, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(body.Principal.Trim(), caller, StringComparison.Ordinal))
             {
                 return Results.Json(
-                    new { error = "forbidden: only an operator may connect on another person's behalf" },
+                    new { error = "forbidden: the connection owner must authorize their own account" },
                     statusCode: 403);
             }
+
+            var principal = caller;
 
             var recipe = recipes.FirstOrDefault(r => string.Equals(r.Target, target, StringComparison.Ordinal));
             if (recipe?.OAuthMcp is not { } oauth)
@@ -124,7 +129,12 @@ public static class OAuthMcpConnectEndpoints
 
             // Create the per-principal binding now that a real token was written (the state proved
             // this callback corresponds to the operator's authenticated begin).
-            await portal.AddConnectionAsync(result.Target, result.Principal, result.SecretName, cancellationToken: ct)
+                await portal.AddConnectionAsync(
+                    result.Target,
+                    result.Principal,
+                    result.SecretName,
+                    principalId: result.Principal,
+                    cancellationToken: ct)
                 .ConfigureAwait(false);
 
             return Results.Text(

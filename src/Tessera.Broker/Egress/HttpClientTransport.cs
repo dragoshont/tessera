@@ -16,8 +16,9 @@ namespace Tessera.Broker.Egress;
 /// so a DNS rebind can't swap in an internal address between check and connect
 /// (the TOCTOU the OWASP/MCP SSRF guidance calls out).
 /// </summary>
-public sealed class HttpClientTransport : IHttpTransport, IDisposable
+public sealed class HttpClientTransport : IHttpTransport, IStreamingHttpTransport, IDisposable
 {
+    private const int MaximumResponseBytes = 1024 * 1024;
     private readonly HttpClient _client;
 
     /// <summary>Creates the transport over an address guard (defaults to loopback-blocked).</summary>
@@ -69,7 +70,7 @@ public sealed class HttpClientTransport : IHttpTransport, IDisposable
         var anyAllowed = false;
         foreach (var address in addresses)
         {
-            if (!guard.IsAllowed(address))
+            if (!guard.IsAllowed(host, address))
             {
                 continue;
             }
@@ -130,6 +131,14 @@ public sealed class HttpClientTransport : IHttpTransport, IDisposable
         }
 
         using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await response.Content.LoadIntoBufferAsync(MaximumResponseBytes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new TransportResponseTooLargeException(MaximumResponseBytes) { Source = exception.Source };
+        }
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
         var responseHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -139,6 +148,77 @@ public sealed class HttpClientTransport : IHttpTransport, IDisposable
         }
 
         return new TransportResponse((int)response.StatusCode, responseHeaders, text);
+    }
+
+    /// <inheritdoc/>
+    public async Task<StreamingTransportResponse> SendStreamingAsync(
+        string method,
+        string url,
+        IReadOnlyDictionary<string, string> headers,
+        string? body,
+        Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> onChunk,
+        int maximumResponseBytes,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(onChunk);
+        if (maximumResponseBytes is < 1 or > MaximumResponseBytes)
+            throw new ArgumentOutOfRangeException(nameof(maximumResponseBytes));
+        using var request = CreateRequest(method, url, headers, body);
+        using var response = await _client.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        var responseHeaders = ResponseHeaders(response);
+        if (!response.IsSuccessStatusCode)
+        {
+            try
+            {
+                await response.Content.LoadIntoBufferAsync(maximumResponseBytes, cancellationToken).ConfigureAwait(false);
+            }
+            catch (HttpRequestException exception)
+            {
+                throw new TransportResponseTooLargeException(maximumResponseBytes) { Source = exception.Source };
+            }
+            return new((int)response.StatusCode, responseHeaders,
+                await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var buffer = new byte[8192];
+        var total = 0;
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read == 0) break;
+            total = checked(total + read);
+            if (total > maximumResponseBytes)
+                throw new TransportResponseTooLargeException(maximumResponseBytes);
+            await onChunk(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
+        return new((int)response.StatusCode, responseHeaders, null);
+    }
+
+    private static HttpRequestMessage CreateRequest(
+        string method,
+        string url,
+        IReadOnlyDictionary<string, string> headers,
+        string? body)
+    {
+        var request = new HttpRequestMessage(new HttpMethod(method), url);
+        string? contentType = null;
+        foreach (var (name, value) in headers)
+        {
+            if (string.Equals(name, "Content-Type", StringComparison.OrdinalIgnoreCase)) contentType = value;
+            else request.Headers.TryAddWithoutValidation(name, value);
+        }
+        if (body is not null)
+            request.Content = new StringContent(body, System.Text.Encoding.UTF8, contentType ?? "application/json");
+        return request;
+    }
+
+    private static Dictionary<string, string> ResponseHeaders(HttpResponseMessage response)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, values) in response.Headers) headers[name] = string.Join(", ", values);
+        return headers;
     }
 
     /// <inheritdoc/>

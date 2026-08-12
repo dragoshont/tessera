@@ -311,7 +311,9 @@ public sealed class PortalService
         var views = new List<PersonView>(people.Count);
         foreach (var person in people)
         {
-            var connections = await ListConnectionsAsync(person.Principal, cancellationToken).ConfigureAwait(false);
+            var connections = await ListConnectionsAsync(
+                person.Principal,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             var needsAttention = connections.Count(c => c.Status is not "live");
             views.Add(new PersonView(person.Principal, person.Role, connections.Count, needsAttention));
         }
@@ -323,7 +325,10 @@ public sealed class PortalService
     /// Lists the connections that act on behalf of <paramref name="principal"/>,
     /// each with a health badge derived from the store's secret-free status.
     /// </summary>
-    public async Task<IReadOnlyList<PortalConnection>> ListConnectionsAsync(string principal, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PortalConnection>> ListConnectionsAsync(
+        string principal,
+        string? principalId = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(principal);
 
@@ -331,11 +336,16 @@ public sealed class PortalService
         var connections = new List<PortalConnection>();
         foreach (var binding in policy.Bindings)
         {
-            if (binding.Principal is null
-                || !string.Equals(binding.Principal, principal, StringComparison.OrdinalIgnoreCase))
+            var matchesOwner = principalId is not null
+                ? string.Equals(binding.PrincipalId, principalId, StringComparison.Ordinal)
+                : binding.Principal is not null
+                    && string.Equals(binding.Principal, principal, StringComparison.OrdinalIgnoreCase);
+            if (!matchesOwner)
             {
                 continue;
             }
+
+            var ownerPrincipal = binding.Principal ?? principal;
 
             var recipe = FindRecipe(policy, binding.Target);
             var health = await _resolver.AssessBindingAsync(binding, cancellationToken).ConfigureAwait(false);
@@ -348,13 +358,13 @@ public sealed class PortalService
             DateTimeOffset? lastVerifiedAt = null;
             if (health.Status == CredentialStatus.Present)
             {
-                var record = await TryGetHealthAsync($"{binding.Target}:{binding.Principal}", cancellationToken).ConfigureAwait(false);
+                var record = await TryGetHealthAsync($"{binding.Target}:{ownerPrincipal}", cancellationToken).ConfigureAwait(false);
                 (verifiedAlive, lastVerifiedAt) = ConnectionHealthVerdict.Resolve(record, DateTimeOffset.UtcNow, _freshnessMaxAge);
             }
 
             connections.Add(new PortalConnection(
-                ConnectionId: $"{binding.Target}:{binding.Principal}",
-                OwnerPrincipal: binding.Principal,
+                ConnectionId: $"{binding.Target}:{ownerPrincipal}",
+                OwnerPrincipal: ownerPrincipal,
                 Provider: binding.Target,
                 DisplayName: recipe?.Description ?? binding.Target,
                 Status: MapStatus(health.Status, verifiedAlive),
@@ -435,24 +445,29 @@ public sealed class PortalService
         string credential,
         CredentialOwner owner = CredentialOwner.User,
         string? guardian = null,
+        string? principalId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(provider);
         ArgumentException.ThrowIfNullOrWhiteSpace(principal);
         ArgumentException.ThrowIfNullOrWhiteSpace(credential);
 
-        var binding = new TargetBinding(provider, credential, principal, owner, guardian);
+        var binding = new TargetBinding(provider, credential, principal, owner, guardian, principalId);
         LoadedPolicy updated;
         lock (_gate)
         {
             // Replace any existing binding for this (provider, principal) pair so a
             // re-add re-points the credential instead of duplicating the row.
             var bindings = _policy.Bindings
-                .Where(b => !(SameTarget(b.Target, provider) && SamePrincipal(b.Principal, principal)))
+                .Where(b => !(SameTarget(b.Target, provider)
+                    && (principalId is not null
+                        ? string.Equals(b.PrincipalId, principalId, StringComparison.Ordinal)
+                        : SamePrincipal(b.Principal, principal))))
                 .Append(binding)
                 .ToArray();
             updated = new LoadedPolicy(_policy.Grants, bindings, _policy.Recipes);
             _policy = updated;
+            _resolver.ReplaceBindings(bindings);
         }
 
         // Persist outside the lock; a read-only mount (GitOps) is not an error —
@@ -479,11 +494,19 @@ public sealed class PortalService
         {
             var recipe = FindRecipe(updated, provider);
             var scopes = recipe?.ExposedActions is { Count: > 0 } acts ? acts.ToArray() : null;
-            var receipt = new ConsentReceipt(principal, provider, provider, owner, DateTimeOffset.UtcNow, guardian, scopes);
+            var consentPrincipal = principalId ?? principal;
+            var receipt = new ConsentReceipt(
+                consentPrincipal,
+                provider,
+                provider,
+                owner,
+                DateTimeOffset.UtcNow,
+                guardian,
+                scopes);
             lock (_gate)
             {
                 // Replace any prior consent for the same (principal, target).
-                _consents.RemoveAll(c => c.Covers(principal, provider, provider));
+                _consents.RemoveAll(c => c.Covers(consentPrincipal, provider, provider));
                 _consents.Add(receipt);
             }
         }
@@ -505,6 +528,26 @@ public sealed class PortalService
             Owner: CredentialOwners.ToToken(binding.Owner),
             Guardian: binding.Guardian);
     }
+
+    /// <summary>
+    /// Creates a portal-authored connection with an opaque, server-generated
+    /// credential reference. The browser never selects a vault/store key.
+    /// </summary>
+    public Task<PortalConnection> AddPortalConnectionAsync(
+        string provider,
+        string principal,
+        string? principalId,
+        CredentialOwner owner = CredentialOwner.User,
+        string? guardian = null,
+        CancellationToken cancellationToken = default)
+        => AddConnectionAsync(
+            provider,
+            principal,
+            $"tessera-ref-{Guid.NewGuid():N}",
+            owner,
+            guardian,
+            principalId,
+            cancellationToken);
 
     private static bool SameTarget(string a, string b) => string.Equals(a, b, StringComparison.Ordinal);
 

@@ -18,6 +18,8 @@ metadata:
     app: tessera
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: tessera
@@ -39,7 +41,7 @@ spec:
       containers:
         - name: tessera
           # 1. Pin a real tag (e.g. a release tag or sha-<commit>).
-          image: ghcr.io/dragoshont/tessera:latest
+          image: ghcr.io/dragoshont/tessera:sha-REVIEWED_COMMIT
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -63,6 +65,14 @@ spec:
               value: ""
             - name: HOME
               value: "/tmp"
+            - name: TESSERA_PRODUCT_DB_PATH
+              value: "/data/tessera-product.db"
+            - name: TESSERA_CONTINUITY_DB_PATH
+              value: "/data/tessera-product.db"
+            - name: TESSERA_PLUGIN_ROOT
+              value: "/app/plugins"
+            - name: TESSERA_PLUGIN_CATALOG
+              value: "/app/plugins/catalog.json"
           envFrom:
             # 4. How the broker authenticates to Key Vault. DefaultAzureCredential
             #    resolves, in order: Workload Identity Federation / Managed Identity
@@ -77,6 +87,8 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: data
+              mountPath: /data
           startupProbe:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 3
@@ -107,6 +119,9 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 32Mi
+        - name: data
+          persistentVolumeClaim:
+            claimName: tessera-data
 ---
 apiVersion: v1
 kind: Service

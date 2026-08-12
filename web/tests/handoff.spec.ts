@@ -10,7 +10,7 @@ async function signIn(page: Page) {
   // Demo/dev loopback: the developer card signs in as a chosen principal.
   await page.getByLabel('Developer sign-in (local only)').fill('alice@example.com')
   await page.getByRole('button', { name: /continue/i }).click()
-  await expect(page).toHaveURL(/\/accounts$/)
+  await expect(page).toHaveURL(/\/chat$/)
 }
 
 test('live hand-off — pre-flight then fail-closed Unavailable (the honest default)', async ({
@@ -18,6 +18,7 @@ test('live hand-off — pre-flight then fail-closed Unavailable (the honest defa
 }, testInfo) => {
   const tag = testInfo.project.name
   await signIn(page)
+  await page.goto('/settings/admin/legacy-accounts')
 
   // Reach the stage through the real row action (⋯ → Re-seed), client-side so the
   // session survives.

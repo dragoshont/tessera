@@ -52,7 +52,7 @@ const preview: Preview = {
   },
   parameters: {
     layout: 'fullscreen',
-    a11y: { test: 'todo' },
+    a11y: { test: 'error' },
   },
 }
 

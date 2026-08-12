@@ -107,7 +107,7 @@ The admin portal (a thin convenience layer; ADR 0016).
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `admins` | string[] | `[]` | The operator allow-list: verified principals (`oid` / `preferred_username`) who may enter the operator surface. Everyone else is a Member who sees only their own connections. Empty = self-service only. |
+| `admins` | string[] | `[]` | Operator allow-list. In OIDC mode every entry is a canonical `principal:sha256:...` ID derived from issuer + tenant + subject; display email, `preferred_username`, and bare `oid` are refused. Loopback dev mode may use its explicit dev principal. Empty = self-service only. |
 | `webRoot` | string | `null` | Path to the built SPA (`web/dist`). When set and present, the broker serves the portal at `/`. Unset = API only. |
 
 ---

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+homelab="${HOMELAB_REPO:-$root/../homelab}"
+rendered="${TMPDIR:-/tmp}/tessera-homelab-plan.yaml"
+
+if [[ ! -d "$homelab/apps/platform/tessera" ]]; then
+  echo "homelab Tessera manifests not found at $homelab/apps/platform/tessera" >&2
+  exit 1
+fi
+
+kubectl kustomize "$root/deploy/k8s" > "$rendered"
+test -s "$rendered"
+if command -v kubeconform >/dev/null 2>&1; then
+  kubeconform -summary "$rendered"
+fi
+
+for file in configmap.yaml deployment.yaml ingressroute.yaml kustomization.yaml; do
+  test -f "$homelab/apps/platform/tessera/$file"
+done
+
+echo "PLAN READY"
+echo "Rendered template: $rendered"
+echo "Target overlay: $homelab/apps/platform/tessera"
+echo "Required reviewed changes: docs/tessera/delivery/DEPLOYMENT_RUNBOOK.md"
+echo "No cluster mutation, git push, Flux reconcile, or secret read was performed."
+echo "Human gate: review the GitOps diff, pin matching Tessera/RM image tags, then commit and push the private homelab repo."

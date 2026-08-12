@@ -1,0 +1,29 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "20260811-provider-boundary-correction",
+  "status": "in-progress",
+  "startedAt": "2026-08-11T15:43:27Z",
+  "artifacts": {
+    "intake": ".architrave/runs/20260811-provider-boundary-correction/intake.md",
+    "tournament": ".architrave/runs/20260811-provider-boundary-correction/tournament.md",
+    "recommendedPlan": ".architrave/runs/20260811-provider-boundary-correction/recommended-plan.md",
+    "phaseLedger": ".architrave/runs/20260811-provider-boundary-correction/phase-ledger.md",
+    "deterministicGates": ".architrave/runs/20260811-provider-boundary-correction/deterministic-gates.md",
+    "judgePre": ".architrave/runs/20260811-provider-boundary-correction/judge-pre.md",
+    "judgePost": ".architrave/runs/20260811-provider-boundary-correction/judge-post.md",
+    "runtimeObserver": ".architrave/runs/20260811-provider-boundary-correction/runtime-observer.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 0,
+    "promotionsProposed": 0
+  },
+  "phases": [
+    { "phase": 1, "name": "Contract and extraction map", "status": "in-progress", "result": "pending" },
+    { "phase": 2, "name": "Generic runtime seam", "status": "not-started", "result": "pending" },
+    { "phase": 3, "name": "Provider extraction", "status": "not-started", "result": "pending" },
+    { "phase": 4, "name": "Absence and architecture enforcement", "status": "not-started", "result": "pending" },
+    { "phase": 5, "name": "Packaging, docs, full gates", "status": "not-started", "result": "pending" }
+  ]
+}

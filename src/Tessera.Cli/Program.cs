@@ -1,5 +1,7 @@
+using Microsoft.Data.Sqlite;
 using Tessera.Broker;
 using Tessera.Core.Configuration;
+using Tessera.Persistence.Sqlite;
 
 namespace Tessera.Cli;
 
@@ -20,6 +22,9 @@ internal static class Program
             "version" or "--version" or "-v" => PrintVersion(),
             "validate" => Validate(args),
             "serve" => await ServeAsync(args).ConfigureAwait(false),
+            "backup" => await BackupAsync(args).ConfigureAwait(false),
+            "verify-backup" => await VerifyBackupAsync(args).ConfigureAwait(false),
+            "restore" => await RestoreAsync(args).ConfigureAwait(false),
             "--help" or "-h" or "help" => Usage(),
             _ => Unknown(args[0]),
         };
@@ -86,6 +91,33 @@ internal static class Program
         return 0;
     }
 
+    private static async Task<int> BackupAsync(string[] args)
+    {
+        var database=ArgValue(args,"--database");if(string.IsNullOrWhiteSpace(database))return Missing("--database");
+        var output=ArgValue(args,"--output")??Path.Combine(Path.GetDirectoryName(Path.GetFullPath(database))!,"backups",$"tessera-product-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssZ}.db");
+        try{await new SqliteKernelStore(database).BackupAsync(output).ConfigureAwait(false);var verification=await SqliteKernelStore.VerifyBackupAsync(output).ConfigureAwait(false);Console.WriteLine($"backup: {Path.GetFullPath(output)}");PrintVerification(verification);return verification.IntegrityOk?0:1;}
+        catch(Exception exception)when(exception is IOException or SqliteException or InvalidDataException or ArgumentException){await Console.Error.WriteLineAsync($"backup failed — {exception.Message}").ConfigureAwait(false);return 1;}
+    }
+
+    private static async Task<int> VerifyBackupAsync(string[] args)
+    {
+        var database=ArgValue(args,"--database");if(string.IsNullOrWhiteSpace(database))return Missing("--database");
+        try{var verification=await SqliteKernelStore.VerifyBackupAsync(database).ConfigureAwait(false);PrintVerification(verification);return verification.IntegrityOk?0:1;}
+        catch(Exception exception)when(exception is IOException or SqliteException or InvalidDataException or ArgumentException){await Console.Error.WriteLineAsync($"verification failed — {exception.Message}").ConfigureAwait(false);return 1;}
+    }
+
+    private static async Task<int> RestoreAsync(string[] args)
+    {
+        var backup=ArgValue(args,"--backup");if(string.IsNullOrWhiteSpace(backup))return Missing("--backup");var output=ArgValue(args,"--output");if(string.IsNullOrWhiteSpace(output))return Missing("--output");
+        try{await SqliteKernelStore.RestoreBackupAsync(backup,output).ConfigureAwait(false);var verification=await SqliteKernelStore.VerifyBackupAsync(output).ConfigureAwait(false);Console.WriteLine($"restored: {Path.GetFullPath(output)}");PrintVerification(verification);return verification.IntegrityOk?0:1;}
+        catch(Exception exception)when(exception is IOException or SqliteException or InvalidDataException or ArgumentException){await Console.Error.WriteLineAsync($"restore failed — {exception.Message}").ConfigureAwait(false);return 1;}
+    }
+
+    private static void PrintVerification(SqliteBackupVerification value)
+        =>Console.WriteLine($"integrity: {(value.IntegrityOk?"ok":"failed")}; schema: v{value.SchemaVersion}; conversations: {value.Conversations}; memory: {value.Assertions}; jobs: {value.Jobs}; accounts: {value.Accounts}; actions: {value.Actions}");
+
+    private static int Missing(string argument){Console.Error.WriteLine($"missing required argument {argument}");return 2;}
+
     private static int Usage()
     {
         Console.WriteLine("""
@@ -95,6 +127,9 @@ internal static class Program
               tessera version
               tessera validate [--config tessera.json] [--grants grants.json]
               tessera serve    [--config tessera.json] [--grants grants.json]
+              tessera backup        --database tessera-product.db [--output backup.db]
+              tessera verify-backup --database backup.db
+              tessera restore       --backup backup.db --output restored.db
             """);
         return 0;
     }

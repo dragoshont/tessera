@@ -14,6 +14,29 @@ namespace Tessera.Core.Tests;
 /// </summary>
 public sealed class RingBufferAuditSinkTests
 {
+    [Fact]
+    public void Tenant_aware_audit_scope_uses_canonical_principal_not_display_email()
+    {
+        var inner = new RecordingSink();
+        var sink = new RingBufferAuditSink(inner, 10);
+        var user = new EndUserAssertion(
+            "subject-a",
+            "https://issuer.example/v2.0",
+            VerificationMethod.OidcJwt,
+            "shared@example.com",
+            "tenant-a");
+        var request = new AccessRequest(
+            new CallerIdentity("caller", VerificationMethod.Network),
+            "target",
+            "read:data",
+            user);
+
+        sink.Record(request, Decision.Allow("allowed"), null);
+
+        Assert.Single(sink.Query(user.CanonicalPrincipalId, null, 10));
+        Assert.Empty(sink.Query("shared@example.com", null, 10));
+    }
+
     private static AccessRequest Request(string caller, string? onBehalfOf, string target, string action, string? preferredUsername = null)
     {
         var who = new CallerIdentity(caller, VerificationMethod.OidcJwt, "tessera.local");

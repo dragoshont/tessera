@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+DATABASE="${TESSERA_PRODUCT_DB_PATH:-$ROOT/.dev/tessera-product.db}"
+OUTPUT="${1:-$ROOT/.dev/backups/tessera-product-$(date -u +%Y%m%dT%H%M%SZ).db}"
+DOTNET="${DOTNET:-dotnet}"
+
+[[ -f "$DATABASE" ]] || { echo "backup: product database not found: $DATABASE" >&2; exit 2; }
+mkdir -p "$(dirname "$OUTPUT")"
+
+exec "$DOTNET" run --project "$ROOT/src/Tessera.Cli/Tessera.Cli.csproj" -c Release -- \
+  backup --database "$DATABASE" --output "$OUTPUT"

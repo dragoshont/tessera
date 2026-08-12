@@ -51,8 +51,33 @@ jobs:
             validate --config deploy/config/tessera.example.json \
                      --grants deploy/config/grants.example.json
 
+  web-desktop:
+    needs: hygiene
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+      - name: Install Web
+        run: npm --prefix web ci
+      - name: Install Desktop
+        run: npm --prefix desktop ci
+      - name: Web lint, unit, and build
+        run: npm --prefix web run lint && npm --prefix web test && npm --prefix web run build
+      - name: Desktop lint, unit, and Electron smoke
+        run: npm --prefix desktop run lint && npm --prefix desktop test && npm --prefix desktop run test:electron
+      - name: Desktop package and packaged smoke
+        run: npm --prefix desktop run package:mac && npm --prefix desktop run verify:package && npm --prefix desktop run test:packaged
+      - name: Desktop dependency audit
+        run: npm --prefix desktop audit --omit=dev --audit-level=high
+
   image:
-    needs: test
+    needs: [test, web-desktop]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

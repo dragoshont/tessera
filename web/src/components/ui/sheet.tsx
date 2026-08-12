@@ -12,7 +12,7 @@ function SheetOverlay({ className, ...props }: ComponentPropsWithoutRef<typeof D
   return (
     <DialogPrimitive.Overlay
       className={cn(
-        'fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] data-[state=open]:animate-in data-[state=closed]:animate-out',
+        'fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] data-[state=open]:animate-in data-[state=closed]:animate-out motion-reduce:animate-none',
         className,
       )}
       {...props}
@@ -21,7 +21,7 @@ function SheetOverlay({ className, ...props }: ComponentPropsWithoutRef<typeof D
 }
 
 const sheetVariants = cva(
-  'fixed z-50 flex flex-col gap-0 bg-card text-foreground shadow-xl transition ease-in-out',
+  'fixed z-50 flex flex-col gap-0 bg-card text-foreground shadow-xl transition ease-in-out motion-reduce:transition-none',
   {
     variants: {
       side: {

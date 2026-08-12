@@ -1,0 +1,21 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "--help",
+  "status": "in-progress",
+  "startedAt": "2026-08-10T17:12:14Z",
+  "artifacts": {
+    "intake": ".architrave/runs/--help/intake.md",
+    "tournament": ".architrave/runs/--help/tournament.md",
+    "recommendedPlan": ".architrave/runs/--help/recommended-plan.md",
+    "deterministicGates": ".architrave/runs/--help/deterministic-gates.md",
+    "judgePre": ".architrave/runs/--help/judge-pre.md",
+    "judgePost": ".architrave/runs/--help/judge-post.md",
+    "runtimeObserver": ".architrave/runs/--help/runtime-observer.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 0,
+    "promotionsProposed": 0
+  }
+}

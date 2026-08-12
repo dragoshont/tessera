@@ -9,7 +9,7 @@ async function signIn(page: Page) {
   await page.goto('/')
   await page.getByLabel('Developer sign-in (local only)').fill('alice@example.com')
   await page.getByRole('button', { name: /continue/i }).click()
-  await expect(page).toHaveURL(/\/accounts$/)
+  await expect(page).toHaveURL(/\/chat$/)
 }
 
 async function setTheme(page: Page, theme: 'light' | 'dark') {
@@ -29,6 +29,7 @@ for (const theme of ['light', 'dark'] as const) {
 
     // My accounts (mixed health).
     await signIn(page)
+    await page.goto('/settings/admin/legacy-accounts')
     await expect(page.getByRole('heading', { name: 'My accounts' })).toBeVisible()
     await page.screenshot({ path: `test-results/screens/${tag}-accounts.png`, fullPage: true })
 
@@ -49,7 +50,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.screenshot({ path: `test-results/screens/${tag}-users.png`, fullPage: true })
 
     // Connect wizard — provider picker (step 1).
-    await page.goto('/connect')
+    await page.goto('/settings/admin/connect')
     await expect(page.getByRole('heading', { name: 'Which account?' })).toBeVisible()
     await page.screenshot({ path: `test-results/screens/${tag}-connect-provider.png`, fullPage: true })
   })

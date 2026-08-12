@@ -1,0 +1,22 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "20260809-mvp-required-adjustments",
+  "status": "passed",
+  "startedAt": "2026-08-09T19:32:58Z",
+  "completedAt": "2026-08-09T19:38:49Z",
+  "artifacts": {
+    "intake": ".architrave/runs/20260809-mvp-required-adjustments/intake.md",
+    "tournament": ".architrave/runs/20260809-mvp-required-adjustments/tournament.md",
+    "recommendedPlan": ".architrave/runs/20260809-mvp-required-adjustments/recommended-plan.md",
+    "deterministicGates": ".architrave/runs/20260809-mvp-required-adjustments/deterministic-gates.md",
+    "judgePre": ".architrave/runs/20260809-mvp-required-adjustments/judge-pre.md",
+    "judgePost": ".architrave/runs/20260809-mvp-required-adjustments/judge-post.md",
+    "runtimeObserver": ".architrave/runs/20260809-mvp-required-adjustments/runtime-observer.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 4,
+    "promotionsProposed": 0
+  }
+}

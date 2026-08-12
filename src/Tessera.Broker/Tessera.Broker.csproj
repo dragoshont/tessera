@@ -25,13 +25,14 @@
     <ProjectReference Include="../Tessera.Stores.AzureKeyVault/Tessera.Stores.AzureKeyVault.csproj" />
     <ProjectReference Include="../Tessera.Providers/Tessera.Providers.csproj" />
     <ProjectReference Include="../Tessera.Mcp/Tessera.Mcp.csproj" />
+    <ProjectReference Include="../Tessera.Mcp.Client/Tessera.Mcp.Client.csproj" />
+    <ProjectReference Include="../Tessera.Persistence.Sqlite/Tessera.Persistence.Sqlite.csproj" />
+    <ProjectReference Include="../Tessera.Plugin.Abstractions/Tessera.Plugin.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Tessera.Broker.Tests" />
-  </ItemGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="Tessera.Broker.Tests" />
+    <InternalsVisibleTo Include="Tessera.ExternalPlugin.Tests" />
   </ItemGroup>
 
 </Project>

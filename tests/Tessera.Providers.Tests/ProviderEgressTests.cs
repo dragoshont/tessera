@@ -137,15 +137,14 @@ public sealed class ProviderEgressTests
     }
 
     [Fact]
-    public async Task Write_tool_proceeds_when_confirmed()
+    public async Task Caller_confirmation_cannot_authorize_a_write_tool()
     {
         var (egress, transport) = Build(grantWrite: true);
         var result = await egress.CallAsync(ChatCaller(), Alice(), Target, "portal_book", "{\"slot\":1}", confirmed: true);
 
-        Assert.Equal(ProviderCallStatus.Completed, result.Status);
-        Assert.Equal(1, transport.Calls);
-        Assert.Equal("POST", transport.LastMethod);
-        Assert.Equal("{\"slot\":1}", transport.LastBody);
+        Assert.Equal(ProviderCallStatus.StepUpRequired, result.Status);
+        Assert.Contains("caller confirmation flags are not accepted", result.Detail);
+        Assert.Equal(0, transport.Calls);
     }
 
     [Fact]

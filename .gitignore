@@ -26,6 +26,10 @@ tessera.toml
 # the portal writes to. The committed *.example templates ARE the source of truth.
 .dev/*.json
 !.dev/*.json.example
+.dev/*.db
+.dev/*.db-*
+.dev/plugins/
+Tessera-*-reports.zip
 
 # .NET
 bin/

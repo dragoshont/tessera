@@ -34,6 +34,10 @@ services:
       TESSERA_VAULT_URL: "https://lowkey:8443"
       TESSERA_KEYVAULT_EMULATOR: "lowkey"
       TESSERA_WEB_ROOT: "/app/wwwroot"
+      TESSERA_PRODUCT_DB_PATH: "/data/tessera-product.db"
+      TESSERA_CONTINUITY_DB_PATH: "/data/tessera-product.db"
+      TESSERA_PLUGIN_ROOT: "/app/plugins"
+      TESSERA_PLUGIN_CATALOG: "/app/plugins/catalog.json"
       # Container binds 0.0.0.0, so dev loopback identity is refused by design.
       # Point at a local OIDC issuer (Mode 2) to exercise real sign-in, or use the
       # host broker (scripts/devloop/up) for the dev loopback card.
@@ -44,3 +48,7 @@ services:
       # Mount the .dev config + grants (materialize them first: cp .dev/*.example).
       - ./.dev/tessera.json:/config/tessera.json:ro
       - ./.dev/grants.json:/config/grants.json:ro
+      - tessera-product:/data
+
+volumes:
+  tessera-product:

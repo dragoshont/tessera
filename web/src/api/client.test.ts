@@ -369,3 +369,74 @@ describe('createHttpClient — pending writes (ADR 0023)', () => {
     await expect(client.approvePendingWrite('cw_missing')).rejects.toMatchObject({ status: 404 })
   })
 })
+
+describe('createHttpClient — R1 continuity', () => {
+  it('GETs the selected view and URL-encodes detail identity', async () => {
+    fetchMock
+      .mockResolvedValueOnce(makeResponse({ status: 200, body: { items: [], truncated: false } }))
+      .mockResolvedValueOnce(makeResponse({ status: 404, body: { code: 'not_found' } }))
+    const client = createHttpClient({ baseUrl: 'http://broker.test/api' })
+
+    await expect(client.listFollowUps('attention')).resolves.toEqual({ items: [], truncated: false })
+    await expect(client.getFollowUp('followup:r1@example')).resolves.toBeUndefined()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://broker.test/api/portal/continuity/follow-ups?view=attention',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'http://broker.test/api/portal/continuity/follow-ups/followup%3Ar1%40example',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+
+  it('POSTs correction with the exact operation/version/field/value contract', async () => {
+    const result = { followUpId: 'followup:r1', version: 4, replayed: false }
+    fetchMock.mockResolvedValueOnce(makeResponse({ status: 200, body: result }))
+    const client = createHttpClient({ baseUrl: 'http://broker.test/api' })
+    const input = {
+      operationId: 'correct-1',
+      expectedVersion: 3,
+      field: 'deliverable' as const,
+      value: 'lease renewal checklist',
+    }
+
+    await expect(client.correctFollowUp('followup:r1', input)).resolves.toEqual(result)
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://broker.test/api/portal/continuity/follow-ups/followup%3Ar1/correct')
+    expect((init as RequestInit).method).toBe('POST')
+    expect((init as RequestInit).body).toBe(JSON.stringify(input))
+  })
+})
+
+describe('createInMemoryClient — R1 continuity', () => {
+  it('drives the synthetic continuity sequence without claiming provider persistence', async () => {
+    const client = createInMemoryClient()
+    const imported = await client.importFollowUpFixture('initial', { operationId: 'import-1' })
+    const accepted = await client.acceptFollowUp(imported.followUpId, {
+      operationId: 'accept-1',
+      expectedVersion: imported.version,
+    })
+    const corrected = await client.correctFollowUp(imported.followUpId, {
+      operationId: 'correct-1',
+      expectedVersion: accepted.version,
+      field: 'deliverable',
+      value: 'lease renewal checklist',
+    })
+    const monday = await client.importFollowUpFixture('monday', {
+      operationId: 'monday-1',
+      followUpId: imported.followUpId,
+      expectedVersion: corrected.version,
+    })
+
+    const detail = await client.getFollowUp(imported.followUpId)
+    expect(detail?.revisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'lease renewal checklist', state: 'current' }),
+      expect.objectContaining({ value: '2026-08-17', state: 'candidate' }),
+    ]))
+    expect(monday.version).toBe(4)
+  })
+})

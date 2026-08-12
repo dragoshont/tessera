@@ -1,0 +1,32 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "20260810-r2-1-live-alpha",
+  "status": "passed",
+  "completedAt": "2026-08-10T21:32:00Z",
+  "outcome": "INTERNALLY_READY_EXTERNAL_VERIFICATION_BLOCKED",
+  "evidence": {
+    "backendTests": 711,
+    "webTests": 103,
+    "playwrightTests": 26,
+    "liveModel": "BLOCKED_EXTERNAL",
+    "liveGitHub": "BLOCKED_EXTERNAL",
+    "liveWrite": "NOT_RUN_SAFE_MODE"
+  },
+  "startedAt": "2026-08-10T17:12:53Z",
+  "artifacts": {
+    "intake": ".architrave/runs/20260810-r2-1-live-alpha/intake.md",
+    "phaseLedger": ".architrave/runs/20260810-r2-1-live-alpha/phase-ledger.md",
+    "tournament": ".architrave/runs/20260810-r2-1-live-alpha/tournament.md",
+    "recommendedPlan": ".architrave/runs/20260810-r2-1-live-alpha/recommended-plan.md",
+    "deterministicGates": ".architrave/runs/20260810-r2-1-live-alpha/deterministic-gates.md",
+    "judgePre": ".architrave/runs/20260810-r2-1-live-alpha/judge-pre.md",
+    "judgePost": ".architrave/runs/20260810-r2-1-live-alpha/judge-post.md",
+    "runtimeObserver": ".architrave/runs/20260810-r2-1-live-alpha/runtime-observer.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 3,
+    "promotionsProposed": 0
+  }
+}

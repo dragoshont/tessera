@@ -217,6 +217,54 @@ public sealed class ConfigTests
     }
 
     [Fact]
+    public void Oidc_portal_admins_must_be_canonical_principal_ids()
+    {
+        var invalid = new TesseraConfig
+        {
+            Identity = new IdentityOptions
+            {
+                Mode = "oidc",
+                Oidc = new OidcOptions { Issuer = "https://issuer.example/v2.0" },
+            },
+            Portal = new PortalOptions { Admins = ["alice@example.com"] },
+        };
+        var valid = new TesseraConfig
+        {
+            Identity = new IdentityOptions
+            {
+                Mode = "oidc",
+                Oidc = new OidcOptions { Issuer = "https://issuer.example/v2.0" },
+            },
+            Portal = new PortalOptions { Admins = ["principal:sha256:abc123"] },
+        };
+
+        Assert.Contains(invalid.Validate(), problem => problem.Contains("canonical", StringComparison.Ordinal));
+        Assert.Empty(valid.Validate());
+    }
+
+    [Fact]
+    public void Internal_model_gateway_HTTP_requires_explicit_operator_acknowledgement()
+    {
+        var invalid=new TesseraConfig{ModelGateways=new ModelGatewayOptions{Enabled=true,Endpoints=[new(){Id="models",DisplayName="Models",Endpoint="http://litellm.default.svc.cluster.local:4000/v1"}]}};
+        var problems=invalid.Validate();Assert.Contains(problems,item=>item.Contains("modelGateways.allowPlainHttp",StringComparison.Ordinal));
+        var valid=new TesseraConfig{ModelGateways=new ModelGatewayOptions{Enabled=true,AllowPlainHttp=true,Endpoints=[new(){Id="models",DisplayName="Models",Endpoint="http://litellm.default.svc.cluster.local:4000/v1"}]}};
+        Assert.Empty(valid.Validate());
+    }
+
+    [Fact]
+    public void Loopback_dev_portal_admin_may_use_display_principal()
+    {
+        var config = new TesseraConfig
+        {
+            Server = new ServerOptions { Host = "127.0.0.1" },
+            Identity = new IdentityOptions { Mode = "dev" },
+            Portal = new PortalOptions { Admins = ["alice@example.com"] },
+        };
+
+        Assert.Empty(config.Validate());
+    }
+
+    [Fact]
     public void LoadPolicy_reads_grants_bindings_and_recipes()
     {
         var path = Path.GetTempFileName();

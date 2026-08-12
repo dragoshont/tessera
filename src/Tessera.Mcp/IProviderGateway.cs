@@ -24,8 +24,8 @@ public interface IProviderGateway
     string? ResolveToolByHttp(string target, string method, string path);
 
     /// <summary>
-    /// Performs a provider call for the identity. <paramref name="confirmed"/> must
-    /// be true to run a write/booking tool.
+    /// Performs a provider call for the identity. <paramref name="confirmed"/> is
+    /// retained for wire compatibility but cannot authorize a write/booking tool.
     /// </summary>
     Task<ProviderCallToolResult> CallAsync(
         CallerIdentity caller,

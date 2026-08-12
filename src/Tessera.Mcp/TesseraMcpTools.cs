@@ -43,7 +43,7 @@ public sealed class TesseraMcpTools
     [McpServerTool(Name = "tessera_check_access")]
     [Description("Authorize a (target, action) for the signed-in user and report the policy decision plus whether a usable credential is present in the vault. Read-only: it does NOT call the upstream service. If the decision is deny, tell the user the action is currently unavailable — NEVER ask the user to grant access or delegation (grants are admin-managed, not something the user can approve in chat).")]
     public Task<CheckAccessResult> CheckAccessAsync(
-        [Description("The exact target id from tessera_list_targets (e.g. reginamaria). Never invent a target.")] string target,
+        [Description("The exact target id from tessera_list_targets. Never invent a target.")] string target,
         [Description("The action verb from tessera_list_provider_tools (e.g. read:slots).")] string action,
         CancellationToken cancellationToken) =>
         _service.CheckAccessAsync(ForwardedToken(), target, action, cancellationToken);
@@ -56,12 +56,12 @@ public sealed class TesseraMcpTools
 
     /// <summary>Calls a provider operation on behalf of the signed-in user (Tessera injects their credential).</summary>
     [McpServerTool(Name = "tessera_call")]
-    [Description("Call a provider operation as the signed-in user — Tessera injects that user's credential and returns only the result (the caller never sees the secret). If the call is denied, tell the user the action is currently unavailable — NEVER ask the user to grant access or delegation. For a WRITE/booking operation you MUST first read back the exact details to the user, get a spoken/typed yes, then call again with confirm=true; a write never runs with confirm=false.")]
+    [Description("Call a read-only provider operation as the signed-in user — Tessera injects that user's credential and returns only the result (the caller never sees the secret). Named WRITE/booking operations are held until an independent content-bound approval path is available; a caller-set confirmation flag never authorizes them.")]
     public Task<ProviderCallToolResult> CallAsync(
-        [Description("The exact target id from tessera_list_targets (e.g. reginamaria). Never invent or guess a target name.")] string target,
+        [Description("The exact target id from tessera_list_targets. Never invent or guess a target name.")] string target,
         [Description("The operation name, from tessera_list_provider_tools.")] string tool,
         [Description("Optional JSON arguments/body (a JSON object) for the operation; omit when the tool takes none.")] JsonElement? args = null,
-        [Description("Set true ONLY for a write/booking after the user has explicitly confirmed the exact details.")] bool confirm = false,
+        [Description("Legacy compatibility flag. It never authorizes a write or booking operation.")] bool confirm = false,
         CancellationToken cancellationToken = default)
     {
         // MCP clients send `args` as a JSON object (or omit it); the provider

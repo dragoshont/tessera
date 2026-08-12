@@ -1,0 +1,22 @@
+{
+  "schema": "architrave.run.v1",
+  "runId": "20260811-all-in-one-delivery",
+  "status": "blocked",
+  "startedAt": "2026-08-11T10:25:39Z",
+  "completedAt": "2026-08-11T20:17:30Z",
+  "artifacts": {
+    "intake": ".architrave/runs/20260811-all-in-one-delivery/intake.md",
+    "tournament": ".architrave/runs/20260811-all-in-one-delivery/tournament.md",
+    "recommendedPlan": ".architrave/runs/20260811-all-in-one-delivery/recommended-plan.md",
+    "deterministicGates": ".architrave/runs/20260811-all-in-one-delivery/deterministic-gates.md",
+    "judgePre": ".architrave/runs/20260811-all-in-one-delivery/judge-pre.md",
+    "judgePost": ".architrave/runs/20260811-all-in-one-delivery/judge-post.md",
+    "runtimeObserver": ".architrave/runs/20260811-all-in-one-delivery/runtime-observer.md"
+  },
+  "learning": {
+    "repoProfile": ".architrave/learning/repo-profile.md",
+    "repoLessons": ".architrave/learning/repo-lessons.md",
+    "candidateLessons": 0,
+    "promotionsProposed": 0
+  }
+}

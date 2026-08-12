@@ -9,15 +9,25 @@ internal sealed class FakeTokenValidator : ITokenValidator
 
     public bool DelegationEnabled { get; init; } = true;
 
-    public FakeTokenValidator AddUser(string token, string oid, string preferredUsername)
+    public FakeTokenValidator AddUser(
+        string token,
+        string oid,
+        string preferredUsername,
+        string? tenantId = null,
+        string issuer = "https://login.microsoftonline.com/test/v2.0")
     {
-        _tokens[token] = new Dictionary<string, string>(StringComparer.Ordinal)
+        var claims = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["oid"] = oid,
             ["preferred_username"] = preferredUsername,
-            ["iss"] = "https://login.microsoftonline.com/test/v2.0",
-            ["tid"] = "test",
+            ["iss"] = issuer,
         };
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            claims["tid"] = tenantId;
+        }
+
+        _tokens[token] = claims;
         return this;
     }
 
