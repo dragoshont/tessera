@@ -154,6 +154,7 @@ public static class ConfigLoader
         return new TesseraConfig
         {
             Server = server,
+            ServerIdentity = config.ServerIdentity,
             Identity = identity,
             Policy = policy,
             Audit = config.Audit,

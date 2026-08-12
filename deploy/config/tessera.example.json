@@ -1,5 +1,11 @@
 {
   "server": { "host": "0.0.0.0", "port": 8080 },
+  "serverIdentity": {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "displayName": "Tessera Home",
+    "apiVersion": "v1",
+    "protocolVersion": 1
+  },
   "identity": {
     "mode": "oidc",
     "trustDomain": "tessera.local",
@@ -11,5 +17,20 @@
   },
   "policy": { "default": "deny", "document": "/config/grants.json" },
   "audit": { "enabled": true, "path": "-" },
-  "egress": { "enabled": false, "allowedHosts": [] }
+  "egress": { "enabled": false, "allowedHosts": [] },
+  "modelGateways": {
+    "enabled": true,
+    "allowPlainHttp": false,
+    "endpoints": [
+      {
+        "id": "home",
+        "displayName": "Home AI gateway",
+        "endpoint": "https://ai.example/v1",
+        "autoConnect": true,
+        "defaultModel": "example-model",
+        "defaultContextLimit": 32768,
+        "credentialEnvironmentVariable": "TESSERA_MODEL_GATEWAY_KEY"
+      }
+    ]
+  }
 }

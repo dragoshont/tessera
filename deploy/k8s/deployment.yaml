@@ -73,6 +73,14 @@ spec:
               value: "/app/plugins"
             - name: TESSERA_PLUGIN_CATALOG
               value: "/app/plugins/catalog.json"
+            # Optional server-owned model bootstrap. Project this from secret
+            # custody so clients never ask users to paste an already-configured
+            # homelab gateway key.
+            - name: TESSERA_LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tessera-model-gateway
+                  key: LITELLM_MASTER_KEY
           envFrom:
             # 4. How the broker authenticates to Key Vault. DefaultAzureCredential
             #    resolves, in order: Workload Identity Federation / Managed Identity

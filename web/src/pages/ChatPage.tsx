@@ -6,11 +6,19 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { r2Api, type R2Action, type R2Conversation } from "../api/r2";
+import {
+  r2Api,
+  type R2Action,
+  type R2Conversation,
+  type R2SetupStatus,
+} from "../api/r2";
 import { ChatWorkspace } from "../components/chat/ChatWorkspace";
-import { ActionApprovalCard } from "../components/product/R2ProductComponents";
+import {
+  ActionApprovalCard,
+  ProductStateBadge,
+} from "../components/product/R2ProductComponents";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Button } from "../components/ui/button";
 import {
@@ -34,11 +42,34 @@ export function ChatPage() {
   const [jobName, setJobName] = useState("");
   const [jobInstruction, setJobInstruction] = useState("");
   const [integrationAccountId, setIntegrationAccountId] = useState("");
+  const setupAttempted = useRef(false);
   const [localPendingExecution, setPendingExecution] = useState<{
     messageId: string;
     executionId: string;
   } | null>(null);
   const [streamingText, setStreamingText] = useState("");
+  const setup = useQuery({
+    queryKey: ["r2", "setup"],
+    queryFn: r2Api.setupStatus,
+  });
+  const bootstrap = useMutation({
+    mutationFn: r2Api.bootstrapSetup,
+    onSuccess: (value) => {
+      queryClient.setQueryData(["r2", "setup"], value);
+      void queryClient.invalidateQueries({ queryKey: ["r2", "model-profiles"] });
+      void queryClient.invalidateQueries({ queryKey: ["r2", "settings"] });
+    },
+  });
+  useEffect(() => {
+    if (
+      setup.data?.ai.state === "READY_TO_CONNECT" &&
+      !setupAttempted.current &&
+      !bootstrap.isPending
+    ) {
+      setupAttempted.current = true;
+      bootstrap.mutate();
+    }
+  }, [bootstrap, setup.data?.ai.state]);
   const profiles = useQuery({
     queryKey: ["r2", "model-profiles"],
     queryFn: r2Api.modelProfiles,
@@ -401,6 +432,25 @@ export function ChatPage() {
     integrationAccount &&
     conversationGrants.data?.accountGrants.includes(integrationAccount.id),
   );
+  if (setup.isLoading)
+    return (
+      <div className="py-16 text-center text-sm text-muted-foreground">
+        Checking Tessera…
+      </div>
+    );
+  if (setup.data && !setup.data.canOpenChat)
+    return (
+      <SetupCenter
+        status={setup.data}
+        busy={bootstrap.isPending}
+        error={bootstrap.error}
+        onRetry={() => {
+          setupAttempted.current = true;
+          bootstrap.mutate();
+        }}
+        onAccounts={() => navigate("/accounts")}
+      />
+    );
   return (
     <div className="grid min-h-[calc(100vh-8rem)] gap-6 lg:grid-cols-[15rem_1fr]">
       <aside className="border-r border-border pr-4" aria-label="Conversations">
@@ -653,6 +703,92 @@ export function ChatPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function SetupCenter({
+  status,
+  busy,
+  error,
+  onRetry,
+  onAccounts,
+}: {
+  status: R2SetupStatus;
+  busy: boolean;
+  error: Error | null;
+  onRetry: () => void;
+  onAccounts: () => void;
+}) {
+  return (
+    <section className="mx-auto max-w-3xl py-10" aria-labelledby="setup-title">
+      <h1 id="setup-title" className="text-2xl font-semibold">
+        Welcome to Tessera
+      </h1>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Tessera checks what is already available and only asks for missing account authorization.
+      </p>
+      <div className="mt-6 divide-y divide-border border-y border-border">
+        <SetupRow
+          name={status.server.displayName || "Tessera Home"}
+          detail={`Version ${status.server.version}`}
+          state={status.server.state}
+        />
+        <SetupRow
+          name="AI"
+          detail={status.ai.model ?? status.ai.displayName ?? "No model available"}
+          state={busy ? "CONNECTING" : status.ai.state}
+        />
+        {status.integrations.map((integration) => (
+          <SetupRow
+            key={integration.id}
+            name={integration.name}
+            detail={
+              integration.state === "CONNECTED"
+                ? "Account connected"
+                : integration.runtimeState === "READY"
+                  ? "Ready for account authorization"
+                  : integration.detailCode?.replaceAll("_", " ") ?? "Unavailable"
+            }
+            state={integration.state}
+          />
+        ))}
+      </div>
+      {error ? (
+        <Alert variant="destructive" className="mt-5">
+          <AlertDescription>{recoveryMessage(null, error.message)}</AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="mt-6 flex flex-wrap gap-3">
+        {status.ai.state !== "CONNECTED" ? (
+          <Button onClick={onRetry} disabled={busy}>
+            {busy ? "Connecting AI…" : "Retry AI connection"}
+          </Button>
+        ) : null}
+        <Button variant="outline" onClick={onAccounts}>
+          Review accounts
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function SetupRow({
+  name,
+  detail,
+  state,
+}: {
+  name: string;
+  detail: string;
+  state: string;
+}) {
+  return (
+    <div className="flex min-h-16 items-center justify-between gap-4 py-3">
+      <div>
+        <p className="font-medium">{name}</p>
+        <p className="text-sm text-muted-foreground">{detail}</p>
+      </div>
+      <ProductStateBadge state={state} />
     </div>
   );
 }

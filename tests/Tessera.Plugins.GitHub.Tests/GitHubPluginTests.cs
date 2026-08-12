@@ -118,6 +118,43 @@ public sealed class GitHubPluginTests
         Assert.Equal("account_ambiguous", exception.ErrorCode);
     }
 
+        [Fact]
+        public async Task Catalog_search_returns_untrusted_review_only_public_metadata()
+        {
+                var response = """
+                        {
+                            "items": [
+                                {
+                                    "name": "ha-mcp",
+                                    "full_name": "homeassistant-ai/ha-mcp",
+                                    "description": "Home Assistant MCP server",
+                                    "html_url": "https://github.com/homeassistant-ai/ha-mcp",
+                                    "default_branch": "main",
+                                    "owner": { "login": "homeassistant-ai" },
+                                    "license": { "spdx_id": "MIT" }
+                                }
+                            ]
+                        }
+                        """;
+                var transport = new CatalogTransport(response);
+
+                var results = await new GitHubPlugin().SearchCatalogAsync(
+                        "home assistant",
+                        5,
+                        transport,
+                        default);
+
+                var item = Assert.Single(results);
+                Assert.Contains("home%20assistant%20mcp", transport.Url, StringComparison.Ordinal);
+                Assert.Equal("application/vnd.github+json", transport.Headers["Accept"]);
+                Assert.Equal("github:homeassistant-ai/ha-mcp", item.Id);
+                Assert.Equal("UNTRUSTED", item.TrustLevel);
+                Assert.Equal("SERVER_REVIEW_REQUIRED", item.InstallationMode);
+                Assert.Equal("REVIEW_REQUIRED", item.InstallState);
+                Assert.False(item.Installed);
+                Assert.Equal("MIT", item.License);
+        }
+
     [Fact]
     public async Task Create_requires_approval_then_verifies_receipt_with_issue_read()
     {
@@ -344,5 +381,29 @@ public sealed class GitHubPluginTests
             string? body,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+    }
+
+    private sealed class CatalogTransport(string response) : IHttpTransport
+    {
+        public string Url { get; private set; } = string.Empty;
+        public IReadOnlyDictionary<string, string> Headers { get; private set; }
+            = new Dictionary<string, string>();
+
+        public Task<TransportResponse> SendAsync(
+            string method,
+            string url,
+            IReadOnlyDictionary<string, string> headers,
+            string? body,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Assert.Equal("GET", method);
+            Url = url;
+            Headers = headers;
+            return Task.FromResult(new TransportResponse(
+                200,
+                new Dictionary<string, string>(),
+                response));
+        }
     }
 }

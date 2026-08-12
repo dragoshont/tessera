@@ -43,15 +43,17 @@ RUN dotnet build src/Tessera.Plugins.Gmail/Tessera.Plugins.Gmail.csproj -c Relea
 # Built from source + the committed lockfile so the image is reproducible and the
 # local node_modules/dist never enter the build context (.dockerignore).
 FROM node:22-alpine AS web
-WORKDIR /web
+WORKDIR /workspace
 # Skip Playwright's browser download (a heavy devDependency postinstall we never
 # need to *build* the SPA — Playwright is only for local e2e screenshots).
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
-COPY web/ ./
-# Vite production build → /web/dist (the same artifact `npm run build` produces).
-RUN npm run build
+COPY packages/tessera-client/package.json packages/tessera-client/package-lock.json packages/tessera-client/tsconfig.json ./packages/tessera-client/
+COPY packages/tessera-client/src/ ./packages/tessera-client/src/
+COPY web/package.json web/package-lock.json ./web/
+RUN npm --prefix web ci
+COPY web/ ./web/
+# Vite production build → /workspace/web/dist (the same artifact `npm run build` produces).
+RUN npm --prefix web run build
 
 # ---- runtime ----
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
@@ -66,7 +68,7 @@ WORKDIR /app
 COPY --from=build /app ./
 # Bake the built SPA in; the broker serves it at / when TESSERA_WEB_ROOT is set
 # (default above). Unset TESSERA_WEB_ROOT to run API-only.
-COPY --from=web /web/dist ./wwwroot
+COPY --from=web /workspace/web/dist ./wwwroot
 COPY plugins ./plugins
 COPY --from=build /plugin-artifacts/modules ./plugins/modules
 COPY --from=build /plugin-artifacts/modules.json ./plugins/modules.json

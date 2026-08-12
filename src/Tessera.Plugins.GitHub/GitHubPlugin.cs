@@ -8,7 +8,7 @@ using Tessera.Plugin.Abstractions;
 
 namespace Tessera.Plugins.GitHub;
 
-public sealed partial class GitHubPlugin : ITesseraCapabilityPlugin, ITesseraModelToolPlugin, ITesseraAccountPlugin, ITesseraMcpPlugin
+public sealed partial class GitHubPlugin : ITesseraCapabilityPlugin, ITesseraModelToolPlugin, ITesseraAccountPlugin, ITesseraMcpPlugin, ITesseraSetupPlugin, ITesseraCatalogPlugin
 {
     private static readonly Uri DefaultEndpoint = new("https://api.githubcopilot.com/mcp/");
     private static readonly JsonElement ObjectSchema = JsonSerializer.SerializeToElement(new
@@ -75,6 +75,9 @@ public sealed partial class GitHubPlugin : ITesseraCapabilityPlugin, ITesseraMod
         new("issue_write", [new("method", "string"), new("owner", "string"), new("repo", "string"), new("title", "string")], [new("issue", "object")]),
         new("issue_read", [new("method", "string"), new("owner", "string"), new("repo", "string"), new("issue_number", "integer")], [new("issue", "object")]),
     ];
+
+    public PluginSetupDescriptor DescribeSetup(PluginHostConfiguration configuration)
+        => new("github", "GitHub", true, true, "/accounts", "account_authorization_required");
 
     public async ValueTask<McpServerContract> DiscoverMcpAsync(
         PluginCapabilityContext context,

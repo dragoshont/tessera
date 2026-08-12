@@ -16,6 +16,7 @@ data:
   tessera.json: |
     {
       "server": { "host": "0.0.0.0", "port": 8080 },
+      "serverIdentity": { "id": "", "displayName": "Tessera Home", "apiVersion": "v1", "protocolVersion": 1 },
       "identity": {
         "mode": "oidc",
         "trustDomain": "tessera.local",
@@ -28,7 +29,15 @@ data:
         "enabled": true,
         "allowPlainHttp": true,
         "endpoints": [
-          { "id": "homelab", "displayName": "Homelab LiteLLM", "endpoint": "http://litellm.default.svc.cluster.local:4000/v1" }
+          {
+            "id": "homelab",
+            "displayName": "Homelab LiteLLM",
+            "endpoint": "http://litellm.default.svc.cluster.local:4000/v1",
+            "autoConnect": true,
+            "defaultModel": "claude-haiku-4.5",
+            "defaultContextLimit": 200000,
+            "credentialEnvironmentVariable": "TESSERA_LITELLM_MASTER_KEY"
+          }
         ]
       },
       "reginaMaria": {

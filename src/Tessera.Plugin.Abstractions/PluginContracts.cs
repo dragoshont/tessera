@@ -124,6 +124,54 @@ public interface ITesseraMcpPlugin
         CancellationToken cancellationToken = default);
 }
 
+public sealed record PluginSetupDescriptor(
+    string PluginId,
+    string DisplayName,
+    bool RuntimeConfigured,
+    bool AccountRequired,
+    string? ConnectPath,
+    string? DetailCode);
+
+/// <summary>Provider-owned projection of runtime readiness for the product setup center.</summary>
+public interface ITesseraSetupPlugin
+{
+    PluginSetupDescriptor DescribeSetup(PluginHostConfiguration configuration);
+}
+
+public sealed record PluginCatalogSourceDescriptor(
+    string Id,
+    string DisplayName,
+    TimeSpan CacheDuration);
+
+public sealed record PluginCatalogItem(
+    string Id,
+    string Name,
+    string Description,
+    string Publisher,
+    string Runtime,
+    string? RepositoryOrPackage,
+    string Version,
+    string? License,
+    string TrustLevel,
+    IReadOnlyList<string> CapabilitiesSummary,
+    IReadOnlyList<string> AuthTypes,
+    string InstallationMode,
+    string InstallState,
+    bool Installed,
+    string? InspectUrl);
+
+/// <summary>Provider-owned public metadata search. Results are never executable packages.</summary>
+public interface ITesseraCatalogPlugin
+{
+    PluginCatalogSourceDescriptor CatalogSource { get; }
+
+    Task<IReadOnlyList<PluginCatalogItem>> SearchCatalogAsync(
+        string query,
+        int limit,
+        IHttpTransport transport,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record PluginAccountDefinition(
     string ProviderId,
     IReadOnlyList<string> InitialPermissions,

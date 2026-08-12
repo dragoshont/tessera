@@ -16,6 +16,25 @@ public sealed class ServerOptions
     public bool IsLoopback => Host is "127.0.0.1" or "::1" or "localhost";
 }
 
+/// <summary>Stable public identity used by native clients to reject the wrong Tessera server.</summary>
+public sealed class ServerIdentityOptions
+{
+    /// <summary>Canonical lowercase UUID assigned once per Tessera installation.</summary>
+    public string Id { get; init; } = "";
+
+    /// <summary>Human-readable non-secret name shown in connection diagnostics.</summary>
+    public string DisplayName { get; init; } = "Tessera Home";
+
+    /// <summary>Product API compatibility version.</summary>
+    public string ApiVersion { get; init; } = "v1";
+
+    /// <summary>Native route-selection protocol version.</summary>
+    public int ProtocolVersion { get; init; } = 1;
+
+    [JsonIgnore]
+    public bool IsConfigured => Guid.TryParseExact(Id, "D", out var id) && id != Guid.Empty;
+}
+
 /// <summary>OIDC end-user/automation token validation settings (Entra — ADR 0011).</summary>
 public sealed class OidcOptions
 {
@@ -274,6 +293,10 @@ public sealed class ModelGatewayEndpointOptions
     public string Id { get; init; } = "";
     public string DisplayName { get; init; } = "";
     public string Endpoint { get; init; } = "";
+    public bool AutoConnect { get; init; }
+    public string DefaultModel { get; init; } = "";
+    public int DefaultContextLimit { get; init; } = 32768;
+    public string CredentialEnvironmentVariable { get; init; } = "";
 }
 
 /// <summary>Fixed operator-owned internal OpenAI-compatible gateway inventory.</summary>
@@ -289,6 +312,9 @@ public sealed class TesseraConfig
 {
     /// <summary>HTTP listener settings.</summary>
     public ServerOptions Server { get; init; } = new();
+
+    /// <summary>Stable public server identity for trusted native route selection.</summary>
+    public ServerIdentityOptions ServerIdentity { get; init; } = new();
 
     /// <summary>Identity settings.</summary>
     public IdentityOptions Identity { get; init; } = new();
@@ -333,6 +359,22 @@ public sealed class TesseraConfig
         if (Server.Port is <= 0 or > 65535)
         {
             problems.Add($"server.port {Server.Port} is out of range (1-65535)");
+        }
+
+        if (!string.IsNullOrWhiteSpace(ServerIdentity.Id))
+        {
+            if (!Guid.TryParseExact(ServerIdentity.Id, "D", out var serverId)
+            || serverId == Guid.Empty
+                || !string.Equals(serverId.ToString("D"), ServerIdentity.Id, StringComparison.Ordinal))
+            problems.Add("serverIdentity.id must be a canonical lowercase non-empty UUID.");
+            if (string.IsNullOrWhiteSpace(ServerIdentity.DisplayName)
+                || ServerIdentity.DisplayName.Length > 128
+                || ServerIdentity.DisplayName.Any(char.IsControl))
+                problems.Add("serverIdentity.displayName must contain 1-128 printable characters.");
+            if (ServerIdentity.ApiVersion != "v1")
+                problems.Add("serverIdentity.apiVersion must be 'v1'.");
+            if (ServerIdentity.ProtocolVersion != 1)
+                problems.Add("serverIdentity.protocolVersion must be 1.");
         }
 
         if (Identity.Mode is not ("mtls" or "oidc" or "dev"))
@@ -446,6 +488,15 @@ public sealed class TesseraConfig
                 if(string.IsNullOrWhiteSpace(gateway.DisplayName)||gateway.DisplayName.Length>128)problems.Add($"model gateway '{gateway.Id}' has an invalid displayName.");
                 if(!Uri.TryCreate(gateway.Endpoint.TrimEnd('/')+"/",UriKind.Absolute,out var endpoint)||endpoint.Scheme is not("http" or "https")||!string.IsNullOrEmpty(endpoint.UserInfo)||!string.IsNullOrEmpty(endpoint.Query)||!string.IsNullOrEmpty(endpoint.Fragment))problems.Add($"model gateway '{gateway.Id}' must be an absolute endpoint without credentials, query, or fragment.");
                 else if(endpoint.Scheme=="http"&&!ModelGateways.AllowPlainHttp)problems.Add($"model gateway '{gateway.Id}' uses http but modelGateways.allowPlainHttp is false.");
+                if(gateway.AutoConnect)
+                {
+                    if(string.IsNullOrWhiteSpace(gateway.DefaultModel)||gateway.DefaultModel.Length>128||gateway.DefaultModel.Any(char.IsControl))problems.Add($"model gateway '{gateway.Id}' autoConnect requires a bounded defaultModel.");
+                    if(gateway.DefaultContextLimit is <256 or >2_000_000)problems.Add($"model gateway '{gateway.Id}' has an invalid defaultContextLimit.");
+                    if(gateway.CredentialEnvironmentVariable.Length is <1 or >128
+                        || !(char.IsAsciiLetter(gateway.CredentialEnvironmentVariable[0])||gateway.CredentialEnvironmentVariable[0]=='_')
+                        || gateway.CredentialEnvironmentVariable.Any(character=>!(char.IsAsciiLetterOrDigit(character)||character=='_')))
+                        problems.Add($"model gateway '{gateway.Id}' autoConnect requires a valid credentialEnvironmentVariable.");
+                }
             }
         }
 

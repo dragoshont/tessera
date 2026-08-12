@@ -7,7 +7,7 @@ using Tessera.Plugin.Abstractions;
 
 namespace Tessera.Plugins.Gmail;
 
-public sealed class GmailPlugin : ITesseraCapabilityPlugin, ITesseraModelToolPlugin, ITesseraAccountPlugin, ITesseraHostPlugin
+public sealed class GmailPlugin : ITesseraCapabilityPlugin, ITesseraModelToolPlugin, ITesseraAccountPlugin, ITesseraHostPlugin, ITesseraSetupPlugin
 {
     private static readonly JsonElement ObjectSchema = JsonSerializer.SerializeToElement(new
     {
@@ -65,6 +65,9 @@ public sealed class GmailPlugin : ITesseraCapabilityPlugin, ITesseraModelToolPlu
 
     public void MapEndpoints(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints)
         => GmailPluginHost.MapEndpoints(endpoints);
+
+    public PluginSetupDescriptor DescribeSetup(PluginHostConfiguration configuration)
+        => GmailPluginHost.DescribeSetup(configuration);
 
     public PluginAccountDefinition DefineAccount(string pluginVersion, JsonElement nonSecretConfiguration)
         => new(

@@ -1,13 +1,94 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 
 const pageOf = <T>(items: T[]) => ({ items, nextCursor: null })
+const connectedSetup = {
+  server: { state: 'CONNECTED', displayName: 'Tessera Home', version: '0.1.0' },
+  ai: { state: 'CONNECTED', gatewayId: 'homelab', displayName: 'Homelab LiteLLM', model: 'claude-haiku-4.5', profileId: 'profile-1', detailCode: null },
+  integrations: [
+    { id: 'github', name: 'GitHub', state: 'READY_TO_CONNECT', runtimeState: 'READY', accountId: null, accountHealth: null, detailCode: 'account_authorization_required', connectPath: '/accounts' },
+    { id: 'gmail', name: 'Gmail', state: 'READY_TO_CONNECT', runtimeState: 'READY', accountId: null, accountHealth: null, detailCode: 'account_authorization_required', connectPath: '/accounts' },
+    { id: 'regina-maria', name: 'Regina Maria', state: 'READY_TO_CONNECT', runtimeState: 'READY', accountId: null, accountHealth: null, detailCode: 'account_authorization_required', connectPath: '/accounts' },
+  ],
+  canOpenChat: true,
+  requiredActionCount: 3,
+}
 
 async function signIn(page: Page) {
+  await page.route('**/api/v1/setup/status', (route) => fulfill(route, connectedSetup))
   await page.goto('/')
   await page.getByLabel('Developer sign-in (local only)').fill('alice@example.com')
   await page.getByRole('button', { name: /continue/i }).click()
   await expect(page).toHaveURL(/\/chat$/)
 }
+
+test('first run automatically bootstraps the detected homelab AI gateway', async ({ page }) => {
+  const profile = { profileId: 'profile-1', accountId: 'model-account', adapterKind: 'openai-compatible-local', endpoint: 'internal', model: 'claude-haiku-4.5', contextLimit: 200000, enabled: true, streamingSupported: true, toolSupport: true, version: 1 }
+  let bootstrapped = false
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/setup/status')) return fulfill(route, bootstrapped ? connectedSetup : { ...connectedSetup, ai: { ...connectedSetup.ai, state: 'READY_TO_CONNECT', profileId: null }, canOpenChat: false, requiredActionCount: 4 })
+    if (path.endsWith('/setup/bootstrap')) { bootstrapped = true; return fulfill(route, connectedSetup) }
+    if (path.endsWith('/settings/model-profiles')) return fulfill(route, pageOf(bootstrapped ? [profile] : []))
+    if (path.endsWith('/settings')) return fulfill(route, { defaultChatModelProfileId: 'profile-1', defaultLightweightModelProfileId: 'profile-1', timezone: 'Europe/Bucharest', approvalDefaults: {}, memoryControls: {}, version: 1 })
+    if (path.endsWith('/conversations') || path.endsWith('/accounts') || path.endsWith('/capabilities')) return fulfill(route, pageOf([]))
+    return fulfill(route, { code: 'not_found' }, 404)
+  })
+  await page.goto('/')
+  await page.getByLabel('Developer sign-in (local only)').fill('alice@example.com')
+  await page.getByRole('button', { name: /continue/i }).click()
+  await expect.poll(() => bootstrapped).toBe(true)
+  await expect(page.getByText('What should Tessera help with?')).toBeVisible()
+  await expect(page.getByText('Model configuration required')).toHaveCount(0)
+})
+
+test('Plugins searches installed, official registry, and GitHub metadata without executing results', async ({ page }) => {
+  await page.addInitScript(() => { window.open = ((url?: string | URL) => { sessionStorage.setItem('inspected-integration', String(url)); return null }) as typeof window.open })
+  const plugin = { id: 'regina-maria', pluginId: 'regina-maria', name: 'Regina Maria', version: '1.0.0', pluginVersion: '1.0.0', publisher: 'Tessera', enabled: true, packageHash: 'hash', configurationState: 'ACCOUNT_SCOPED', accountProviderIds: ['regina-maria'], capabilities: [], versionStamp: 1 }
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/settings/model-profiles') || path.endsWith('/conversations') || path.endsWith('/accounts') || path.endsWith('/capabilities')) return fulfill(route, pageOf([]))
+    if (path.endsWith('/plugins')) return fulfill(route, pageOf([plugin]))
+    if (path.endsWith('/integrations/sources')) return fulfill(route, { items: [{ id: 'local', name: 'Installed and local', state: 'READY', errorCode: null }, { id: 'mcp-registry', name: 'Official MCP Registry', state: 'READY', errorCode: null }, { id: 'github', name: 'GitHub public repositories', state: 'READY', errorCode: null }] })
+    if (path.endsWith('/integrations/search')) return fulfill(route, { items: [{ id: 'github:homeassistant-ai/ha-mcp', name: 'ha mcp', description: 'Home Assistant MCP server', source: 'github', publisher: 'homeassistant-ai', runtime: 'MCP candidate', repositoryOrPackage: 'https://github.com/homeassistant-ai/ha-mcp', version: 'main', license: 'MIT', trustLevel: 'UNTRUSTED', capabilitiesSummary: ['Home Assistant MCP server'], authTypes: [], sensitivity: 'STANDARD', installationMode: 'SERVER_REVIEW_REQUIRED', installState: 'REVIEW_REQUIRED', installed: false, inspectUrl: 'https://github.com/homeassistant-ai/ha-mcp' }], sources: [{ id: 'github', name: 'GitHub public repositories', state: 'READY', errorCode: null }] })
+    return fulfill(route, { code: 'not_found' }, 404)
+  })
+  await signIn(page)
+  await page.goto('/plugins')
+  await page.getByLabel('Search integrations').fill('home assistant')
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(page.getByText('Home Assistant MCP server', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-product-state="UNTRUSTED"]')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Install' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Inspect source' }).click()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('inspected-integration'))).toBe('https://github.com/homeassistant-ai/ha-mcp')
+})
+
+test('Jobs reject past schedules and require confirmation before cancellation', async ({ page }) => {
+  const profile = { profileId: 'profile-1', accountId: 'model-account', adapterKind: 'openai-compatible-local', endpoint: 'internal', model: 'alpha', contextLimit: 8192, enabled: true, streamingSupported: true, toolSupport: true, version: 1 }
+  const job = { id: 'job-1', jobId: 'job-1', name: 'Morning brief', instruction: 'Summarize', desiredState: 'ACTIVE', health: 'READY', modelProfileId: 'profile-1', schedule: { kind: 'daily', at: null, localTime: '08:00', timeZone: 'Europe/Bucharest', days: null }, nextOccurrence: null, accountGrants: ['model-account'], capabilityGrants: ['model.chat.complete@1'], sideEffectGrants: [], contextPolicy: {}, lastRun: null, version: 1 }
+  let canceled = false
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/settings/model-profiles')) return fulfill(route, pageOf([profile]))
+    if (path.endsWith('/settings')) return fulfill(route, { defaultChatModelProfileId: 'profile-1', defaultLightweightModelProfileId: 'profile-1', timezone: 'Europe/Bucharest', approvalDefaults: {}, memoryControls: {}, version: 1 })
+    if (path.endsWith('/accounts') || path.endsWith('/capabilities')) return fulfill(route, pageOf([]))
+    if (path.endsWith('/jobs/job-1') && route.request().method() === 'DELETE') { canceled = true; return fulfill(route, { ...job, desiredState: 'CANCELED', version: 2 }) }
+    if (path.endsWith('/jobs')) return fulfill(route, pageOf([job]))
+    return fulfill(route, { code: 'not_found' }, 404)
+  })
+  await signIn(page)
+  await page.goto('/jobs')
+  await page.getByLabel('Name').fill('Past Job')
+  await page.getByLabel('Instruction').fill('Should not schedule in the past')
+  await page.getByLabel('Run at').fill('2020-01-01T08:00')
+  await page.getByRole('button', { name: 'Review and create Job' }).click()
+  await expect(page.getByText('Choose a future date and time for this Job.')).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page.getByText(/Existing run history/)).toBeVisible()
+  expect(canceled).toBe(false)
+  await page.getByRole('button', { name: 'Cancel Job' }).click()
+  await expect.poll(() => canceled).toBe(true)
+})
 
 async function fulfill(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })

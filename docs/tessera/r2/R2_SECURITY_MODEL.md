@@ -1,5 +1,11 @@
 # R2 Security Model
 
+## Native route trust
+
+Native clients bind routes using normal TLS/ATS validation plus the exact public installation UUID from `/.well-known/tessera`. The UUID is a second identity check, not a secret and not a substitute for TLS. Trust-on-first-use, HTTP LAN exceptions, certificate bypass, arbitrary endpoints, redirects during discovery and authentication before route verification are forbidden.
+
+Failover preserves the original authentication snapshot and replays only existing idempotency-keyed mutations byte-for-byte. Unkeyed or optimistic-version-only ambiguous writes are never automatically replayed. Local diagnostics may store route metadata but not canonical state, Jobs, Actions, Accounts or provider credentials.
+
 ## Trust Boundaries
 
 Browser, model output, plugin manifests, capability results, provider HTTP, and scheduler wakeups are untrusted. The Broker derives canonical owner identity and authorizes every object. Credential values remain in custody. Model and plugin output can propose structured data only; neither authorizes, chooses arbitrary egress, or mutates canonical memory/Chat directly.

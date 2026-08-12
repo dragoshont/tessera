@@ -25,6 +25,8 @@ internal sealed class R2PluginCatalog
             .ToArray();
     }
 
+            public IReadOnlyList<ValidatedPluginPackage> ListPackages() => _packages;
+
     public void ValidateExecutableModules(TesseraPluginRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);

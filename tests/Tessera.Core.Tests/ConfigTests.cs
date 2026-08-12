@@ -7,12 +7,46 @@ namespace Tessera.Core.Tests;
 public sealed class ConfigTests
 {
     [Fact]
+    public void Empty_uuid_is_not_a_configured_server_identity()
+    {
+        var identity = new ServerIdentityOptions { Id = "00000000-0000-0000-0000-000000000000" };
+        Assert.False(identity.IsConfigured);
+        Assert.Contains(new TesseraConfig { ServerIdentity = identity }.Validate(), problem => problem.Contains("non-empty UUID", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Default_config_is_valid_and_fail_closed()
     {
         var config = new TesseraConfig();
         Assert.Empty(config.Validate());
         Assert.Equal("deny", config.Policy.Default);
         Assert.False(config.Egress.Enabled);
+    }
+
+    [Fact]
+    public void Configured_server_identity_requires_canonical_supported_values()
+    {
+        var invalid = new TesseraConfig
+        {
+            ServerIdentity = new ServerIdentityOptions
+            {
+                Id = "NOT-A-UUID",
+                DisplayName = "Tessera\nHome",
+                ApiVersion = "v2",
+                ProtocolVersion = 2,
+            },
+        };
+        Assert.Equal(4, invalid.Validate().Count);
+
+        var valid = new TesseraConfig
+        {
+            ServerIdentity = new ServerIdentityOptions
+            {
+                Id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                DisplayName = "Tessera Home",
+            },
+        };
+        Assert.Empty(valid.Validate());
     }
 
     [Fact]
@@ -115,6 +149,47 @@ public sealed class ConfigTests
     }
 
     [Fact]
+    public void Auto_connect_model_gateway_requires_a_safe_complete_bootstrap_contract()
+    {
+        var invalid = new TesseraConfig
+        {
+            ModelGateways = new ModelGatewayOptions
+            {
+                Enabled = true,
+                Endpoints = [new ModelGatewayEndpointOptions
+                {
+                    Id = "homelab",
+                    DisplayName = "Homelab LiteLLM",
+                    Endpoint = "https://models.example/v1",
+                    AutoConnect = true,
+                    DefaultContextLimit = 1,
+                    CredentialEnvironmentVariable = "INVALID-NAME",
+                }],
+            },
+        };
+        Assert.Equal(3, invalid.Validate().Count(problem => problem.Contains("model gateway", StringComparison.Ordinal)));
+
+        var valid = new TesseraConfig
+        {
+            ModelGateways = new ModelGatewayOptions
+            {
+                Enabled = true,
+                Endpoints = [new ModelGatewayEndpointOptions
+                {
+                    Id = "homelab",
+                    DisplayName = "Homelab LiteLLM",
+                    Endpoint = "https://models.example/v1",
+                    AutoConnect = true,
+                    DefaultModel = "claude-haiku-4.5",
+                    DefaultContextLimit = 200_000,
+                    CredentialEnvironmentVariable = "TESSERA_LITELLM_MASTER_KEY",
+                }],
+            },
+        };
+        Assert.Empty(valid.Validate());
+    }
+
+    [Fact]
     public void Out_of_range_port_is_rejected()
     {
         var config = new TesseraConfig { Server = new ServerOptions { Port = 70000 } };
@@ -138,6 +213,7 @@ public sealed class ConfigTests
                 {
                   // server settings
                   "server": { "host": "0.0.0.0", "port": 8080 },
+                  "serverIdentity": { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "displayName": "Tessera Home" },
                   "identity": { "mode": "oidc", "oidc": { "issuer": "https://issuer/v2.0" } },
                   "policy": { "default": "deny" },
                 }
@@ -155,6 +231,7 @@ public sealed class ConfigTests
             Assert.Equal(9090, config.Server.Port); // env override applied
             Assert.Equal("oidc", config.Identity.Mode);
             Assert.Equal("api://system", config.Identity.Oidc.Audience);
+            Assert.Equal("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", config.ServerIdentity.Id);
             Assert.True(config.Identity.Oidc.DelegationEnabled);
             Assert.Empty(config.Validate());
         }

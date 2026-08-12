@@ -1,5 +1,22 @@
 # R2 API Contract
 
+## Public server descriptor
+
+`GET /.well-known/tessera` is the only unauthenticated native bootstrap contract. A configured installation returns `200`, `Cache-Control: no-store`, and a body smaller than 4 KiB:
+
+```json
+{
+	"product": "tessera",
+	"serverId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+	"displayName": "Tessera Home",
+	"serverVersion": "0.1.0",
+	"apiVersion": "v1",
+	"protocolVersion": 1
+}
+```
+
+An unconfigured installation returns RFC 9457 Problem Details with HTTP `503` and `code=server_identity_unconfigured`. Clients reject redirects, malformed/oversized responses, wrong product/ID/version, non-HTTPS non-loopback origins and TLS failures before attaching an access token.
+
 **Authority:** This document refines the normative requirements in `docs/tessera/r1/r2-spec.md`. `R2_PRODUCT_SPEC.md` is the route summary; this is the exact cross-tier contract.
 
 ## Common Wire Types

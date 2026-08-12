@@ -17,7 +17,7 @@ using Tessera.Plugin.Abstractions;
 
 namespace Tessera.Plugins.ReginaMaria;
 
-public sealed class ReginaMariaPlugin : ITesseraCapabilityPlugin, ITesseraModelToolPlugin, ITesseraHostPlugin, ITesseraMcpPlugin
+public sealed class ReginaMariaPlugin : ITesseraCapabilityPlugin, ITesseraModelToolPlugin, ITesseraHostPlugin, ITesseraMcpPlugin, ITesseraSetupPlugin
 {
     private static readonly JsonElement ObjectSchema = JsonSerializer.SerializeToElement(new
     {
@@ -67,6 +67,18 @@ public sealed class ReginaMariaPlugin : ITesseraCapabilityPlugin, ITesseraModelT
         new("rm_create_appointment", [new("interval_id", "string"), new("physician_id", "string")], [new("booked", "boolean"), new("id", "string")]),
         new("rm_cancel_appointment", [new("appointment_id", "string")], [new("cancelled", "boolean")]),
     ];
+
+    public PluginSetupDescriptor DescribeSetup(PluginHostConfiguration configuration)
+    {
+        var options = ReginaMariaHostOptions.Load(configuration);
+        return new(
+            "regina-maria",
+            "Regina Maria",
+            options.Enabled && options.Connectors.Count > 0,
+            true,
+            options.Enabled ? "/api/v1/accounts/regina-maria/connectors" : null,
+            options.Enabled ? "account_authorization_required" : "connector_runtime_unavailable");
+    }
 
     public async ValueTask<McpServerContract> DiscoverMcpAsync(
         PluginCapabilityContext context,

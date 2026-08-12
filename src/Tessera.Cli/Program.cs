@@ -8,8 +8,6 @@ namespace Tessera.Cli;
 /// <summary>The <c>tessera</c> command-line entry point.</summary>
 internal static class Program
 {
-    private const string Version = "0.1.0";
-
     public static async Task<int> Main(string[] args)
     {
         if (args.Length == 0)
@@ -32,7 +30,8 @@ internal static class Program
 
     private static int PrintVersion()
     {
-        Console.WriteLine($"tessera {Version}");
+        var version = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        Console.WriteLine($"tessera {version}");
         return 0;
     }
 

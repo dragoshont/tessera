@@ -61,12 +61,17 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
+            packages/tessera-client/package-lock.json
             web/package-lock.json
             desktop/package-lock.json
+      - name: Install shared client
+        run: npm --prefix packages/tessera-client ci
       - name: Install Web
         run: npm --prefix web ci
       - name: Install Desktop
         run: npm --prefix desktop ci
+      - name: Shared client typecheck and tests
+        run: npm --prefix packages/tessera-client run typecheck && npm --prefix packages/tessera-client test
       - name: Web lint, unit, and build
         run: npm --prefix web run lint && npm --prefix web test && npm --prefix web run build
       - name: Desktop lint, unit, and Electron smoke

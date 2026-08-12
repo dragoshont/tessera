@@ -1,5 +1,5 @@
 # Final Product Specification
 
-Tessera is one deployed canonical backend with two clients: the Web app and a packaged macOS Electron app built from the same React product routes. Conversations, Memory, Jobs, Accounts, Plugins, Actions, Evidence and Activity are server-owned. Desktop contains no scheduler, provider client, SQLite database or canonical product store.
+Tessera is one canonical backend with three clients: the Web app, a packaged macOS Electron app built from the React product routes, and a native React Native iOS app. Conversations, Memory, Jobs, Accounts, Plugins, Actions, Evidence and Activity are server-owned. No client contains a scheduler, provider credential/client, SQLite database or canonical product store.
 
-Required shared routes: Chat, Jobs, Accounts, Plugins, Memory, Activity and Settings. Consequential provider calls remain exact Tessera Actions. Jobs continue when Desktop is closed.
+Required shared surfaces: Chat, Jobs, Accounts, Plugins, Memory, Activity and Settings. Consequential provider calls remain exact Tessera Actions. Jobs continue when every client is closed. Native routes require TLS plus the stable Tessera Home server UUID before authentication.

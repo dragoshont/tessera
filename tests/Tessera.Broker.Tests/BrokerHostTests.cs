@@ -22,6 +22,7 @@ public sealed class BrokerHostTests : IAsyncLifetime
         File.WriteAllText(configPath, $$"""
             {
               "server": { "host": "127.0.0.1", "port": {{port}} },
+              "serverIdentity": { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "displayName": "Tessera Test" },
               "identity": { "mode": "mtls", "trustDomain": "tessera.local" },
               "policy": { "default": "deny" },
               "audit": { "enabled": false }
@@ -73,6 +74,54 @@ public sealed class BrokerHostTests : IAsyncLifetime
     {
         var response = await _client.GetAsync(new Uri("/healthz", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Server_descriptor_is_public_bounded_and_cache_disabled()
+    {
+        var response = await _client.GetAsync(new Uri("/.well-known/tessera", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.InRange(body.Length, 1, 4096);
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        Assert.Equal("tessera", root.GetProperty("product").GetString());
+        Assert.Equal("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", root.GetProperty("serverId").GetString());
+        Assert.Equal("Tessera Test", root.GetProperty("displayName").GetString());
+        Assert.Equal("v1", root.GetProperty("apiVersion").GetString());
+        Assert.Equal(1, root.GetProperty("protocolVersion").GetInt32());
+        Assert.Matches("^[0-9]+\\.[0-9]+\\.[0-9]+$", root.GetProperty("serverVersion").GetString()!);
+        Assert.Equal(6, root.EnumerateObject().Count());
+    }
+
+    [Fact]
+    public async Task Server_descriptor_fails_closed_when_identity_is_unconfigured()
+    {
+        var port = FreePort();
+        var path = Path.Combine(_dir, "unconfigured.json");
+        File.WriteAllText(path, $$"""
+            {
+              "server": { "host": "127.0.0.1", "port": {{port}} },
+              "identity": { "mode": "mtls" },
+              "policy": { "default": "deny" },
+              "audit": { "enabled": false }
+            }
+            """);
+        await using var app = await BrokerHost.BuildAppAsync(new BrokerHostOptions
+        {
+            ConfigPath = path,
+            PolicyPath = Path.Combine(_dir, "missing-grants.json"),
+            StoreOverride = new InMemoryCredentialStore(),
+        });
+        await app.StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+        var response = await client.GetAsync(new Uri("/.well-known/tessera", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("server_identity_unconfigured", document.RootElement.GetProperty("code").GetString());
+        await app.StopAsync();
     }
 
     [Fact]

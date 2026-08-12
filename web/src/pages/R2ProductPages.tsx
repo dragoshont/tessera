@@ -99,8 +99,21 @@ function problem(error: unknown): string | null {
     : recoveryMessage(null);
 }
 
+function isValidTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return value.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function AccountsPage() {
   const client = useQueryClient();
+  const setup = useQuery({
+    queryKey: ["r2", "setup"],
+    queryFn: r2Api.setupStatus,
+  });
   const accounts = useQuery({
     queryKey: ["r2", "accounts"],
     queryFn: r2Api.accounts,
@@ -115,9 +128,12 @@ export function AccountsPage() {
   const [repository, setRepository] = useState("");
   const [secret, setSecret] = useState("");
   const [connectorId, setConnectorId] = useState("");
+  const [disable, setDisable] = useState<R2Account | null>(null);
   const [revoke, setRevoke] = useState<R2Account | null>(null);
-  const refresh = () =>
-    client.invalidateQueries({ queryKey: ["r2", "accounts"] });
+  const refresh = () => {
+    void client.invalidateQueries({ queryKey: ["r2", "setup"] });
+    return client.invalidateQueries({ queryKey: ["r2", "accounts"] });
+  };
   const rmConnectors = useQuery({
     queryKey: ["r2", "regina-maria-connectors"],
     queryFn: r2Api.reginaMariaConnectors,
@@ -171,6 +187,7 @@ export function AccountsPage() {
           ? r2Api.disableAccount(account)
           : r2Api.revokeAccount(account),
     onSuccess: () => {
+      setDisable(null);
       setRevoke(null);
       void refresh();
     },
@@ -190,6 +207,33 @@ export function AccountsPage() {
       loading={accounts.isLoading}
       error={accounts.error}
     >
+      {setup.data?.integrations.length ? (
+        <section className="border-b border-border py-5" aria-labelledby="integration-readiness-title">
+          <h2 id="integration-readiness-title" className="text-sm font-semibold">
+            Integration readiness
+          </h2>
+          <ul className="mt-3 grid gap-2 md:grid-cols-3">
+            {setup.data.integrations.map((integration) => (
+              <li
+                key={integration.id}
+                className="flex min-h-16 items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+              >
+                <div>
+                  <p className="text-sm font-medium">{integration.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {integration.state === "CONNECTED"
+                      ? "Account connected"
+                      : integration.runtimeState === "READY"
+                        ? "Runtime ready; account authorization remains"
+                        : "Runtime unavailable"}
+                  </p>
+                </div>
+                <ProductStateBadge state={integration.state} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <form
         className="grid gap-3 border-b border-border py-5 md:grid-cols-2"
         onSubmit={(event) => {
@@ -351,9 +395,7 @@ export function AccountsPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() =>
-                      lifecycle.mutate({ account, operation: "disable" })
-                    }
+                    onClick={() => setDisable(account)}
                   >
                     Disable
                   </Button>
@@ -382,6 +424,37 @@ export function AccountsPage() {
           ))}
         </ul>
       )}
+      <Dialog
+        open={Boolean(disable)}
+        onOpenChange={(open) => {
+          if (!open) setDisable(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Disable {disable?.displayName}</DialogTitle>
+            <DialogDescription>
+              This blocks new Chat and Job use while preserving account history
+              and credential custody. You can enable and test it again later.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDisable(null)}>
+              Keep enabled
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={lifecycle.isPending}
+              onClick={() =>
+                disable &&
+                lifecycle.mutate({ account: disable, operation: "disable" })
+              }
+            >
+              Disable account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={Boolean(revoke)}
         onOpenChange={(open) => {
@@ -448,6 +521,7 @@ export function JobsPage() {
   const [localTime, setLocalTime] = useState("08:00");
   const [accountIds, setAccountIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<R2Job | null>(null);
+  const [cancelJob, setCancelJob] = useState<R2Job | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const runs = useQuery({
     queryKey: ["r2", "job-runs", selected?.id],
@@ -495,7 +569,12 @@ export function JobsPage() {
         scheduleKind === "once"
           ? {
               kind: "once" as const,
-              at: new Date(at).toISOString(),
+              at: (() => {
+                const scheduled = new Date(at);
+                if (!at || Number.isNaN(scheduled.valueOf()) || scheduled <= new Date())
+                  throw new Error("Choose a future date and time for this Job.");
+                return scheduled.toISOString();
+              })(),
               localTime: null,
               timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
               days: null,
@@ -544,6 +623,7 @@ export function JobsPage() {
           ? r2Api.cancelJob(job)
           : r2Api.setJobState(job, operation),
     onSuccess: () => {
+      setCancelJob(null);
       void client.invalidateQueries({ queryKey: ["r2", "jobs"] });
       void client.invalidateQueries({ queryKey: ["r2", "job-runs"] });
     },
@@ -714,7 +794,7 @@ export function JobsPage() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => mutate.mutate({ job, operation: "cancel" })}
+                  onClick={() => setCancelJob(job)}
                 >
                   Cancel
                 </Button>
@@ -750,6 +830,36 @@ export function JobsPage() {
           {runDetail.data ? <JobRunTimeline detail={runDetail.data} /> : null}
         </DialogContent>
       </Dialog>
+      <Dialog
+        open={Boolean(cancelJob)}
+        onOpenChange={(open) => {
+          if (!open) setCancelJob(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel {cancelJob?.name}</DialogTitle>
+            <DialogDescription>
+              Tessera will stop future runs. Existing run history, Actions,
+              outputs, and Evidence remain available.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelJob(null)}>
+              Keep Job
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!cancelJob || mutate.isPending}
+              onClick={() =>
+                cancelJob && mutate.mutate({ job: cancelJob, operation: "cancel" })
+              }
+            >
+              Cancel Job
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ProductState>
   );
 }
@@ -757,6 +867,8 @@ export function JobsPage() {
 export function PluginsPage() {
   const client = useQueryClient();
   const [remove, setRemove] = useState<R2Plugin | null>(null);
+  const [searchText, setSearchText] = useState("");
+  const [submittedSearch, setSubmittedSearch] = useState("");
   const query = useQuery({
     queryKey: ["r2", "plugins"],
     queryFn: r2Api.plugins,
@@ -764,6 +876,15 @@ export function PluginsPage() {
   const capabilities = useQuery({
     queryKey: ["r2", "capabilities"],
     queryFn: r2Api.capabilities,
+  });
+  const sources = useQuery({
+    queryKey: ["r2", "integration-sources"],
+    queryFn: r2Api.integrationSources,
+  });
+  const search = useQuery({
+    queryKey: ["r2", "integration-search", submittedSearch],
+    queryFn: () => r2Api.searchIntegrations(submittedSearch),
+    enabled: submittedSearch.length >= 2,
   });
   const mutation = useMutation({
     mutationFn: ({
@@ -865,6 +986,114 @@ export function PluginsPage() {
           })}
         </ul>
       ) : null}
+      <section
+        className="border-t border-border py-6"
+        aria-labelledby="integration-search-title"
+      >
+        <h2 id="integration-search-title" className="text-lg font-semibold">
+          Find integrations
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Search installed integrations, the official MCP Registry, and public
+          GitHub MCP repositories. Search results are metadata only; Tessera
+          never downloads or executes unreviewed code.
+        </p>
+        <form
+          className="mt-4 flex flex-col gap-2 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const value = searchText.trim();
+            if (value.length >= 2) setSubmittedSearch(value);
+          }}
+        >
+          <Input
+            aria-label="Search integrations"
+            placeholder="Search integrations…"
+            value={searchText}
+            minLength={2}
+            maxLength={100}
+            onChange={(event) => setSearchText(event.target.value)}
+          />
+          <Button disabled={searchText.trim().length < 2 || search.isFetching}>
+            {search.isFetching ? "Searching…" : "Search"}
+          </Button>
+        </form>
+        <div className="mt-3 flex flex-wrap gap-2" aria-label="Catalog sources">
+          {(search.data?.sources ?? sources.data?.items ?? []).map((source) => (
+            <Badge key={source.id} variant="outline">
+              {source.name}: {source.state.toLowerCase()}
+            </Badge>
+          ))}
+        </div>
+        {problem(search.error) ? (
+          <Alert variant="destructive" className="mt-4">
+            <AlertDescription>{problem(search.error)}</AlertDescription>
+          </Alert>
+        ) : null}
+        {submittedSearch && !search.isFetching && search.data?.items.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No compatible public or local integrations matched “{submittedSearch}”.
+          </p>
+        ) : null}
+        {search.data?.items.length ? (
+          <ul className="mt-5 divide-y divide-border border-y border-border">
+            {search.data.items.map((item) => (
+              <li key={`${item.source}:${item.id}:${item.version}`} className="py-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{item.name}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {item.description}
+                    </p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {item.source} · {item.publisher} · {item.runtime} · {item.version}
+                      {item.license ? ` · ${item.license}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <ProductStateBadge state={item.installState} />
+                    <ProductStateBadge state={item.trustLevel} />
+                    <ProductStateBadge state={item.sensitivity} />
+                  </div>
+                </div>
+                {item.capabilitiesSummary.length ? (
+                  <p className="mt-3 text-sm">
+                    Capabilities: {item.capabilitiesSummary.join(" · ")}
+                  </p>
+                ) : null}
+                {item.authTypes.length ? (
+                  <Alert className="mt-3">
+                    <AlertDescription>
+                      Authorization: {item.authTypes.join(", ")}. Review where
+                      credentials and sensitive data would be sent before installation.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {item.inspectUrl ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void openTrustedExternal(item.inspectUrl!)}
+                    >
+                      Inspect source
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      Built into the reviewed Tessera server image.
+                    </span>
+                  )}
+                  {!item.installed ? (
+                    <span className="text-xs text-muted-foreground">
+                      Review required before server installation.
+                    </span>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
       {problem(mutation.error) ? (
         <Alert variant="destructive" className="mt-4">
           <AlertDescription>{problem(mutation.error)}</AlertDescription>
@@ -1126,14 +1355,17 @@ export function SettingsPage() {
     },
   });
   const save = useMutation({
-    mutationFn: () =>
-      settings.data
+    mutationFn: () => {
+      if (!isValidTimeZone(timezone))
+        return Promise.reject(new Error("Choose a valid IANA timezone, for example Europe/Bucharest."));
+      return settings.data
         ? r2Api.updateSettings(settings.data, {
             timezone,
             defaultChatModelProfileId:
               defaultProfileId || settings.data.defaultChatModelProfileId,
           })
-        : Promise.reject(new Error("Settings unavailable")),
+        : Promise.reject(new Error("Settings unavailable"));
+    },
     onSuccess: () =>
       void client.invalidateQueries({ queryKey: ["r2", "settings"] }),
   });
@@ -1147,42 +1379,48 @@ export function SettingsPage() {
       loading={profiles.isLoading || settings.isLoading}
       error={profiles.error ?? settings.error}
     >
-      <form
-        className="grid gap-3 border-b border-border py-5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          configure.mutate();
-        }}
-      >
-        <Input
-          aria-label="Model endpoint"
-          placeholder="https://provider.example/v1"
-          value={endpoint}
-          onChange={(event) => setEndpoint(event.target.value)}
-          required
-        />
-        <Input
-          aria-label="Model name"
-          placeholder="Model name"
-          value={model}
-          onChange={(event) => setModel(event.target.value)}
-          required
-        />
-        <Input
-          aria-label="Provider token"
-          type="password"
-          autoComplete="off"
-          placeholder="Provider token"
-          value={secret}
-          onChange={(event) => setSecret(event.target.value)}
-          required
-        />
-        <Button disabled={configure.isPending}>Save and validate model</Button>
-        <p className="text-xs text-muted-foreground">
-          Remote endpoints require HTTPS. Loopback HTTP is accepted only for
-          explicitly local adapters.
-        </p>
-      </form>
+      <details open={!items.length} className="border-b border-border py-5">
+        <summary className="cursor-pointer text-sm font-medium">
+          {items.length ? "Advanced model connection" : "Connect an AI model"}
+        </summary>
+        <form
+          className="mt-4 grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            configure.mutate();
+          }}
+        >
+          <Input
+            aria-label="Model endpoint"
+            placeholder="https://provider.example/v1"
+            value={endpoint}
+            onChange={(event) => setEndpoint(event.target.value)}
+            required
+          />
+          <Input
+            aria-label="Model name"
+            placeholder="Model name"
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            required
+          />
+          <Input
+            aria-label="Provider token"
+            type="password"
+            autoComplete="off"
+            placeholder="Provider token"
+            value={secret}
+            onChange={(event) => setSecret(event.target.value)}
+            required
+          />
+          <Button disabled={configure.isPending}>Save and validate model</Button>
+          <p className="text-xs text-muted-foreground">
+            Remote endpoints require HTTPS. Loopback HTTP is accepted only for
+            explicitly local adapters. Existing server-owned gateways are
+            discovered automatically and do not require client setup.
+          </p>
+        </form>
+      </details>
       {problem(configure.error) ? (
         <Alert variant="destructive" className="mt-4">
           <AlertDescription>{problem(configure.error)}</AlertDescription>
@@ -1198,11 +1436,20 @@ export function SettingsPage() {
           />
         </div>
         <div className="flex items-end">
-          <Button variant="outline" onClick={() => save.mutate()}>
+          <Button
+            variant="outline"
+            disabled={!isValidTimeZone(timezone) || save.isPending}
+            onClick={() => save.mutate()}
+          >
             Save timezone
           </Button>
         </div>
       </div>
+      {problem(save.error) ? (
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{problem(save.error)}</AlertDescription>
+        </Alert>
+      ) : null}
       {items.length ? (
         <ul className="divide-y divide-border">
           {items.map((profile) => (

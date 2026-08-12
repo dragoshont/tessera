@@ -17,6 +17,18 @@ namespace Tessera.Plugins.Gmail;
 
 internal static class GmailPluginHost
 {
+    public static PluginSetupDescriptor DescribeSetup(PluginHostConfiguration configuration)
+    {
+        var options = LoadOptions(configuration);
+        return new(
+            "gmail",
+            "Gmail",
+            options.Enabled,
+            true,
+            options.Enabled ? "/api/v1/accounts/gmail/connect" : null,
+            options.Enabled ? "account_authorization_required" : "oauth_application_unavailable");
+    }
+
     public static void ConfigureServices(IServiceCollection services, PluginHostConfiguration configuration)
     {
         var options = LoadOptions(configuration);

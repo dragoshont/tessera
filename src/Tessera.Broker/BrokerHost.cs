@@ -234,6 +234,7 @@ public static class BrokerHost
         var productDatabasePath = options.ProductDatabasePath
             ?? Get(options.Environment, "TESSERA_PRODUCT_DB_PATH");
         var pluginRegistry = options.PluginRegistryOverride ?? TesseraPluginRegistry.AuthoritativeEmpty;
+        IReadOnlyList<PluginSetupDescriptor> pluginSetupDescriptors = [];
         if (!string.IsNullOrWhiteSpace(productDatabasePath))
         {
             var productStore = new SqliteKernelStore(productDatabasePath, productDatabaseMaxBytes);
@@ -279,6 +280,11 @@ public static class BrokerHost
                     && options.Environment.TryGetValue(name, out var value)
                         ? value
                         : Environment.GetEnvironmentVariable(name));
+            pluginSetupDescriptors = pluginRegistry.ListPlugins()
+                .OfType<ITesseraSetupPlugin>()
+                .Select(plugin => plugin.DescribeSetup(hostConfiguration))
+                .OrderBy(descriptor => descriptor.DisplayName, StringComparer.Ordinal)
+                .ToArray();
             foreach (var hostPlugin in pluginRegistry.ListPlugins().OfType<ITesseraHostPlugin>())
             {
                 var staged = new ServiceCollection();
@@ -290,6 +296,7 @@ public static class BrokerHost
             services.AddHostedService(services=>services.GetRequiredService<R2ChatExecutionQueue>());
             services.AddHostedService<R2SchedulerService>();
         }
+        services.AddSingleton(pluginSetupDescriptors);
         // Use-based liveness metadata (ADR 0025 / SDD-01 P4): one shared, non-secret
         // store the egress writes verdicts to and the portal reads them from. In-memory
         // (single replica); a present connection projects as unverified until a real
@@ -318,6 +325,22 @@ public static class BrokerHost
         if(config.ModelGateways.Enabled)modelGatewayRuntime=new(config.ModelGateways,publicHttpTransport,options.InternalTransportOverride,options.TransportOverride is null);
         var httpTransport=(Tessera.Providers.IHttpTransport?)modelGatewayRuntime??publicHttpTransport;
         services.AddSingleton<Tessera.Providers.IHttpTransport>(httpTransport);
+        if (status.ProductConfigured)
+        {
+            services.AddSingleton(sp => new ModelGatewayBootstrapService(
+                config,
+                sp.GetRequiredService<SqliteKernelStore>(),
+                sp.GetRequiredService<ICredentialStore>(),
+                sp.GetRequiredService<Tessera.Providers.IHttpTransport>(),
+                name => options.Environment is not null
+                    && options.Environment.TryGetValue(name, out var value)
+                        ? value
+                        : Environment.GetEnvironmentVariable(name)));
+            services.AddSingleton(sp => new IntegrationCatalogService(
+                sp.GetService<R2PluginCatalog>(),
+                sp.GetRequiredService<Tessera.Providers.IHttpTransport>(),
+                pluginRegistry.ListPlugins().OfType<ITesseraCatalogPlugin>().ToArray()));
+        }
         services.AddSingleton(pluginRegistry);
         services.AddSingleton<IMcpClientRuntime>(options.McpClientRuntimeOverride
             ?? new McpClientRuntime(endpoint => Egress.HttpClientTransport.CreateGuardedHttpClient(
@@ -431,6 +454,8 @@ public static class BrokerHost
             app.MapOAuthMcpConnect();
         }
         app.MapModelGatewayEndpoints();
+        app.MapSetupEndpoints();
+        app.MapIntegrationCatalogEndpoints();
         foreach (var hostPlugin in pluginRegistry.ListPlugins().OfType<ITesseraHostPlugin>())
             hostPlugin.MapEndpoints(app);
         app.MapMcp("/mcp");
@@ -507,6 +532,24 @@ public static class BrokerHost
 
     private static void MapEndpoints(WebApplication app)
     {
+        app.MapGet("/.well-known/tessera", (HttpContext context, TesseraConfig config) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            if (!config.ServerIdentity.IsConfigured)
+                return Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "server_identity_unconfigured",
+                    extensions: new Dictionary<string, object?> { ["code"] = "server_identity_unconfigured" });
+            var version = typeof(BrokerHost).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+            return Results.Json(new ServerDescriptor(
+                "tessera",
+                config.ServerIdentity.Id,
+                config.ServerIdentity.DisplayName,
+                version,
+                config.ServerIdentity.ApiVersion,
+                config.ServerIdentity.ProtocolVersion));
+        });
+
         app.MapGet("/healthz", () => Results.Json(new { status = "ok" }));
 
         app.MapGet("/readyz", async (BrokerStatus status, IServiceProvider services, CancellationToken token) =>
@@ -656,6 +699,14 @@ public static class BrokerHost
         return parsed;
     }
 }
+
+internal sealed record ServerDescriptor(
+    string Product,
+    string ServerId,
+    string DisplayName,
+    string ServerVersion,
+    string ApiVersion,
+    int ProtocolVersion);
 
 /// <summary>The /status payload (secret-free).</summary>
 /// <param name="Ready">Whether startup completed.</param>

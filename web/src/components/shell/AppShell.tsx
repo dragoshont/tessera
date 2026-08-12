@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Activity, Blocks, Bot, Brain, CalendarClock, Lock, LogOut, Menu, Radar, Settings2, Users, Wallet } from 'lucide-react'
+import { Activity, Blocks, Bot, Brain, CalendarClock, LogOut, Menu, Radar, Settings2, Users, Wallet } from 'lucide-react'
 import type { Person } from '../../data/types'
 import { cn } from '../../lib/utils'
 import { useSession } from '../../app/session'
@@ -77,16 +77,6 @@ export function SidebarNav({
           <NavLink to="/settings/admin/observability" className={navItemClass} onClick={onNavigate}>
             <Radar className="h-4 w-4" aria-hidden />
             Observability
-          </NavLink>
-          <NavLink
-            to="/settings/admin/connections"
-            className={navItemClass}
-            onClick={onNavigate}
-            title="Step-up required to enter"
-          >
-            <Lock className="h-4 w-4" aria-hidden />
-            <span className="flex-1">All connections</span>
-            <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
           </NavLink>
         </div>
       ) : null}

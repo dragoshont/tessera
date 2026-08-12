@@ -17,7 +17,6 @@ import { ToastProvider } from './components/ui/toast'
 import { AccountsPage as LegacyAccountsPage } from './pages/AccountsPage'
 import { ActionRequiredPage } from './pages/ActionRequiredPage'
 import { ActivityAccessPage } from './pages/ActivityAccessPage'
-import { AllConnectionsPage } from './pages/AllConnectionsPage'
 import { AuthCallbackPage } from './pages/AuthCallbackPage'
 import { ConnectWizardPage } from './pages/ConnectWizardPage'
 import { ContinuityPage } from './pages/ContinuityPage'
@@ -188,7 +187,6 @@ function AppRoutes() {
           <Route path="/action-required" element={<Navigate to="/activity" replace />} />
           <Route path="/handoff/:connectionId" element={<LiveHandoffPage />} />
           <Route path="/settings/admin/users" element={<UsersPage />} />
-          <Route path="/settings/admin/connections" element={<AllConnectionsPage />} />
           <Route path="/settings/admin/legacy-accounts" element={<LegacyAccountsPage />} />
           <Route path="/settings/admin/connections/:connectionId" element={<LegacyAccountsPage />} />
           <Route path="/settings/admin/activity" element={<ActivityAccessPage />} />
@@ -197,7 +195,6 @@ function AppRoutes() {
           <Route path="/settings/admin/connect" element={<ConnectWizardPage />} />
           <Route path="/settings/admin/observability" element={<ObservabilityPage />} />
           <Route path="/admin/users" element={<Navigate to="/settings/admin/users" replace />} />
-          <Route path="/admin/connections" element={<Navigate to="/settings/admin/connections" replace />} />
           <Route path="/admin/observability" element={<Navigate to="/settings/admin/observability" replace />} />
         </Route>
       </Route>
