@@ -100,4 +100,26 @@ public sealed class BundleParserTests
         Assert.NotNull(store);
         Assert.Equal("azure-key-vault", store!.Kind);
     }
+
+    [Theory]
+    [InlineData("google-oauth-client-secret")]
+    [InlineData("regina-maria-tessera-action-token")]
+    [InlineData("A1-b2-C3")]
+    public void Key_vault_compatible_names_remain_unchanged(string reference)
+        => Assert.Equal(reference, KeyVaultSecretName.FromLogicalReference(reference));
+
+    [Fact]
+    public void Owner_bound_account_reference_maps_to_stable_valid_secret_name()
+    {
+        const string reference = "r2/account/owner-hash/account-id";
+
+        var first = KeyVaultSecretName.FromLogicalReference(reference);
+        var second = KeyVaultSecretName.FromLogicalReference(reference);
+
+        Assert.Equal(first, second);
+        Assert.Matches("^tessera-ref-[0-9a-f]{64}$", first);
+        Assert.InRange(first.Length, 1, 127);
+        Assert.DoesNotContain('/', first);
+        Assert.NotEqual(first, KeyVaultSecretName.FromLogicalReference(reference + "-other"));
+    }
 }

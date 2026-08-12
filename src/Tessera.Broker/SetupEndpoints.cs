@@ -5,6 +5,7 @@ using Tessera.Core.Configuration;
 using Tessera.Core.Identity;
 using Tessera.Core.Kernel;
 using Tessera.Core.Product;
+using Tessera.Core.Stores;
 using Tessera.Identity;
 using Tessera.Persistence.Sqlite;
 using Tessera.Plugin.Abstractions;
@@ -80,6 +81,12 @@ internal static class SetupEndpoints
                             ? StatusCodes.Status401Unauthorized
                             : StatusCodes.Status422UnprocessableEntity,
                         exception.Message);
+                }
+                catch (StoreException)
+                {
+                    return Problem(
+                        StatusCodes.Status503ServiceUnavailable,
+                        "storage_unavailable");
                 }
             });
     }

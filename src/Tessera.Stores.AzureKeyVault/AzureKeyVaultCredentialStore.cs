@@ -1,4 +1,6 @@
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using Azure;
 using Azure.Core.Pipeline;
 using Azure.Identity;
@@ -113,10 +115,11 @@ public sealed class AzureKeyVaultCredentialStore : ICredentialStore, ICredential
     /// <inheritdoc/>
     public async Task<CredentialBundle> GetBundleAsync(string name, CancellationToken cancellationToken = default)
     {
+        var secretName = KeyVaultSecretName.FromLogicalReference(name);
         try
         {
             Response<KeyVaultSecret> response =
-                await _client.GetSecretAsync(name, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await _client.GetSecretAsync(secretName, cancellationToken: cancellationToken).ConfigureAwait(false);
             return BundleParser.Parse(response.Value.Value);
         }
         catch (RequestFailedException ex) when (ex.Status == 404)
@@ -137,13 +140,14 @@ public sealed class AzureKeyVaultCredentialStore : ICredentialStore, ICredential
     /// <inheritdoc/>
     public async Task PutBundleAsync(string name, CredentialBundle bundle, CancellationToken cancellationToken = default)
     {
+        var secretName = KeyVaultSecretName.FromLogicalReference(name);
         // Merge-then-write: re-read the current secret and overlay the rotated
         // fields, so a concurrent harvester write isn't clobbered (the bundle may
         // carry fields we don't model). Only the sole session owner calls this.
         string merged;
         try
         {
-            Response<KeyVaultSecret> current = await _client.GetSecretAsync(name, cancellationToken: cancellationToken).ConfigureAwait(false);
+            Response<KeyVaultSecret> current = await _client.GetSecretAsync(secretName, cancellationToken: cancellationToken).ConfigureAwait(false);
             merged = BundleParser.Merge(current.Value.Value, bundle);
         }
         catch (RequestFailedException ex) when (ex.Status == 404)
@@ -153,7 +157,7 @@ public sealed class AzureKeyVaultCredentialStore : ICredentialStore, ICredential
 
         try
         {
-            await _client.SetSecretAsync(name, merged, cancellationToken).ConfigureAwait(false);
+            await _client.SetSecretAsync(secretName, merged, cancellationToken).ConfigureAwait(false);
         }
         catch (RequestFailedException ex)
         {
@@ -163,5 +167,20 @@ public sealed class AzureKeyVaultCredentialStore : ICredentialStore, ICredential
         {
             throw new StoreException($"Key Vault auth failed writing '{name}': {ex.Message}", ex);
         }
+    }
+}
+
+internal static class KeyVaultSecretName
+{
+    private const string HashedPrefix = "tessera-ref-";
+
+    public static string FromLogicalReference(string reference)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reference);
+        if (reference.Length <= 127
+            && reference.All(character => char.IsAsciiLetterOrDigit(character) || character == '-'))
+            return reference;
+        return HashedPrefix + Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(reference)));
     }
 }
