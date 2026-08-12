@@ -112,10 +112,10 @@ public sealed class EntraTokenValidator : ITokenValidator
         var claims = Flatten(result.Claims);
 
         if (!string.IsNullOrEmpty(_options.TenantId)
-            && claims.TryGetValue("tid", out var tid)
-            && !string.Equals(tid, _options.TenantId, StringComparison.OrdinalIgnoreCase))
+            && (!claims.TryGetValue("tid", out var tid)
+                || !string.Equals(tid, _options.TenantId, StringComparison.OrdinalIgnoreCase)))
         {
-            return TesseraTokenResult.Fail("token tenant (tid) does not match the configured tenant");
+            return TesseraTokenResult.Fail("token tenant (tid) is missing or does not match the configured tenant");
         }
 
         return TesseraTokenResult.Success(claims);

@@ -24,11 +24,15 @@ public sealed partial class SqliteKernelStore :
     private const string TimestampFormat = "O";
     private readonly string _databasePath;
     private readonly string _connectionString;
+    private readonly long? _maxDatabaseBytes;
 
-    public SqliteKernelStore(string databasePath)
+    public SqliteKernelStore(string databasePath, long? maxDatabaseBytes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+        if (maxDatabaseBytes is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxDatabaseBytes));
         _databasePath = Path.GetFullPath(databasePath);
+        _maxDatabaseBytes = maxDatabaseBytes;
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = _databasePath,
@@ -107,10 +111,14 @@ public sealed partial class SqliteKernelStore :
         var foreignKeys = await ReadPragmaAsync(connection, "PRAGMA foreign_keys;", cancellationToken).ConfigureAwait(false);
         var journalMode = await ReadPragmaAsync(connection, "PRAGMA journal_mode;", cancellationToken).ConfigureAwait(false);
         var busyTimeout = await ReadPragmaAsync(connection, "PRAGMA busy_timeout;", cancellationToken).ConfigureAwait(false);
+        var pageSize = await ReadPragmaAsync(connection, "PRAGMA page_size;", cancellationToken).ConfigureAwait(false);
+        var maxPageCount = await ReadPragmaAsync(connection, "PRAGMA max_page_count;", cancellationToken).ConfigureAwait(false);
         return new SqliteConnectionSettings(
             Convert.ToInt32(foreignKeys, CultureInfo.InvariantCulture) == 1,
             Convert.ToString(journalMode, CultureInfo.InvariantCulture) ?? string.Empty,
-            Convert.ToInt32(busyTimeout, CultureInfo.InvariantCulture));
+            Convert.ToInt32(busyTimeout, CultureInfo.InvariantCulture),
+            Convert.ToInt64(pageSize, CultureInfo.InvariantCulture),
+            Convert.ToInt64(maxPageCount, CultureInfo.InvariantCulture));
     }
 
     public async Task<ProductRuntimeHealth> GetRuntimeHealthAsync(CancellationToken cancellationToken = default)
@@ -203,6 +211,21 @@ public sealed partial class SqliteKernelStore :
             await using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;";
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            if (_maxDatabaseBytes is { } maxDatabaseBytes)
+            {
+                var pageSize = Convert.ToInt64(
+                    await ReadPragmaAsync(connection, "PRAGMA page_size;", cancellationToken).ConfigureAwait(false),
+                    CultureInfo.InvariantCulture);
+                var requestedPageCount = maxDatabaseBytes / pageSize;
+                if (requestedPageCount <= 0)
+                    throw new InvalidOperationException("Configured SQLite size limit is smaller than one database page.");
+                command.CommandText = $"PRAGMA max_page_count={requestedPageCount.ToString(CultureInfo.InvariantCulture)};";
+                var effectivePageCount = Convert.ToInt64(
+                    await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                    CultureInfo.InvariantCulture);
+                if (effectivePageCount > requestedPageCount)
+                    throw new InvalidOperationException("Existing SQLite database exceeds the configured size limit.");
+            }
             return connection;
         }
         catch
@@ -276,7 +299,12 @@ public sealed partial class SqliteKernelStore :
 internal sealed record SqliteConnectionSettings(
     bool ForeignKeysEnabled,
     string JournalMode,
-    int BusyTimeoutMilliseconds);
+    int BusyTimeoutMilliseconds,
+    long PageSizeBytes,
+    long MaxPageCount)
+{
+    public long MaxDatabaseBytes => checked(PageSizeBytes * MaxPageCount);
+}
 
 public sealed record ProductRuntimeHealth(int SchemaVersion,int EnabledPlugins,int EnabledModelProfiles,int ConnectedAccounts,int AuthRequiredAccounts,int PendingRuns,int FailedRuns);
 public sealed record SqliteBackupVerification(bool IntegrityOk,int SchemaVersion,int Conversations,int Assertions,int Jobs,int Accounts,int Actions);

@@ -73,7 +73,7 @@ public sealed class TesseraTokenResult
             return null;
         }
 
-        var subject = Subject ?? PreferredUsername;
+        var subject = Subject;
         if (string.IsNullOrEmpty(subject) || string.IsNullOrEmpty(Issuer))
         {
             return null;

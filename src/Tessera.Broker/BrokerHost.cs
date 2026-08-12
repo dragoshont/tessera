@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
@@ -82,6 +83,9 @@ public sealed record BrokerHostOptions
 
     /// <summary>Explicit SQLite path for the R2 product store.</summary>
     public string? ProductDatabasePath { get; init; }
+
+    /// <summary>Optional hard SQLite page-count ceiling for the product database.</summary>
+    public long? ProductDatabaseMaxBytes { get; init; }
 
     /// <summary>Trusted-local plugin package root. Null uses environment/default discovery.</summary>
     public string? PluginRoot { get; init; }
@@ -213,11 +217,13 @@ public static class BrokerHost
         services.AddSingleton(broker);
         services.AddSingleton(validator);
         services.AddSingleton(status);
+        var productDatabaseMaxBytes = options.ProductDatabaseMaxBytes
+            ?? ParsePositiveLong(Get(options.Environment, "TESSERA_PRODUCT_DB_MAX_BYTES"), "TESSERA_PRODUCT_DB_MAX_BYTES");
         var continuityDatabasePath = options.ContinuityDatabasePath
             ?? Get(options.Environment, "TESSERA_CONTINUITY_DB_PATH");
         if (!string.IsNullOrWhiteSpace(continuityDatabasePath))
         {
-            var continuityStore = new SqliteKernelStore(continuityDatabasePath);
+            var continuityStore = new SqliteKernelStore(continuityDatabasePath, productDatabaseMaxBytes);
             await continuityStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             services.AddSingleton<IPrincipalRepository>(continuityStore);
             services.AddSingleton<IFollowUpRepository>(continuityStore);
@@ -230,7 +236,7 @@ public static class BrokerHost
         var pluginRegistry = options.PluginRegistryOverride ?? TesseraPluginRegistry.AuthoritativeEmpty;
         if (!string.IsNullOrWhiteSpace(productDatabasePath))
         {
-            var productStore = new SqliteKernelStore(productDatabasePath);
+            var productStore = new SqliteKernelStore(productDatabasePath, productDatabaseMaxBytes);
             await productStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             status.ProductConfigured = true;
             services.AddSingleton(productStore);
@@ -640,6 +646,14 @@ public static class BrokerHost
         }
 
         return System.Environment.GetEnvironmentVariable(key);
+    }
+
+    private static long? ParsePositiveLong(string? value, string name)
+    {
+        if (value is null) return null;
+        if (!long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
+            throw new InvalidOperationException($"{name} must be a positive integer.");
+        return parsed;
     }
 }
 

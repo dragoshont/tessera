@@ -160,6 +160,19 @@ public sealed class SqliteMigrationTests
     }
 
     [Fact]
+    public async Task Configured_database_size_limit_sets_a_hard_page_ceiling()
+    {
+        using var database = new TemporaryDatabase();
+        const long limit = 64L * 1024 * 1024;
+        var store = new SqliteKernelStore(database.Path, limit);
+        await store.InitializeAsync();
+
+        var settings = await store.GetConnectionSettingsAsync();
+
+        Assert.InRange(settings.MaxDatabaseBytes, limit - settings.PageSizeBytes, limit);
+    }
+
+    [Fact]
     public async Task Foreign_key_rejects_state_for_unknown_owner()
     {
         using var database = new TemporaryDatabase();

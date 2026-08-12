@@ -69,6 +69,28 @@ internal sealed class TokenFactory
         return Create(claims, audience: null, issuer: null, expires: null);
     }
 
+    public string UsernameOnlyToken(string preferredUsername)
+    {
+        var claims = new Dictionary<string, object>
+        {
+            ["preferred_username"] = preferredUsername,
+            ["tid"] = TenantId,
+            ["jti"] = Guid.NewGuid().ToString("N"),
+        };
+        return Create(claims, audience: null, issuer: null, expires: null);
+    }
+
+    public string UserTokenWithoutTenant(string oid = "oid-alice")
+    {
+        var claims = new Dictionary<string, object>
+        {
+            ["oid"] = oid,
+            ["preferred_username"] = "alice@example.com",
+            ["jti"] = Guid.NewGuid().ToString("N"),
+        };
+        return Create(claims, audience: null, issuer: null, expires: null);
+    }
+
     public string AppOnlyToken(string appId = "app-crawler-9999", string? audience = null)
     {
         var claims = new Dictionary<string, object>

@@ -52,6 +52,27 @@ public sealed class EntraTokenValidatorTests
     }
 
     [Fact]
+    public async Task Username_without_signed_oid_or_sub_cannot_own_state()
+    {
+        var factory = new TokenFactory();
+        var result = await Validator(factory).ValidateAsync(
+            factory.UsernameOnlyToken("alice@example.com"));
+
+        Assert.True(result.Succeeded);
+        Assert.Null(result.ToEndUserAssertion());
+    }
+
+    [Fact]
+    public async Task Configured_tenant_rejects_a_missing_tid_claim()
+    {
+        var factory = new TokenFactory();
+        var result = await Validator(factory).ValidateAsync(factory.UserTokenWithoutTenant());
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("missing", result.FailureReason!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Valid_app_only_token_yields_a_verified_caller_identity()
     {
         var factory = new TokenFactory();
