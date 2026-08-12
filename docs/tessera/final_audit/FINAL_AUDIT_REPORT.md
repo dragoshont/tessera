@@ -1,6 +1,6 @@
 # Final Audit Report
 
-Status: source-complete pending publication of the final reviewed-install release; deployed custody fix and authenticated model E2E pass.
+Status: `DELIVERED_ENGINEERING_AUTH_CHECKPOINTS_REMAIN`.
 
 ## Corrections
 
@@ -32,8 +32,9 @@ All five reviewed packages were already installed for the live owner, so no cano
 
 ## Deployment And Verification
 
-- Hardened CI, immutable GHCR images and Flux rollouts: PASS.
-- Descriptor/no-store, Cloudflare TLS route, DB schema 15, PVCs, scheduler, plugin registry, backup and replacement-pod recovery: PASS.
+- Final CI run `31625718882`, immutable image `835f28b2...44bc38` from source `4e60505`, and Flux/GitOps `ca2b1e8`: PASS.
+- Descriptor/no-store, Cloudflare TLS route, DB schema 15, PVCs, scheduler, plugin registry, online backup integrity and replacement-pod recovery: PASS.
+- Fresh encrypted off-node restic snapshot coverage: observed. Isolated off-node restore: not claimed; root-only operations checkpoint.
 - Backend/plugin/architecture: 786/786 PASS with fresh retained TRX evidence.
 - Shared route/auth client: 19/19 PASS.
 - Web: 105/105 unit; 44/44 desktop/phone Playwright; production and Storybook builds PASS.
@@ -41,7 +42,7 @@ All five reviewed packages were already installed for the live owner, so no cano
 - iOS: typecheck, Expo Doctor, CocoaPods and standalone Release build/render PASS.
 - Public K8s: 7/7 schema-valid; private Tessera render valid with CRDs explicitly skipped.
 - PII/secret, diff and Architrave run-artifact gates: PASS.
-- Two independent source judge families: PASS before final deployment; final runtime/product review follows the reviewed-install release.
+- Two independent source judge families and final runtime/product review: PASS.
 
 ## Real E2E Executed
 

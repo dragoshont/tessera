@@ -4,7 +4,7 @@
 
 The hardened server/Web custody release is deployed through Flux and Cloudflare Tunnel. Owner Microsoft sign-in, automatic LiteLLM bootstrap and real persisted/streamed Web Chat pass. The current macOS package is installed and the standalone iOS Release renders the verified server/sign-in state. Provider and authenticated cross-client journeys still require their own consent/session/MFA.
 
-Current runtime: `https://tessera.hont.ro`, digest `04e1a046…297249`, source `1eafb29`, GitOps `4fd4dbf`, schema v15. Installed Desktop is `/Applications/Tessera.app`. iOS Release is simulator-installed as `io.tessera.mobile`.
+Current runtime: `https://tessera.hont.ro`, digest `835f28b2…44bc38`, source `4e60505`, GitOps `ca2b1e8`, schema v15. The final Desktop is installed at `/Applications/Tessera.app`. The final iOS Release is simulator-installed as the sole Tessera bundle `io.tessera.mobile`.
 
 ## Scorecard
 

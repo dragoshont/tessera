@@ -17,3 +17,9 @@ Adversarial Judge: PASS. Atomic package/receipt rollback, durable replay/conflic
 Raw Phase 6 evidence is retained under `evidence/`: per-project TRX counters reconstruct 786/786; complete Web unit, Playwright 44/44, shared-client, iOS typecheck, K8s schema and harness outputs; and a redacted five-package live inventory documenting the non-destructive E2E boundary. Independent counterpart re-review remains pending after final product-truth copy reconciliation.
 
 Independent counterpart Architrave review: PASS. Atomic installation, public-source truth, interactive Storybook states and retained evidence have no unresolved source or audit issues.
+
+## Final Deployed Verdict
+
+Adversarial Judge: PASS for source `4e60505`, CI `31625718882`, image `835f28b2...44bc38`, GitOps `ca2b1e8`, Cloudflare/runtime continuity and final clients. No product engineering issue remains.
+
+Remaining checkpoints are explicitly outside the product PASS: provider consent/safe operations; authenticated macOS/iOS continuation; an available signed physical iPhone; and a root-operated isolated off-node restic restore. Full disaster-recovery retention is not claimed.

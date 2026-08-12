@@ -4,7 +4,7 @@ Verified runtime after the 2026-08-12 cutover.
 
 | Dimension | Repository intent | Running homelab | Status |
 |---|---|---|---|
-| Tessera source/image | reviewed custody release | source `1eafb29`, digest `04e1a046…297249` | MATCH |
+| Tessera source/image | final reviewed-install release | source `4e60505`, digest `835f28b2…44bc38` | MATCH |
 | server descriptor | stable operator-owned UUID in private deployment config | strict JSON/no-store | MATCH |
 | schema | v15, no migration | v15 | MATCH |
 | persistence | retained RWO data+backup PVC, 1 GiB ceiling | Bound and restart-verified | MATCH |

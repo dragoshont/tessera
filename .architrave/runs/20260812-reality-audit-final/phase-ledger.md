@@ -9,4 +9,4 @@
 | 5 | Publish, deploy and authenticated model E2E | completed | Image, private GitOps, Cloudflare, native/package/restart, owner bootstrap and real Chat | CI, runtime observer and browser evidence | PASS with provider/device checkpoints |
 | 6 | Reviewed integration installation | completed | Exact local package review/install in Web/iOS; atomic durable receipts; public results Inspect-only | Backend, Storybook, Web/iOS and two-family semantic gates | PASS |
 
-All source engineering and semantic phases are complete. Final publication/repackage/deployment follows; provider consent/MFA remains a separate human checkpoint and cannot be inferred from runtime configuration.
+All engineering, semantic, publication, client-package and deployment phases are complete. Provider consent/MFA and physical-device availability remain separate checkpoints and cannot be inferred from runtime configuration.

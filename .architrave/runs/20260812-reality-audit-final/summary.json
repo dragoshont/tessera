@@ -1,7 +1,7 @@
 {
   "schema": "architrave.run.v1",
   "runId": "20260812-reality-audit-final",
-  "status": "source-ready-publication-pending",
+  "status": "delivered-engineering-auth-checkpoints-remain",
   "startedAt": "2026-08-12T15:51:43Z",
   "artifacts": {
     "intake": ".architrave/runs/20260812-reality-audit-final/intake.md",

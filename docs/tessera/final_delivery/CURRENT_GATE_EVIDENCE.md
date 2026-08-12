@@ -21,8 +21,8 @@ Worktree-bound continuation checkpoint, 2026-08-12. Baseline `611af03`; branch `
 | iOS simulator | install/launch final Release on iPhone 17 Pro iOS 26.5 | PASS; renders verified live server/sign-in |
 | macOS | lint, unit, Electron, package, packaged and installed smoke | 7/7 unit; all smoke/package gates PASS; 0 production vulnerabilities |
 | K8s | `kubectl kustomize deploy/k8s` + `kubeconform -summary` | 7/7 valid |
-| Custody-fix CI/image | GitHub Actions run `31619969671` | PASS; digest `04e1a046…297249` |
-| Private GitOps | Flux revision `4fd4dbf` | PASS; rollout available |
+| Final CI/image | GitHub Actions run `31625718882` | PASS; source `4e60505`, digest `835f28b2…44bc38` |
+| Private GitOps | Flux revision `ca2b1e8` | PASS; rollout and restart recovery available |
 | Cloudflare remote | forced public anycast request | PASS; `server: cloudflare`, `cf-ray`, strict descriptor |
 | Persistence/restart | ephemeral backup + pod replacement | PASS; schema 15, DB/scheduler/plugin Ready |
 | Auth boundary | remote setup/catalog and Electron CORS | 401 unauthenticated; `app://tessera` preflight 204 |

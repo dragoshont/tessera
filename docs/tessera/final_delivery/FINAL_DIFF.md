@@ -10,7 +10,7 @@ Server identity descriptor, stable Tessera Home UUID, shared TypeScript domain/H
 
 ## Deployed / Installed
 
-The schema-v15 Web/server custody release from `1eafb29` is deployed at digest `04e1a046…297249` through GitOps `4fd4dbf`. Cloudflare Tunnel serves the canonical hostname. The current macOS package is installed and the standalone iOS Release is installed on the iPhone 17 Pro simulator.
+The schema-v15 final Web/server release from `4e60505` is deployed at digest `835f28b2…44bc38` through GitOps `ca2b1e8`. Cloudflare Tunnel serves the canonical hostname. The final macOS package is installed and inspected; the standalone iOS Release is installed and running on the iPhone 17 Pro simulator.
 
 ## Verified
 
@@ -21,7 +21,7 @@ The schema-v15 Web/server custody release from `1eafb29` is deployed at digest `
 - Reviewed local package installation is explicit, disabled by default and exact-version/hash-bound; public results remain Inspect-only.
 - iOS TypeScript/Expo Doctor/CocoaPods/Release build PASS; final render shows verified live server/sign-in.
 - macOS package, installed renderer smoke and dependency audit PASS.
-- Cloudflare anycast descriptor/health, schema 15 backup, PVCs and replacement-pod recovery PASS.
+- Cloudflare anycast descriptor/health, schema 15 online backup integrity, PVC continuity and replacement-pod recovery PASS.
 
 ## External Blocks
 
@@ -29,6 +29,6 @@ GitHub/Gmail authorization and safe reads; Gmail approved write target; primary/
 
 ## Engineering-Controlled Open Work
 
-The final reviewed-install source and deterministic/Adversarial gates pass; counterpart review and publication/repackage/rebuild/deploy remain pending. The deployed custody image, private GitOps, Cloudflare route, persistence/backup/restart, current macOS package and iOS verified-server render pass.
+No product engineering work remains. Atomic reviewed installation, deterministic/two-family gates, CI/image publication, macOS repack/install, iOS rebuild/install, GitOps/Cloudflare deployment, persistence, online backup integrity and final restart recovery pass. Full off-node restore is not claimed and remains a root-only operations checkpoint.
 
-Owner Microsoft sign-in, automatic bootstrap and real Web Chat/SSE pass. Provider authorization and authenticated macOS/iOS continuation remain explicit checkpoints. Status target after final reviewed-install publication: `DELIVERED_ENGINEERING_AUTH_CHECKPOINTS_REMAIN`.
+Owner Microsoft sign-in, automatic bootstrap and real Web Chat/SSE pass. Provider authorization and authenticated macOS/iOS continuation remain explicit checkpoints. Status: `DELIVERED_ENGINEERING_AUTH_CHECKPOINTS_REMAIN`.

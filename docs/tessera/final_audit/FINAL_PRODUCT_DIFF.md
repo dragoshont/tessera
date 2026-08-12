@@ -14,16 +14,18 @@ Final status: `DELIVERED_ENGINEERING_AUTH_CHECKPOINTS_REMAIN`.
 
 ## Engineering Delivery
 
-- Custody-fix CI passed and published immutable image `04e1a046...297249` from source `1eafb29`.
-- Flux applied private GitOps revision `4fd4dbf`; deployment and backup use the same digest.
+- Final CI passed and published immutable image `835f28b2...44bc38` from source `4e60505`.
+- Flux applied private GitOps revision `ca2b1e8`; deployment and backup use the same digest.
 - AKV ExternalSecret is synced and value-preserving without secret disclosure.
 - Cloudflare proxied DNS/tunnel route is live and proven through anycast.
-- Descriptor, health, DB schema 15, scheduler, plugin registry, backup and pod restart recovery pass.
+- Descriptor, health, DB schema 15, scheduler, plugin registry, online backup integrity/PVC continuity and pod restart recovery pass.
 - Current macOS Electron product is repackaged, installed and renderer-ready.
 - Final iOS Release renders the verified server and real sign-in action.
 - Owner sign-in, automatic LiteLLM bootstrap and persisted/streamed Web Chat pass.
 
 Engineering-controlled `MISSING` = 0. Engineering-controlled `PARTIAL` = 0.
+
+Full disaster-recovery retention is not part of this PASS claim: a fresh encrypted off-node snapshot is observed, but an isolated restic restore remains a root-only operations checkpoint.
 
 ## Human/Auth Checkpoints
 

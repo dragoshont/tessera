@@ -20,7 +20,9 @@
 | Live health/readiness/TLS/CORS | PASS |
 | Live egress allow/deny | PASS |
 | Live LiteLLM completion | PASS |
-| Backup integrity/schema v15 | PASS |
+| Online backup integrity/schema v15 | PASS |
+| Fresh encrypted off-node snapshot | PASS (coverage observed) |
+| Isolated off-node restore | OPERATIONS CHECKPOINT (root-only credentials) |
 | Full backend restart recovery | PASS |
 | Hardened CI/image + Flux rollout | PASS |
 | Cloudflare anycast descriptor/health | PASS |

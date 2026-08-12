@@ -22,7 +22,7 @@ Baseline: `611af03`. Status reflects repository and last verified runtime eviden
 | R16 | MCP/plugin boundary | §§13-16 | plugin abstractions, Gmail/RM modules | intact | consumes API | consumes API | consumes API | current | architecture/full 786 | PASS | none | retain |
 | R17 | Web/macOS regression-free | §§5-6 | shared Web `r2.ts` | current | built | packaged/installed | n/a | current | 105/44/package smoke | PASS | none | retain |
 | R18 | Native dependency security | §§31,35 | iOS package/README | n/a | n/a | n/a | minimal direct graph | n/a | Doctor/build | PASS | monitor SDK advisories | routine upgrades |
-| R19 | Deployed release convergence | §§22,26-29 | K8s config/image/GitOps | custody fix | live | installed | installed | digest `04e1a046…` | CI/Flux/Cloudflare/restart | PASS | final reviewed-install image publication | publish after source gates |
+| R19 | Deployed release convergence | §§22,26-29 | K8s config/image/GitOps | final | live | installed | installed | digest `835f28b2…` | CI/Flux/Cloudflare/restart | PASS | none | retain pin |
 | R20 | Real cross-client E2E | §§18,27-30 | E2E reports | available | owner Chat PASS | pending client session | pending client session | current | live Web model E2E | AUTH CHECKPOINT | provider and client sessions | continue after consent/sign-in |
 | R21 | Gmail real account | §15 | Gmail plugin/OAuth | implemented | workflow | workflow | shared Account | not authorized | plugin tests | BLOCKED_EXTERNAL | console/consent/safe target | human checkpoint |
 | R22 | RM user + wife | §16 | RM MCP v0.5.38, account bindings | implemented | workflow | workflow | shared Accounts | connectors healthy | 159 RM tests baseline | BLOCKED_EXTERNAL | independent MFA/consent | account holders authorize |

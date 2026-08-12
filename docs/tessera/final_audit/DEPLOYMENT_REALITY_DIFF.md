@@ -4,7 +4,7 @@ Post-cutover evidence captured 2026-08-12.
 
 | Dimension | Running deployment | Release candidate | Gap |
 |---|---|---|---|
-| Source/image | source `1eafb29`, digest `04e1a046...297249` | deployed custody release | MATCH |
+| Source/image | source `4e60505`, digest `835f28b2...44bc38` | final reviewed-install release | MATCH |
 | Descriptor | strict six-field JSON, `Cache-Control: no-store` | strict `/.well-known/tessera` descriptor | MATCH |
 | Database | SQLite schema v15 | schema v15, no destructive migration | None |
 | Persistence | retained data and backup PVCs | same mounts and one writer | None |
