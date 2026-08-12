@@ -6,8 +6,9 @@ Verified 2026-08-12. Repository candidate: branch `2.0-beta`, SQLite schema v15,
 - Web: 105 Vitest and 34 Playwright checks green.
 - Desktop: Electron 43.4.0, 7 unit/security tests, development and packaged launch smoke green.
 - Desktop artifact: `desktop/release/Tessera-Alpha-0.1.0-arm64.{dmg,zip}` (unsigned public-distribution identity; ad-hoc signed dogfood app).
-- Live Web: `https://tessera.hont.ro` still serves legacy stateless `sha-b5c1cc5` before cutover.
+- Live Web: `https://tessera.hont.ro`, schema v15, image digest `sha256:3545c49d…64c57`.
 - Live RM MCPs: two v0.5.36 deployments; account B awaits independent authorization.
-- Live LiteLLM: v1.94.0 healthy; corrected Tessera inference not yet verified.
+- Live LiteLLM: v1.94.0 healthy; real `claude-haiku-4.5` completion returned HTTP 200.
+- Desktop Alpha 0.1.0 is installed at `/Applications/Tessera.app`; human OIDC sign-in is pending.
 
 No production mock satisfies a final criterion.

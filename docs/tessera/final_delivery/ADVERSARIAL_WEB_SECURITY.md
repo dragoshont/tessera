@@ -1,3 +1,3 @@
 # Adversarial Web Security
 
-Repository controls pass account substitution, Action replay, provider-data injection, plugin disable races, SSRF, bounded output and owner isolation tests. Deployed OAuth state/callback ownership, SSE ownership, real provider prompt injection and revoke-during-call remain pending live deployment.
+Repository controls pass account substitution, Action replay, provider-data injection, plugin disable races, SSRF, bounded output and owner isolation tests. Live default-deny policy allows LiteLLM, both RM MCPs, Authentik and Key Vault while an undeclared private Sonarr request times out. Public MCP/broker routes are blocked. OAuth state/callback ownership after human login, SSE ownership, real provider prompt injection and revoke-during-call remain pending.

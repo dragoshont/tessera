@@ -1,3 +1,3 @@
 # Adversarial Desktop Security
 
-Unit and packaged launch checks cover origin/IPC/URL/deep-link validation, renderer isolation, route parity, fuses, ATS, CSP, signature and package secret scanning. Live OIDC cold/warm callback, notification permissions and deployed network interruption remain pending.
+Unit, development Electron, debugger-free hardened packaged launch and package checks cover origin/IPC/URL/deep-link validation, renderer isolation, route parity, fuses, ATS, CSP, signature and secret scanning. The installed app launches against live TLS. OIDC cold/warm callback, notification permissions and deployed network interruption remain pending human sign-in.

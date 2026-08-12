@@ -1,3 +1,3 @@
 # Final Backup and Restore
 
-Run online backup after real state exists, verify integrity/schema, and restore to an isolated execution-disabled environment. Conversations, Memory, Jobs/history, plugin/account metadata and Action history must survive. Pending or unknown Actions must not replay provider writes.
+The deployed CronJob produced `/backup/tessera-product-20260812T030117Z.db`; verification reported integrity OK and schema v15. The backup and live database persisted through a full Deployment restart. Off-node restic coverage includes the host root, but a fresh snapshot and isolated execution-disabled restore remain pending. Pending or unknown Actions must not replay provider writes.

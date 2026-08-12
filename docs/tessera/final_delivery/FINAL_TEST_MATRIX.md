@@ -10,5 +10,10 @@
 | Packaged app launch | PASS |
 | Desktop npm audit | 0 vulnerabilities |
 | Package secret scan | PASS |
-| Kubernetes render | 7 valid |
+| Kubernetes render/schema | 521 unique; 0 invalid/errors |
+| Live health/readiness/TLS/CORS | PASS |
+| Live egress allow/deny | PASS |
+| Live LiteLLM completion | PASS |
+| Backup integrity/schema v15 | PASS |
+| Full backend restart recovery | PASS |
 | Real deployed Web/Desktop/provider E2E | PENDING |

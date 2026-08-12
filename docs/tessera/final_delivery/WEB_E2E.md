@@ -1,3 +1,3 @@
 # Web E2E
 
-Local fixture-backed browser matrix: 34/34 PASS. Live deployed journeys remain pending cutover: OIDC login, real LiteLLM Chat/streaming, Memory/restart, Gmail, two RM accounts, Jobs, Actions and full-stack restart.
+Local fixture-backed browser matrix: 34/34 PASS. Live TLS health and readiness return 200; database and scheduler are ready at schema v15. OIDC discovery and strict Web PKCE authorization are active. Unauthenticated `/api/v1` returns 401, Desktop CORS allows only `app://tessera`, and public `/mcp` plus `/v1` return 404. Full-stack restart passed. Human OIDC login, Chat/streaming, Memory content, Gmail, RM Accounts, Jobs and Actions remain pending.
