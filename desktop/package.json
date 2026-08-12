@@ -13,7 +13,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:electron": "npm run build && playwright test",
-    "test:packaged": "node scripts/prepare-test-app.mjs && TESSERA_PACKAGED_APP=$PWD/test-artifacts/Tessera.app/Contents/MacOS/Tessera playwright test",
+    "test:packaged": "node scripts/smoke-packaged.mjs",
+    "test:packaged:inspect": "node scripts/prepare-test-app.mjs && TESSERA_PACKAGED_APP=$PWD/test-artifacts/Tessera.app/Contents/MacOS/Tessera playwright test",
     "start": "npm run build && electron .",
     "package:mac": "npm run build && electron-builder --mac dmg zip --publish never",
     "verify:package": "node scripts/verify-package.mjs"

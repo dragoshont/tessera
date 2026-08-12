@@ -42,6 +42,7 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 const testUserData = process.env.TESSERA_ELECTRON_TEST_USER_DATA
+const smokeMarker = process.env.TESSERA_ELECTRON_SMOKE_MARKER
 if (testUserData) app.setPath('userData', testUserData)
 if (!app.requestSingleInstanceLock()) app.quit()
 
@@ -68,6 +69,11 @@ void app.whenReady().then(async () => {
   registerIpc()
   installPermissionPolicy()
   mainWindow = await createWindow()
+  if (testUserData && smokeMarker) {
+    await writeFile(smokeMarker, 'ready', { mode: 0o600 })
+    app.quit()
+    return
+  }
   installMenu()
   registerShortcut()
   for (const link of process.argv.filter((value) => value.startsWith('tessera://'))) queuedDeepLinks.push(link)
