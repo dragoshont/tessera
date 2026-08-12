@@ -54,6 +54,21 @@ internal sealed class TokenFactory
         return Create(claims, audience, issuer, expires);
     }
 
+    public string SubjectToken(
+        string subject,
+        string preferredUsername,
+        string tenantId = TenantId)
+    {
+        var claims = new Dictionary<string, object>
+        {
+            ["sub"] = subject,
+            ["preferred_username"] = preferredUsername,
+            ["tid"] = tenantId,
+            ["jti"] = Guid.NewGuid().ToString("N"),
+        };
+        return Create(claims, audience: null, issuer: null, expires: null);
+    }
+
     public string AppOnlyToken(string appId = "app-crawler-9999", string? audience = null)
     {
         var claims = new Dictionary<string, object>

@@ -34,6 +34,24 @@ public sealed class EntraTokenValidatorTests
     }
 
     [Fact]
+    public async Task Authentik_subject_is_stable_when_display_username_changes()
+    {
+        var factory = new TokenFactory();
+        var validator = Validator(factory);
+
+        var before = (await validator.ValidateAsync(
+            factory.SubjectToken("hashed-user-id", "before@example.com"))).ToEndUserAssertion();
+        var after = (await validator.ValidateAsync(
+            factory.SubjectToken("hashed-user-id", "after@example.com"))).ToEndUserAssertion();
+
+        Assert.NotNull(before);
+        Assert.NotNull(after);
+        Assert.Equal("hashed-user-id", before.Subject);
+        Assert.Equal(before.CanonicalPrincipalId, after.CanonicalPrincipalId);
+        Assert.NotEqual(before.PreferredUsername, after.PreferredUsername);
+    }
+
+    [Fact]
     public async Task Valid_app_only_token_yields_a_verified_caller_identity()
     {
         var factory = new TokenFactory();

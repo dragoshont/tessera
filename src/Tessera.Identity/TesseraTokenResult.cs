@@ -27,6 +27,9 @@ public sealed class TesseraTokenResult
     /// <summary>Stable end-user id (<c>oid</c>), if this is a user token.</summary>
     public string? Oid => Get("oid");
 
+    /// <summary>Stable provider-scoped subject (<c>oid</c> for Entra, otherwise <c>sub</c>).</summary>
+    public string? Subject => Oid ?? Get("sub");
+
     /// <summary>Human-readable username (<c>preferred_username</c>), if present.</summary>
     public string? PreferredUsername => Get("preferred_username") ?? Get("upn");
 
@@ -51,7 +54,7 @@ public sealed class TesseraTokenResult
     /// </summary>
     public bool IsAppOnly =>
         string.Equals(Get("idtyp"), "app", StringComparison.OrdinalIgnoreCase) ||
-        (string.IsNullOrEmpty(Oid) && string.IsNullOrEmpty(PreferredUsername) && !string.IsNullOrEmpty(AppId));
+        (string.IsNullOrEmpty(Subject) && string.IsNullOrEmpty(PreferredUsername) && !string.IsNullOrEmpty(AppId));
 
     /// <summary>Builds a failed result with a reason.</summary>
     public static TesseraTokenResult Fail(string reason) => new(false, reason, null);
@@ -70,7 +73,7 @@ public sealed class TesseraTokenResult
             return null;
         }
 
-        var subject = Oid ?? PreferredUsername;
+        var subject = Subject ?? PreferredUsername;
         if (string.IsNullOrEmpty(subject) || string.IsNullOrEmpty(Issuer))
         {
             return null;

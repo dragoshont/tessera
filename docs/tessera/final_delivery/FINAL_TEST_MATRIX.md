@@ -2,7 +2,7 @@
 
 | Lane | Current result |
 |---|---|
-| Backend | 769 PASS |
+| Backend | 766 PASS |
 | Web unit/build | 105 PASS |
 | Web Playwright | 34 PASS |
 | Desktop unit/security | 7 PASS |
