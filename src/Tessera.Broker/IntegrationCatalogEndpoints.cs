@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -57,8 +58,7 @@ internal static class IntegrationCatalogEndpoints
                                 boundary.Owner!,
                                 cancellationToken)
                             .ConfigureAwait(false))
-                        .Where(plugin => plugin.Enabled)
-                        .Select(plugin => plugin.PluginId)
+                        .Select(plugin => $"{plugin.PluginId}@{plugin.PluginVersion}")
                         .ToHashSet(StringComparer.Ordinal);
                     return Results.Json(
                         await services.GetRequiredService<IntegrationCatalogService>()
@@ -72,6 +72,60 @@ internal static class IntegrationCatalogEndpoints
                 catch (ArgumentException)
                 {
                     return Problem(StatusCodes.Status400BadRequest, "invalid_query");
+                }
+            });
+
+        app.MapPost(
+            "/api/v1/integrations/local/{id}/versions/{version}/install",
+            async (
+                HttpContext context,
+                string id,
+                string version,
+                JsonElement? request,
+                ITokenValidator validator,
+                TesseraConfig config,
+                IServiceProvider services,
+                CancellationToken cancellationToken) =>
+            {
+                var boundary = await OwnerAsync(
+                        context,
+                        validator,
+                        config,
+                        services,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (boundary.Error is not null) return boundary.Error;
+                if (request is not { ValueKind: JsonValueKind.Object }
+                    || request.Value.EnumerateObject().Any())
+                    return Problem(StatusCodes.Status400BadRequest, "invalid_request");
+                if (!TryIdempotencyKey(context, out var idempotencyKey))
+                    return Problem(StatusCodes.Status400BadRequest, "invalid_idempotency_key");
+                try
+                {
+                    var result = await services.GetRequiredService<R2PluginCatalog>()
+                        .InstallIdempotentAsync(
+                            services.GetRequiredService<SqliteKernelStore>(),
+                            boundary.Owner!,
+                            idempotencyKey!,
+                            id,
+                            version,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    context.Response.Headers["Idempotency-Replayed"] = result.Replayed
+                        ? "true"
+                        : "false";
+                    return Results.Content(
+                        result.ResponseBodyJson,
+                        "application/json",
+                        statusCode: result.StatusCode);
+                }
+                catch (KeyNotFoundException)
+                {
+                    return Problem(StatusCodes.Status404NotFound, "reviewed_package_not_found");
+                }
+                catch (InvalidOperationException exception)
+                {
+                    return Problem(StatusCodes.Status409Conflict, exception.Message);
                 }
             });
     }
@@ -103,13 +157,6 @@ internal static class IntegrationCatalogEndpoints
                     DateTimeOffset.UtcNow),
                 cancellationToken)
             .ConfigureAwait(false);
-        var catalog = services.GetService<R2PluginCatalog>();
-        if (catalog is not null)
-            await catalog.EnsureInstalledAsync(
-                    store,
-                    user.CanonicalPrincipalId,
-                    cancellationToken)
-                .ConfigureAwait(false);
         return new(user.CanonicalPrincipalId, null);
     }
 
@@ -118,6 +165,13 @@ internal static class IntegrationCatalogEndpoints
             statusCode: status,
             title: code,
             extensions: new Dictionary<string, object?> { ["code"] = code });
+
+    private static bool TryIdempotencyKey(HttpContext context, out string? key)
+    {
+        key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        return key is { Length: > 0 and <= 128 }
+            && key.All(character => character is >= '!' and <= '~');
+    }
 
     private sealed record Boundary(string? Owner, IResult? Error);
 }

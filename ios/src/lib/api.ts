@@ -25,6 +25,7 @@ export type SetupStatus = { server: { state: string; displayName: string; versio
 export type IntegrationCatalogItem = { id: string; name: string; description: string; source: string; publisher: string; runtime: string; repositoryOrPackage: string | null; version: string; license: string | null; trustLevel: string; capabilitiesSummary: string[]; authTypes: string[]; sensitivity: string; installationMode: string; installState: string; installed: boolean; inspectUrl: string | null }
 export type IntegrationSource = { id: string; name: string; state: string; errorCode: string | null }
 export type IntegrationSearch = { items: IntegrationCatalogItem[]; sources: IntegrationSource[] }
+export type IntegrationInstallReceipt = { pluginId: string; version: string; installState: 'INSTALLED' }
 
 export class TesseraApi {
   constructor(private readonly http: HttpClient, private readonly routes: RouteManager, private readonly auth: () => Promise<AuthLease>) {}
@@ -33,6 +34,7 @@ export class TesseraApi {
   bootstrapSetup = () => this.http.mutate<SetupStatus>('/setup/bootstrap', 'POST', {}, 'setup-bootstrap')
   integrationSources = () => this.http.request<{ items: IntegrationSource[] }>('/integrations/sources')
   searchIntegrations = (query: string, limit = 20) => this.http.request<IntegrationSearch>(`/integrations/search?query=${encodeURIComponent(query)}&limit=${limit}`)
+  installReviewedIntegration = (item: IntegrationCatalogItem) => this.http.mutate<IntegrationInstallReceipt>(`/integrations/local/${encodeURIComponent(item.id)}/versions/${encodeURIComponent(item.version)}/install`, 'POST', {}, 'integration-install')
   conversations = () => this.http.request<Page<Conversation>>('/conversations')
   createConversation = (modelProfileId: string | null) => this.http.mutate<Conversation>('/conversations', 'POST', { title: 'New conversation', modelProfileId }, 'conversation')
   messages = (id: string) => this.http.request<Page<Message>>(`/conversations/${encodeURIComponent(id)}/messages`)

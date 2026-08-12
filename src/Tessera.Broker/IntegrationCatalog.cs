@@ -157,7 +157,8 @@ internal sealed class LocalIntegrationCatalogSource(R2PluginCatalog catalog)
             .Select(package =>
             {
                 var accountRequired = package.Manifest.Capabilities.Any(capability => capability.AccountRequired);
-                var installed = installedPluginIds.Contains(package.Manifest.Id);
+                var installed = installedPluginIds.Contains(
+                    $"{package.Manifest.Id}@{package.Manifest.Version}");
                 return new IntegrationCatalogItem(
                     package.Manifest.Id,
                     package.Manifest.Name,
@@ -293,7 +294,7 @@ internal sealed class McpRegistryCatalogSource(IHttpTransport transport)
             "SERVER_REVIEW_REQUIRED",
             "REVIEW_REQUIRED",
             false,
-            repository ?? website);
+            CatalogInspectUrl.Normalize(repository ?? website));
     }
 
     private static bool SecretInputs(
@@ -373,7 +374,7 @@ internal sealed class PluginIntegrationCatalogSource(
                 "SERVER_REVIEW_REQUIRED",
                 "REVIEW_REQUIRED",
                 false,
-                SafeInspectUrl(value.InspectUrl)))
+                CatalogInspectUrl.Normalize(value.InspectUrl)))
             .ToArray();
         _cache[cacheKey] = new(DateTimeOffset.UtcNow.Add(plugin.CatalogSource.CacheDuration), items);
         return items;
@@ -383,7 +384,11 @@ internal sealed class PluginIntegrationCatalogSource(
         DateTimeOffset ExpiresAt,
         IReadOnlyList<IntegrationCatalogItem> Items);
 
-    private static string? SafeInspectUrl(string? value)
+}
+
+internal static class CatalogInspectUrl
+{
+    public static string? Normalize(string? value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
             || uri.Scheme != Uri.UriSchemeHttps

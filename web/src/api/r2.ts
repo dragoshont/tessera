@@ -50,6 +50,7 @@ export type R2SetupStatus = { server: { state: string; displayName: string; vers
 export type R2IntegrationCatalogItem = { id: string; name: string; description: string; source: string; publisher: string; runtime: string; repositoryOrPackage: string | null; version: string; license: string | null; trustLevel: string; capabilitiesSummary: string[]; authTypes: string[]; sensitivity: string; installationMode: string; installState: string; installed: boolean; inspectUrl: string | null }
 export type R2IntegrationSource = { id: string; name: string; state: string; errorCode: string | null }
 export type R2IntegrationSearch = { items: R2IntegrationCatalogItem[]; sources: R2IntegrationSource[] }
+export type R2IntegrationInstallReceipt = { pluginId: string; version: string; installState: 'INSTALLED' }
 
 const sharedHttp = createHttpClient({
   send: (path, init) => fetch(apiUrl(path), {
@@ -65,6 +66,7 @@ export const r2Api = {
   bootstrapSetup: () => mutate<R2SetupStatus>('/setup/bootstrap', 'POST', {}, 'setup-bootstrap'),
   integrationSources: () => request<{ items: R2IntegrationSource[] }>('/integrations/sources'),
   searchIntegrations: (query: string, limit = 20) => request<R2IntegrationSearch>(`/integrations/search?query=${encodeURIComponent(query)}&limit=${limit}`),
+  installReviewedIntegration: (item: R2IntegrationCatalogItem) => mutate<R2IntegrationInstallReceipt>(`/integrations/local/${encodeURIComponent(item.id)}/versions/${encodeURIComponent(item.version)}/install`, 'POST', {}, 'integration-install'),
   conversations: () => request<R2Page<R2Conversation>>('/conversations'),
   createConversation: (modelProfileId: string | null, title = 'New conversation') => mutate<R2Conversation>('/conversations', 'POST', { title, modelProfileId }, 'conversation'),
   updateConversation: (item: R2Conversation, input: { title?: string; state?: 'ACTIVE' | 'ARCHIVED' }) => mutate<R2Conversation>(`/conversations/${encodeURIComponent(item.id)}`, 'PATCH', { ...input, expectedVersion: item.version }),

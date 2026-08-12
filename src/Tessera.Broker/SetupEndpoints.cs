@@ -216,13 +216,6 @@ internal static class SetupEndpoints
                     DateTimeOffset.UtcNow),
                 cancellationToken)
             .ConfigureAwait(false);
-        var catalog = services.GetService<R2PluginCatalog>();
-        if (catalog is not null)
-            await catalog.EnsureInstalledAsync(
-                    store,
-                    user.CanonicalPrincipalId,
-                    cancellationToken)
-                .ConfigureAwait(false);
         return new(user.CanonicalPrincipalId, null);
     }
 

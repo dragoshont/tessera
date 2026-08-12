@@ -903,6 +903,15 @@ export function PluginsPage() {
       void client.invalidateQueries({ queryKey: ["r2", "capabilities"] });
     },
   });
+  const install = useMutation({
+    mutationFn: r2Api.installReviewedIntegration,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["r2", "plugins"] });
+      void client.invalidateQueries({ queryKey: ["r2", "capabilities"] });
+      void client.invalidateQueries({ queryKey: ["r2", "integration-search"] });
+      void client.invalidateQueries({ queryKey: ["r2", "setup"] });
+    },
+  });
   const items = query.data?.items ?? [];
   return (
     <ProductState
@@ -991,9 +1000,11 @@ export function PluginsPage() {
         items={search.data?.items ?? []}
         sources={search.data?.sources ?? sources.data?.items ?? []}
         loading={search.isFetching}
-        errorMessage={problem(search.error)}
+        installingId={install.isPending ? install.variables?.id ?? null : null}
+        errorMessage={problem(search.error) ?? problem(install.error)}
         onSearch={setSubmittedSearch}
         onInspect={(url) => void openTrustedExternal(url)}
+        onInstall={(item) => install.mutate(item)}
       />
       {problem(mutation.error) ? (
         <Alert variant="destructive" className="mt-4">

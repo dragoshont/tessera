@@ -1,0 +1,16 @@
+
+> @tessera/client@0.1.0 typecheck
+> tsc --noEmit
+
+
+> @tessera/client@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.10 /Users/dragoshont/Repo/tessera/packages/tessera-client
+
+
+ Test Files  1 passed (1)
+      Tests  19 passed (19)
+   Start at  20:35:40
+   Duration  429ms (transform 49ms, setup 0ms, import 64ms, tests 218ms, environment 0ms)

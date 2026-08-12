@@ -1,0 +1,12 @@
+
+> tessera-admin@0.0.0 test
+> vitest run --pool=threads --maxWorkers=1
+
+
+ RUN  v4.1.8 /Users/dragoshont/Repo/tessera/web
+
+
+ Test Files  14 passed (14)
+      Tests  105 passed (105)
+   Start at  20:35:21
+   Duration  17.33s (transform 266ms, setup 976ms, import 7.55s, tests 2.35s, environment 5.25s)

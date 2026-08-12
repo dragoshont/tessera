@@ -1,0 +1,15 @@
+ok    intake .architrave/runs/20260812-reality-audit-final/intake.md
+ok    heading 'Understanding' in .architrave/runs/20260812-reality-audit-final/intake.md
+ok    heading 'Acceptance Criteria' in .architrave/runs/20260812-reality-audit-final/intake.md
+ok    heading 'Grounding Sources' in .architrave/runs/20260812-reality-audit-final/intake.md
+ok    tournament .architrave/runs/20260812-reality-audit-final/tournament.md
+ok    heading 'Decision Matrix' in .architrave/runs/20260812-reality-audit-final/tournament.md
+ok    recommended plan .architrave/runs/20260812-reality-audit-final/recommended-plan.md
+ok    heading 'Implementation Sequence' in .architrave/runs/20260812-reality-audit-final/recommended-plan.md
+ok    heading 'Test Strategy' in .architrave/runs/20260812-reality-audit-final/recommended-plan.md
+ok    deterministic gates .architrave/runs/20260812-reality-audit-final/deterministic-gates.md
+ok    summary .architrave/runs/20260812-reality-audit-final/summary.json
+ok    repo profile .architrave/learning/repo-profile.md
+ok    repo lessons .architrave/learning/repo-lessons.md
+ok    summary schema
+ARCHITRAVE-RUN: PASS

@@ -10,26 +10,25 @@ Server identity descriptor, stable Tessera Home UUID, shared TypeScript domain/H
 
 ## Deployed / Installed
 
-The prior schema-v15 Web/server release and macOS Alpha remain healthy/installed at digest `58223131…c10e91`. RM v0.5.38 and LiteLLM remain healthy. The new descriptor/shared-client release is not deployed. The standalone iOS Release build is installed on the iPhone 17 Pro simulator.
+The schema-v15 Web/server custody release from `1eafb29` is deployed at digest `04e1a046…297249` through GitOps `4fd4dbf`. Cloudflare Tunnel serves the canonical hostname. The current macOS package is installed and the standalone iOS Release is installed on the iPhone 17 Pro simulator.
 
 ## Verified
 
-- Core config: 23/23.
-- Broker descriptor: 6/6.
+- Full backend/plugin/architecture: 786/786.
 - Shared client: 19/19.
-- Web R2 client: 4/4; Web production build PASS.
-- iOS TypeScript PASS; Expo Doctor 20/20; CocoaPods PASS; Debug and standalone Release simulator builds PASS; Release render and cold restart PASS.
-- Baseline backend/Web/Desktop/deployment/RM evidence remains unchanged.
+- Web unit 105/105, desktop/phone Playwright 44/44, production and Storybook builds PASS.
+- Authenticated Web setup created one healthy model account/profile/defaults and real Chat persisted/streamed `TESSERA LIVE OK`.
+- Reviewed local package installation is explicit, disabled by default and exact-version/hash-bound; public results remain Inspect-only.
+- iOS TypeScript/Expo Doctor/CocoaPods/Release build PASS; final render shows verified live server/sign-in.
+- macOS package, installed renderer smoke and dependency audit PASS.
+- Cloudflare anycast descriptor/health, schema 15 backup, PVCs and replacement-pod recovery PASS.
 
 ## External Blocks
 
-Human OIDC sign-in; Gmail console/consent/safe write target; user and wife independent RM consent/MFA; physical iPhone signing/biometric/cellular dogfood.
+GitHub/Gmail authorization and safe reads; Gmail approved write target; primary/secondary RM consent/MFA; authenticated macOS/iOS continuation; physical iPhone signing/biometric/cellular dogfood.
 
 ## Engineering-Controlled Open Work
 
-1. Publish/reconcile the new server image and verify descriptor.
-2. Publish `tessera.hont.ro` through the existing Cloudflare Tunnel and verify streaming/OIDC.
-3. Repackage macOS against the released Web bundle.
-4. Execute authenticated Web/macOS/iOS and concurrency/network E2E.
+The final reviewed-install source and deterministic/Adversarial gates pass; counterpart review and publication/repackage/rebuild/deploy remain pending. The deployed custody image, private GitOps, Cloudflare route, persistence/backup/restart, current macOS package and iOS verified-server render pass.
 
-Engineering-controlled `MISSING` and `PARTIAL` are therefore not zero. This report does not mislabel the repository checkpoint as final deployed delivery.
+Owner Microsoft sign-in, automatic bootstrap and real Web Chat/SSE pass. Provider authorization and authenticated macOS/iOS continuation remain explicit checkpoints. Status target after final reviewed-install publication: `DELIVERED_ENGINEERING_AUTH_CHECKPOINTS_REMAIN`.

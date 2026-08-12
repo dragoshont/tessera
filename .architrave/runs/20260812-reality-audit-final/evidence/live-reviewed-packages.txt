@@ -1,0 +1,8 @@
+LIVE_REVIEWED_PACKAGES (plugin id@version and enabled flag only)
+github@1.0.0 enabled=1
+gmail@1.0.0 enabled=1
+local@1.0.0 enabled=1
+model-provider@1.0.0 enabled=1
+regina-maria@1.0.0 enabled=1
+COUNT=5
+NO_CANONICAL_PACKAGE_REMOVED_FOR_TESTING

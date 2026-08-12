@@ -25,6 +25,8 @@ The deployed server is stale. `GET /.well-known/tessera` returns the Web SPA doc
 - Standalone Release simulator build after current setup/search/config changes: PASS.
 - Release render and cold restart against the stale server: bounded offline UI, no crash/blank screen.
 
-## Remaining Runtime Check
+## Final Runtime Result
 
-After cutover: install/launch the final Release, verify descriptor/auth and all primary screens against the deployed server. Physical iPhone Wi-Fi/cellular testing remains dependent on available signing/device access and is not inferred from simulator success.
+The final standalone Release built with an embedded `main.jsbundle`, installed and launched on the iPhone 17 Pro simulator. It rendered `SERVER VERIFIED`, `Tessera Home` and the real system-browser Sign in action against the deployed descriptor. There was no blank/offline screen or crash. Microsoft sign-in and post-auth product screens remain the explicit user-auth checkpoint. Physical iPhone Wi-Fi/cellular testing remains dependent on signing/device access and is not inferred from simulator success.
+
+The unsigned simulator logged Expo Notifications Keychain registration error `-34018`; the app remained interactive. This is a simulator signing limitation, not route/session failure.

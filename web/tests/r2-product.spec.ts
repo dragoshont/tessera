@@ -49,7 +49,7 @@ test('Plugins searches installed, official registry, and GitHub metadata without
     if (path.endsWith('/settings/model-profiles') || path.endsWith('/conversations') || path.endsWith('/accounts') || path.endsWith('/capabilities')) return fulfill(route, pageOf([]))
     if (path.endsWith('/plugins')) return fulfill(route, pageOf([plugin]))
     if (path.endsWith('/integrations/sources')) return fulfill(route, { items: [{ id: 'local', name: 'Installed and local', state: 'READY', errorCode: null }, { id: 'mcp-registry', name: 'Official MCP Registry', state: 'READY', errorCode: null }, { id: 'github', name: 'GitHub public repositories', state: 'READY', errorCode: null }] })
-    if (path.endsWith('/integrations/search')) return fulfill(route, { items: [{ id: 'github:homeassistant-ai/ha-mcp', name: 'ha mcp', description: 'Home Assistant MCP server', source: 'github', publisher: 'homeassistant-ai', runtime: 'MCP candidate', repositoryOrPackage: 'https://github.com/homeassistant-ai/ha-mcp', version: 'main', license: 'MIT', trustLevel: 'UNTRUSTED', capabilitiesSummary: ['Home Assistant MCP server'], authTypes: [], sensitivity: 'STANDARD', installationMode: 'SERVER_REVIEW_REQUIRED', installState: 'REVIEW_REQUIRED', installed: false, inspectUrl: 'https://github.com/homeassistant-ai/ha-mcp' }], sources: [{ id: 'github', name: 'GitHub public repositories', state: 'READY', errorCode: null }] })
+    if (path.endsWith('/integrations/search')) return fulfill(route, { items: [{ id: 'github:homeassistant-ai/ha-mcp', name: 'ha mcp', description: 'Home Assistant MCP server', source: 'github', publisher: 'homeassistant-ai', runtime: 'MCP candidate', repositoryOrPackage: 'https://github.com/homeassistant-ai/ha-mcp', version: 'main', license: 'MIT', trustLevel: 'UNTRUSTED', capabilitiesSummary: ['Home Assistant MCP server'], authTypes: [], sensitivity: 'STANDARD', installationMode: 'SERVER_REVIEW_REQUIRED', installState: 'REVIEW_REQUIRED', installed: false, inspectUrl: 'https://github.com/homeassistant-ai/ha-mcp' }, { id: 'registry:unsafe', name: 'Unsafe metadata', description: 'Registry result whose source URL failed server validation.', source: 'mcp-registry', publisher: 'unknown', runtime: 'MCP', repositoryOrPackage: null, version: '1.0.0', license: null, trustLevel: 'UNTRUSTED', capabilitiesSummary: [], authTypes: [], sensitivity: 'STANDARD', installationMode: 'SERVER_REVIEW_REQUIRED', installState: 'REVIEW_REQUIRED', installed: false, inspectUrl: null }], sources: [{ id: 'github', name: 'GitHub public repositories', state: 'READY', errorCode: null }] })
     return fulfill(route, { code: 'not_found' }, 404)
   })
   await signIn(page)
@@ -57,10 +57,43 @@ test('Plugins searches installed, official registry, and GitHub metadata without
   await page.getByLabel('Search integrations').fill('home assistant')
   await page.getByRole('button', { name: 'Search', exact: true }).click()
   await expect(page.getByText('Home Assistant MCP server', { exact: true })).toBeVisible()
-  await expect(page.locator('[data-product-state="UNTRUSTED"]')).toBeVisible()
+  await expect(page.locator('[data-product-state="UNTRUSTED"]')).toHaveCount(2)
   await expect(page.getByRole('button', { name: 'Install' })).toHaveCount(0)
+  await expect(page.getByText('Public source URL unavailable.')).toBeVisible()
+  await expect(page.getByText('Built into the reviewed Tessera server image.')).toHaveCount(0)
   await page.getByRole('button', { name: 'Inspect source' }).click()
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('inspected-integration'))).toBe('https://github.com/homeassistant-ai/ha-mcp')
+})
+
+test('Plugins reviews and installs only a hash-validated local package in a disabled state', async ({ page }) => {
+  let installed = false
+  let installCalls = 0
+  const plugin = { id: 'local-tools', pluginId: 'local-tools', name: 'Local tools', version: '1.2.3', pluginVersion: '1.2.3', publisher: 'Tessera', enabled: false, packageHash: 'reviewed-hash', configurationState: 'READY', accountProviderIds: [], capabilities: [], versionStamp: 1 }
+  const result = { id: 'local-tools', name: 'Local tools', description: 'Reviewed local utility capabilities.', source: 'local', publisher: 'Tessera', runtime: 'Tessera plugin', repositoryOrPackage: null, version: '1.2.3', license: null, trustLevel: 'BUILT_IN', capabilitiesSummary: ['Read local time'], authTypes: [], sensitivity: 'STANDARD', installationMode: 'SERVER_INSTALLED', installState: installed ? 'INSTALLED' : 'AVAILABLE', installed, inspectUrl: null }
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/settings/model-profiles') || path.endsWith('/conversations') || path.endsWith('/accounts') || path.endsWith('/capabilities')) return fulfill(route, pageOf([]))
+    if (path.endsWith('/plugins')) return fulfill(route, pageOf(installed ? [plugin] : []))
+    if (path.endsWith('/integrations/sources')) return fulfill(route, { items: [{ id: 'local', name: 'Installed and local', state: 'READY', errorCode: null }] })
+    if (path.endsWith('/integrations/search')) return fulfill(route, { items: [{ ...result, installState: installed ? 'INSTALLED' : 'AVAILABLE', installed }], sources: [{ id: 'local', name: 'Installed and local', state: 'READY', errorCode: null }] })
+    if (path.endsWith('/integrations/local/local-tools/versions/1.2.3/install') && route.request().method() === 'POST') {
+      installCalls += 1
+      installed = true
+      return fulfill(route, { pluginId: 'local-tools', version: '1.2.3', installState: 'INSTALLED' })
+    }
+    return fulfill(route, { code: 'not_found' }, 404)
+  })
+  await signIn(page)
+  await page.goto('/plugins')
+  await page.getByLabel('Search integrations').fill('local tools')
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await page.getByRole('button', { name: 'Review installation' }).click()
+  await expect(page.getByRole('heading', { name: 'Install Local tools' })).toBeVisible()
+  await expect(page.getByText(/disabled state/)).toBeVisible()
+  await expect(page.getByRole('dialog').getByText('Read local time', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: 'Install disabled' }).click()
+  await expect.poll(() => installCalls).toBe(1)
+  await expect(page.getByRole('button', { name: 'Enable' })).toBeVisible()
 })
 
 test('Jobs reject past schedules and require confirmation before cancellation', async ({ page }) => {

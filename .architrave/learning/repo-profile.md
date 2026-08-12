@@ -65,8 +65,9 @@ Tessera implements a user-operated, identity-aware credential/action broker and 
 | Full R1 gates pass at 617 backend, 94 web, and 16 browser tests; all final adversaries PASS | `.architrave/runs/20260810-r1-continuity/deterministic-gates.md`, `judge-post.md` | 2026-08-10 |
 | R2 internal/e2e gates pass at 672 backend, 100 web, and 26 browser tests; Product/Architecture/Security PASS | `.architrave/runs/20260810-r2-usable-alpha/deterministic-gates.md`, `judge-post.md` | 2026-08-10 |
 | MCP-first repository gates pass at 768 backend, 105 web, and 34 browser tests; architecture/security pass in Copilot and Claude families; repository product UX passes | `.architrave/runs/20260811-plugin-boundary-correction/deterministic-gates.md`, `judge-post.md` | 2026-08-11 |
-| Corrected image is not deployed; Gmail/RM authorization, real provider actions and deployed restart/recovery remain blocked human/runtime phases | `docs/tessera/delivery/FINAL_DELIVERY_REPORT.md` | 2026-08-11 |
+| Corrected server is deployed through Flux/Cloudflare; descriptor, schema 15, scheduler, backup/restart, iOS verified-server render and authenticated LiteLLM Chat pass. Gmail/GitHub/RM provider authorization and authenticated cross-client continuation remain user/provider checkpoints. | `docs/tessera/final_audit/FINAL_AUDIT_REPORT.md` | 2026-08-12 |
+| Public integration metadata is Inspect-only; exact hash-pinned local packages support keyed, disabled-by-default reviewed installation in Web/iOS. | `docs/tessera/final_audit/PLUGIN_DISCOVERY.md` | 2026-08-12 |
 
 ## Last Reviewed
 
-2026-08-11
+2026-08-12

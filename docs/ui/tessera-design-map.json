@@ -44,7 +44,7 @@
       "story": "Product/IntegrationSearchPanel",
       "code": "web/src/components/product/IntegrationSearchPanel.tsx",
       "reuses": ["AppShell"],
-      "states": ["Results", "Searching", "Empty", "SourceDegraded"]
+      "states": ["Results", "InstallReview", "PublicSourceUnavailable", "Searching", "Empty", "SourceDegraded"]
     },
     "ActionApprovalCard": {
       "story": "Product/ActionApprovalCard",

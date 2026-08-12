@@ -4794,9 +4794,6 @@ internal static class R2ProductEndpoints
             return new(Error: Problem(400, "invalid_cursor"));
         context.Items["r2.cursor.offset"] = offset;
         await store.AddAsync(principal, token);
-        var catalog = services.GetService<R2PluginCatalog>();
-        if (catalog is not null)
-            await catalog.EnsureInstalledAsync(store, principal.PrincipalId, token);
         return new(store, principal.PrincipalId);
     }
 

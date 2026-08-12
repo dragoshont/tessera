@@ -156,7 +156,7 @@ public sealed class SetupAndCatalogTests
                     "title": "Gmail Safe",
                     "description": "Read Gmail metadata through a public MCP server.",
                     "version": "1.2.3",
-                    "repository": { "url": "https://github.com/example/gmail-safe", "source": "github" },
+                    "repository": { "url": "https://127.0.0.1/private", "source": "github" },
                     "packages": [
                       {
                         "registryType": "npm",
@@ -197,6 +197,7 @@ public sealed class SetupAndCatalogTests
         Assert.Equal("REVIEW_REQUIRED", item.InstallState);
         Assert.False(item.Installed);
         Assert.Contains("External credentials", item.AuthTypes);
+        Assert.Null(item.InspectUrl);
         Assert.Equal(first, second);
         Assert.Equal(1, calls);
     }
@@ -246,7 +247,7 @@ public sealed class SetupAndCatalogTests
             var results = await source.SearchAsync(
                 "regina maria",
                 10,
-                new HashSet<string>(["regina-maria"], StringComparer.Ordinal),
+                new HashSet<string>(["regina-maria@1.0.0"], StringComparer.Ordinal),
                 default);
 
             var item = Assert.Single(results);

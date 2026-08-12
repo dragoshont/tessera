@@ -6,17 +6,17 @@ Read-only Kubernetes/Flux/GitOps/tunnel/DNS/HTTP evidence and canonical SQLite m
 
 ## Observed State
 
-- Running Tessera image is the previous schema-v15 stateful release.
+- Running Tessera image is `04e1a046...297249` from reviewed custody-fix source `1eafb29`; private GitOps revision `4fd4dbf` is applied.
 - Data/backup PVCs and one server scheduler replica are healthy.
-- Five plugins are installed; canonical accounts/model profiles were empty at audit.
-- Existing LiteLLM and two isolated Regina Maria runtimes are configured outside canonical account state.
-- Existing two-replica Cloudflare Tunnel has no Tessera hostname at the pre-cutover checkpoint.
+- Five reviewed plugins are installed. After owner authentication, canonical state has one healthy model account, one enabled profile and both defaults.
+- AKV-projected LiteLLM secret matches the existing live key without disclosure.
+- Cloudflare Tunnel and proxied DNS route the canonical hostname to the Tessera namespace Service.
+- Descriptor, backup, schema 15 and replacement-pod recovery pass.
+- Authenticated Web setup and real persisted/streamed Chat pass (`TESSERA LIVE OK`).
 
 ## Mismatches
 
-- Descriptor route returns SPA HTML from the stale image.
-- Public DNS/tunnel route does not yet provide the canonical remote path.
-- Model/account bootstrap and current Web/native clients are not deployed.
+The reviewed-install source phase is not yet published/deployed. Provider accounts and authenticated macOS/iOS continuity remain checkpoints.
 
 ## Human Approval Items
 

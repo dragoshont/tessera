@@ -1,11 +1,11 @@
 # Deployed Diff
 
-Last verified runtime remains the frozen baseline; repository changes in this run have not been pushed/reconciled.
+Verified runtime after the 2026-08-12 cutover.
 
 | Dimension | Repository intent | Running homelab | Status |
 |---|---|---|---|
-| Tessera source/image | current tree with descriptor/iOS shared client | source `f869d76`, digest `58223131…c10e91` | DRIFT |
-| server descriptor | stable operator-owned UUID in private deployment config | endpoint absent in old image | DRIFT |
+| Tessera source/image | reviewed custody release | source `1eafb29`, digest `04e1a046…297249` | MATCH |
+| server descriptor | stable operator-owned UUID in private deployment config | strict JSON/no-store | MATCH |
 | schema | v15, no migration | v15 | MATCH |
 | persistence | retained RWO data+backup PVC, 1 GiB ceiling | Bound and restart-verified | MATCH |
 | scheduler | one server replica | one healthy replica | MATCH |
@@ -13,7 +13,7 @@ Last verified runtime remains the frozen baseline; repository changes in this ru
 | LiteLLM | fixed internal route | real completion baseline HTTP 200 | MATCH |
 | egress | dedicated namespace default-deny allowlist | verified, undeclared Sonarr denied | MATCH |
 | reverse proxy/TLS | `https://tessera.hont.ro` | LAN-only Traefik TLS | MATCH |
-| remote route | Cloudflare Tunnel → `tessera.tessera.svc.cluster.local:8080` | hostname absent from tunnel at audit start | MISSING |
-| health | descriptor + existing health/readiness | existing health/readiness only | PARTIAL |
+| remote route | Cloudflare Tunnel → `tessera.tessera.svc.cluster.local:8080` | proxied route live | MATCH |
+| health | descriptor + existing health/readiness | DB/scheduler/plugin Ready | MATCH |
 
-Required release action: build/publish a new Tessera image, update private GitOps digest/config, review rendered manifests, push/reconcile under human approval, verify descriptor/no-store, schema/PVC/scheduler/egress, restart recovery and all client routes. Until then, deployment status is intentionally not PASS.
+Deployment, owner setup and real Web Chat PASS. Provider and authenticated macOS/iOS checks remain user/provider checkpoints, not deployment drift.

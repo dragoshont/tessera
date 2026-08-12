@@ -1,3 +1,3 @@
 # Cross-Client E2E
 
-Architecture guarantees one backend and shared API/routes; executable parity tests pass. Real cross-client conversation, Memory, Job, Action, Account, Plugin and Activity journeys remain pending corrected deployment and Desktop authentication.
+The corrected deployment and real authenticated Web model journey pass. Web persisted a conversation and streamed `TESSERA LIVE OK`; macOS and iOS use the same canonical API/routes and pass packaged/native route checks. Continuing that object from authenticated macOS/iOS plus provider-backed Memory/Job/Action/Account journeys remains a user-session/provider-consent checkpoint, not deployment work.

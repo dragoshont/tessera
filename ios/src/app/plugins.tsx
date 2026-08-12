@@ -52,6 +52,23 @@ export default function PluginsScreen() {
     if (url.protocol !== 'https:') { setError('Integration source URL is not trusted'); return }
     await WebBrowser.openBrowserAsync(url.toString(), { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET })
   }
+  const install = (item: IntegrationCatalogItem) => Alert.alert(
+    `Install ${item.name}?`,
+    `Publisher: ${item.publisher}\nVersion: ${item.version}\nRuntime: ${item.runtime}\nTrust: ${item.trustLevel}\nSensitivity: ${item.sensitivity}\nCapabilities: ${item.capabilitiesSummary.join(' · ') || 'None declared'}\nAuthorization: ${item.authTypes.join(', ') || 'None'}\n\nThis exact package is already hash-validated in the reviewed Tessera server image. It will be installed disabled; enabling and account authorization remain separate.`,
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Install disabled', onPress: () => void (async () => {
+        setBusy(item.id)
+        setError(null)
+        try {
+          await api.installReviewedIntegration(item)
+          setResults((current) => current.map((value) => value.id === item.id && value.version === item.version ? { ...value, installed: true, installState: 'INSTALLED' } : value))
+          await load(true)
+        } catch (cause) { setError(cause instanceof Error ? cause.message : 'Installation failed') }
+        finally { setBusy(null) }
+      })() },
+    ],
+  )
   if (loading) return <View style={[sharedStyles.page, { backgroundColor: palette.background }]}><Loading /></View>
   if (error && !items.length) return <View style={[sharedStyles.page, { backgroundColor: palette.background }]}><ErrorState message={error} retry={() => void load()} /></View>
   return <ScrollView style={{ backgroundColor: palette.background }} contentContainerStyle={sharedStyles.listContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />}>
@@ -66,7 +83,7 @@ export default function PluginsScreen() {
     </Card>
     {error ? <Text accessibilityRole="alert" style={[sharedStyles.body, { color: palette.danger }]}>{error}</Text> : null}
     {searchedFor && !searching && !results.length ? <Text style={[sharedStyles.body, { color: palette.muted, textAlign: 'center', paddingVertical: Space.xl }]}>No compatible integrations matched “{searchedFor}”.</Text> : null}
-    {results.map((item) => <Card key={`${item.source}:${item.id}:${item.version}`}><View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>{item.name}</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>{item.source} · {item.publisher} · {item.runtime}</Text></View><Status value={item.installState} /></View><Text style={[sharedStyles.body, { color: palette.text }]}>{item.description}</Text><View style={styles.sourceList}><Status value={item.trustLevel} /><Status value={item.sensitivity} /></View>{item.authTypes.length ? <Text style={[sharedStyles.detail, { color: palette.warning }]}>Authorization: {item.authTypes.join(', ')}. Review where credentials and sensitive data would be sent.</Text> : null}{item.inspectUrl ? <Button label="Inspect source" icon="safari" onPress={() => void inspect(item)} /> : <Text style={[sharedStyles.detail, { color: palette.muted }]}>Built into the reviewed Tessera server image.</Text>}{!item.installed ? <Text style={[sharedStyles.detail, { color: palette.muted }]}>Review required before server installation.</Text> : null}</Card>)}
+    {results.map((item) => <Card key={`${item.source}:${item.id}:${item.version}`}><View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>{item.name}</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>{item.source} · {item.publisher} · {item.runtime}</Text></View><Status value={item.installState} /></View><Text style={[sharedStyles.body, { color: palette.text }]}>{item.description}</Text><View style={styles.sourceList}><Status value={item.trustLevel} /><Status value={item.sensitivity} /></View>{item.authTypes.length ? <Text style={[sharedStyles.detail, { color: palette.warning }]}>Authorization: {item.authTypes.join(', ')}. Review where credentials and sensitive data would be sent.</Text> : null}{item.inspectUrl ? <Button label="Inspect source" icon="safari" onPress={() => void inspect(item)} /> : <Text style={[sharedStyles.detail, { color: palette.muted }]}>{item.source === 'local' ? 'Built into the reviewed Tessera server image.' : 'Public source URL unavailable.'}</Text>}{item.source === 'local' && !item.installed ? <Button label={busy === item.id ? 'Installing…' : 'Review installation'} icon="shippingbox" tone="primary" busy={busy === item.id} onPress={() => install(item)} /> : !item.installed ? <Text style={[sharedStyles.detail, { color: palette.muted }]}>A reviewed server package is required before installation.</Text> : null}</Card>)}
   </ScrollView>
 }
 

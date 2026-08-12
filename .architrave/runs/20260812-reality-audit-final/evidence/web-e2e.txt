@@ -1,0 +1,91 @@
+
+> tessera-admin@0.0.0 test:e2e
+> playwright test
+
+[2m[WebServer] [22m(node:80789) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 44 tests using 5 workers
+
+(node:80798) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80794) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80796) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80795) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80797) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80798) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80794) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80796) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80795) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80797) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   4 [desktop] › tests/health-honesty.spec.ts:7:1 › accounts view shows honest health — Unverified, never a false Live (1.5s)
+  ✓   3 [desktop] › tests/r2-product.spec.ts:24:1 › first run automatically bootstraps the detected homelab AI gateway (1.6s)
+  ✓   1 [desktop] › tests/handoff.spec.ts:16:1 › live hand-off — pre-flight then fail-closed Unavailable (the honest default) (1.9s)
+  ✓   5 [desktop] › tests/screenshots.spec.ts:20:3 › screens — light (2.4s)
+  ✓   6 [desktop] › tests/smoke.spec.ts:11:1 › sign in, read My accounts, open a connection — and reveal no secret (971ms)
+  ✓   7 [desktop] › tests/r2-product.spec.ts:44:1 › Plugins searches installed, official registry, and GitHub metadata without executing results (1.1s)
+  ✓   8 [desktop] › tests/handoff.spec.ts:42:1 › live hand-off — WaitingForYou (demo canvas) (758ms)
+  ✓   2 [desktop] › tests/continuity.spec.ts:12:1 › continuity compounds accepted history through correction, conflict, and completion (3.2s)
+  ✓  10 [desktop] › tests/smoke.spec.ts:35:1 › Users view shows the operator as Admin and the others as Members (845ms)
+  ✓  11 [desktop] › tests/r2-product.spec.ts:66:1 › Plugins reviews and installs only a hash-validated local package in a disabled state (1.0s)
+  ✓   9 [desktop] › tests/screenshots.spec.ts:20:3 › screens — dark (1.7s)
+(node:80862) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80862) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80870) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80870) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  13 [desktop] › tests/r2-product.spec.ts:97:1 › Jobs reject past schedules and require confirmation before cancellation (976ms)
+(node:80873) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  12 [desktop] › tests/ui-controls.spec.ts:27:1 › delivered primary controls have real targets, accessible names, and no console failures (2.4s)
+(node:80873) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  16 [desktop] › tests/r2-product.spec.ts:128:1 › R2 lands on truthful Chat and exposes primary product navigation (644ms)
+  ✓  15 [phone] › tests/handoff.spec.ts:16:1 › live hand-off — pre-flight then fail-closed Unavailable (the honest default) (1.0s)
+(node:80888) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80888) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  14 [phone] › tests/continuity.spec.ts:12:1 › continuity compounds accepted history through correction, conflict, and completion (1.7s)
+  ✓  18 [desktop] › tests/r2-product.spec.ts:143:1 › Memory exposes source-grounded Why, correction, and stop-using language (918ms)
+  ✓  17 [phone] › tests/health-honesty.spec.ts:7:1 › accounts view shows honest health — Unverified, never a false Live (756ms)
+  ✓  19 [phone] › tests/handoff.spec.ts:42:1 › live hand-off — WaitingForYou (demo canvas) (644ms)
+  ✓  21 [desktop] › tests/r2-product.spec.ts:171:1 › Chat renders and approves the exact durable Action proposal (881ms)
+  ✓  20 [phone] › tests/r2-product.spec.ts:24:1 › first run automatically bootstraps the detected homelab AI gateway (682ms)
+  ✓  23 [phone] › tests/smoke.spec.ts:11:1 › sign in, read My accounts, open a connection — and reveal no secret (1.0s)
+  ✓  22 [phone] › tests/screenshots.spec.ts:20:3 › screens — light (1.7s)
+  ✓  25 [desktop] › tests/r2-product.spec.ts:200:1 › Chat grants an arbitrary integration from account capability metadata (783ms)
+  ✓  27 [phone] › tests/smoke.spec.ts:35:1 › Users view shows the operator as Admin and the others as Members (857ms)
+  ✓  26 [phone] › tests/r2-product.spec.ts:44:1 › Plugins searches installed, official registry, and GitHub metadata without executing results (1.0s)
+  ✓  29 [desktop] › tests/r2-product.spec.ts:238:1 › Jobs expose durable run history and waiting approval state (1.1s)
+  ✓  30 [phone] › tests/r2-product.spec.ts:66:1 › Plugins reviews and installs only a hash-validated local package in a disabled state (1.0s)
+  ✓  28 [phone] › tests/screenshots.spec.ts:20:3 › screens — dark (1.8s)
+  ✓  24 [phone] › tests/ui-controls.spec.ts:27:1 › delivered primary controls have real targets, accessible names, and no console failures (3.1s)
+  ✓  32 [phone] › tests/r2-product.spec.ts:97:1 › Jobs reject past schedules and require confirmation before cancellation (754ms)
+  ✓  31 [desktop] › tests/r2-product.spec.ts:260:1 › Plugin disable and Account revoke show truthful recovery states (1.1s)
+  ✓  33 [phone] › tests/r2-product.spec.ts:128:1 › R2 lands on truthful Chat and exposes primary product navigation (501ms)
+  ✓  34 [desktop] › tests/r2-product.spec.ts:287:1 › Gmail Account connection opens Google OAuth without asking for a token (547ms)
+  ✓  35 [phone] › tests/r2-product.spec.ts:143:1 › Memory exposes source-grounded Why, correction, and stop-using language (671ms)
+  ✓  36 [desktop] › tests/r2-product.spec.ts:294:1 › Regina Maria connection uses configured isolated profiles and reports authorization required (600ms)
+  ✓  37 [phone] › tests/r2-product.spec.ts:171:1 › Chat renders and approves the exact durable Action proposal (559ms)
+  ✓  38 [desktop] › tests/r2-product.spec.ts:300:1 › Settings configures the sole fixed LiteLLM gateway without an internal URL (541ms)
+  ✓  39 [phone] › tests/r2-product.spec.ts:200:1 › Chat grants an arbitrary integration from account capability metadata (432ms)
+  ✓  40 [phone] › tests/r2-product.spec.ts:238:1 › Jobs expose durable run history and waiting approval state (555ms)
+  ✓  41 [phone] › tests/r2-product.spec.ts:260:1 › Plugin disable and Account revoke show truthful recovery states (747ms)
+  ✓  42 [phone] › tests/r2-product.spec.ts:287:1 › Gmail Account connection opens Google OAuth without asking for a token (571ms)
+  ✓  43 [phone] › tests/r2-product.spec.ts:294:1 › Regina Maria connection uses configured isolated profiles and reports authorization required (531ms)
+  ✓  44 [phone] › tests/r2-product.spec.ts:300:1 › Settings configures the sole fixed LiteLLM gateway without an internal URL (479ms)
+
+  44 passed (17.2s)

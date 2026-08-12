@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
@@ -44,6 +45,17 @@ public sealed class R2ProductEndpointsTests : IAsyncLifetime
         await File.WriteAllTextAsync(grantsPath, "{ \"grants\": [], \"bindings\": [], \"recipes\": [] }");
         _custody = new InMemoryCredentialStore();
         _transport = new ModelTransport();
+        var pluginRoot = Path.Combine(_directory, "plugins");
+        var packageRoot = Path.Combine(pluginRoot, "reviewed-local");
+        Directory.CreateDirectory(packageRoot);
+        var reviewedManifest = """{"Id":"reviewed-local","Version":"1.0.0","Name":"Reviewed local","Publisher":"Tessera","MinimumTesseraVersion":"2.0.0","Capabilities":[{"Id":"reviewed.local.read","Version":"1","Description":"Read reviewed local state","ExecutorKind":"native","AccountRequired":false,"RequiredPermissions":[],"SideEffectClass":"ReadOnly","TimeoutMilliseconds":1000,"MaxResultBytes":4096}]}""";
+        var manifestBytes = Encoding.UTF8.GetBytes(reviewedManifest);
+        await File.WriteAllBytesAsync(Path.Combine(packageRoot, "manifest.json"), manifestBytes);
+        var pluginCatalogPath = Path.Combine(pluginRoot, "catalog.json");
+        await File.WriteAllTextAsync(pluginCatalogPath, JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["reviewed-local@1.0.0"] = Convert.ToHexStringLower(SHA256.HashData(manifestBytes)),
+        }));
         _app = await BrokerHost.BuildAppAsync(new BrokerHostOptions
         {
             ConfigPath = configPath,
@@ -51,10 +63,62 @@ public sealed class R2ProductEndpointsTests : IAsyncLifetime
             StoreOverride = _custody,
             TransportOverride = _transport,
             ProductDatabasePath = Path.Combine(_directory, "product.db"),
-            PluginRoot = Path.Combine(_directory, "no-plugin-catalog"),
+            PluginRoot = pluginRoot,
+            PluginCatalogPath = pluginCatalogPath,
         });
         await _app.StartAsync();
         _client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+    }
+
+    [Fact]
+    public async Task Reviewed_install_route_enforces_auth_key_body_replay_conflict_and_local_source()
+    {
+        const string path = "/api/v1/integrations/local/reviewed-local/versions/1.0.0/install";
+        using var unauthenticated = await _client.PostAsJsonAsync(path, new { });
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
+
+        using var missingKey = await SendJsonAsync(Owner, HttpMethod.Post, path, new { });
+        Assert.Equal(HttpStatusCode.BadRequest, missingKey.StatusCode);
+        Assert.Equal("invalid_idempotency_key", (await ReadJsonAsync(missingKey)).GetProperty("code").GetString());
+
+        using var invalidBody = await SendJsonAsync(Owner, HttpMethod.Post, path, new { unexpected = true }, "install-body-key");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidBody.StatusCode);
+        Assert.Equal("invalid_request", (await ReadJsonAsync(invalidBody)).GetProperty("code").GetString());
+
+        using var first = await SendJsonAsync(Owner, HttpMethod.Post, path, new { }, "install-key");
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal("false", first.Headers.GetValues("Idempotency-Replayed").Single());
+        var firstBody = await first.Content.ReadAsStringAsync();
+        using var firstJson = JsonDocument.Parse(firstBody);
+        Assert.Equal("INSTALLED", firstJson.RootElement.GetProperty("installState").GetString());
+
+        using var replay = await SendJsonAsync(Owner, HttpMethod.Post, path, new { }, "install-key");
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.Equal("true", replay.Headers.GetValues("Idempotency-Replayed").Single());
+        Assert.Equal(firstBody, await replay.Content.ReadAsStringAsync());
+
+        using var conflict = await SendJsonAsync(
+            Owner,
+            HttpMethod.Post,
+            "/api/v1/integrations/local/other/versions/1.0.0/install",
+            new { },
+            "install-key");
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        Assert.Equal("idempotency_conflict", (await ReadJsonAsync(conflict)).GetProperty("code").GetString());
+
+        using var publicSource = await SendJsonAsync(
+            Owner,
+            HttpMethod.Post,
+            "/api/v1/integrations/github/reviewed-local/versions/1.0.0/install",
+            new { },
+            "public-install-key");
+        Assert.Equal(HttpStatusCode.NotFound, publicSource.StatusCode);
+
+        var owner = PrincipalRef.Create("https://dev.tessera.local", "dev", Owner, Owner, DateTimeOffset.UtcNow);
+        var installation = Assert.Single(await _app.Services.GetRequiredService<SqliteKernelStore>()
+            .ListPluginInstallationsAsync(owner.PrincipalId));
+        Assert.Equal("reviewed-local", installation.PluginId);
+        Assert.False(installation.Enabled);
     }
 
     public async Task DisposeAsync()

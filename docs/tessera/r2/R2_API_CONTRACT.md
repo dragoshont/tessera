@@ -132,6 +132,7 @@ IntegrationSearchDto    { items: IntegrationCatalogDto[], sources: IntegrationSo
 | `POST /setup/bootstrap` | `{}` + idempotency | `200 SetupStatusDto` | per-owner serialized convergence; validates the configured gateway/model, custody and canonical bindings; `400 invalid_idempotency_key`, `422 model_gateway_*` |
 | `GET /integrations/sources` | none | `200 { items: IntegrationSourceDto[] }` | source metadata only; no public source executes code |
 | `GET /integrations/search` | `query, limit?` | `200 IntegrationSearchDto` | query 2-100 chars, limit 1-50; local hash-validated packages plus cached public metadata; source failures degrade independently |
+| `POST /integrations/local/{id}/versions/{version}/install` | `{}` + idempotency | `200 { pluginId, version, installState: "INSTALLED" }` | exact hash-validated server package only; first install is disabled; package row and durable receipt commit atomically; replay returns exact body and `Idempotency-Replayed: true`; changed `id@version` returns `409 idempotency_conflict`; `404 reviewed_package_not_found`, `409 package_hash_conflict/package_previously_removed` |
 
 GET list/detail routes return their named DTOs/Page DTOs and `404 not_found` without cross-owner disclosure. Endpoint-specific failures supplement the common authentication, validation, storage, and version errors.
 
@@ -144,6 +145,8 @@ List filters reject unknown enum values and malformed timestamps with `400 inval
 Creation, dispatch, approval, validation, retry, and run-now require `Idempotency-Key` (1-128 visible ASCII). Scope is `(owner, route family, key)`. The server hashes canonical method, route resource IDs, and RFC 8785-style property-sorted JSON after validation; secret input is represented by its SHA-256 only in the transient hash computation and is never persisted. Exact replay returns the original status and exact documented response body and sets `Idempotency-Replayed: true`; an initial response sets `Idempotency-Replayed: false`. This header keeps entity DTO response bodies exact. Operations whose documented body is `MutationReceipt` also populate its `replayed` member consistently. A changed request returns `409 idempotency_conflict`. Receipts are retained at least as long as the referenced product record and never expire while an external outcome can be reconciled.
 
 Setup bootstrap is a deterministic convergence operation rather than an external dispatch: it requires a valid key, serializes by owner in the one-writer server, rechecks canonical state inside that gate, uses deterministic account/profile IDs, and returns current setup state. Concurrent client calls cannot compensate or erase a winning credential. A later call repairs missing custody from server-owned configuration only after the real gateway/model probe succeeds.
+
+Integration installation is deliberately narrower than discovery. Only `source=local` packages whose exact manifest bytes match the server's pinned catalog can reach the install route. Installation records the package disabled; enabling, configuration and account authorization remain separate explicit operations. MCP Registry and public repository metadata have no install route and cannot become executable through client-supplied source, URL, command, manifest, hash or trust fields.
 
 ## Credential Custody Transaction
 

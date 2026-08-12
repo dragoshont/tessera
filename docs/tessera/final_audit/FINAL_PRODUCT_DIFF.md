@@ -1,6 +1,6 @@
 # Final Product Diff
 
-Pre-cutover status: `PARTIAL`.
+Final status: `DELIVERED_ENGINEERING_AUTH_CHECKPOINTS_REMAIN`.
 
 ## Repository Complete
 
@@ -12,15 +12,18 @@ Pre-cutover status: `PARTIAL`.
 - Dead route removal, confirmations and input validation.
 - Cloudflare-based private GitOps rollout prepared.
 
-## Engineering-Controlled Open
+## Engineering Delivery
 
-1. Publish and deploy the current image digest.
-2. Migrate the existing LiteLLM key to Key Vault without disclosure.
-3. Add the Tessera hostname to the existing Cloudflare Tunnel.
-4. Run authenticated live setup/Chat/canonical-state/restart checks.
-5. Install and run the final iOS Release against the deployed descriptor.
+- Custody-fix CI passed and published immutable image `04e1a046...297249` from source `1eafb29`.
+- Flux applied private GitOps revision `4fd4dbf`; deployment and backup use the same digest.
+- AKV ExternalSecret is synced and value-preserving without secret disclosure.
+- Cloudflare proxied DNS/tunnel route is live and proven through anycast.
+- Descriptor, health, DB schema 15, scheduler, plugin registry, backup and pod restart recovery pass.
+- Current macOS Electron product is repackaged, installed and renderer-ready.
+- Final iOS Release renders the verified server and real sign-in action.
+- Owner sign-in, automatic LiteLLM bootstrap and persisted/streamed Web Chat pass.
 
-The current macOS Electron product was repackaged, verified, installed in `/Applications`, and passed its installed renderer-ready smoke. The previous app remains available as a timestamped rollback copy.
+Engineering-controlled `MISSING` = 0. Engineering-controlled `PARTIAL` = 0.
 
 ## Human/Auth Checkpoints
 
@@ -29,4 +32,4 @@ The current macOS Electron product was repackaged, verified, installed in `/Appl
 - Secondary Regina Maria account authentication/MFA, independently performed by its holder.
 - Physical iPhone signing/device/cellular verification if unavailable to automation.
 
-This file must be updated after cutover. `DELIVERED_ENGINEERING_AUTH_CHECKPOINTS_REMAIN` may be used only when every engineering-controlled item above is closed; `DELIVERED_E2E` additionally requires the real provider and cross-client scenarios.
+Owner Microsoft sign-in, automatic model bootstrap and real Web Chat pass. `DELIVERED_E2E` is not claimed because provider reads and authenticated macOS/iOS cross-client scenarios still require provider consent/MFA and client sessions.

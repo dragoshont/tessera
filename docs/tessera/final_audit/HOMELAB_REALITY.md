@@ -23,7 +23,7 @@ The canonical remote route is:
 Client -> Cloudflare -> existing tunnel -> tessera.tessera.svc.cluster.local:8080
 ```
 
-Local split DNS currently resolves the canonical hostname to the Traefik LAN address. At audit start, public DNS also resolved to that private address and the managed tunnel had no Tessera hostname route. The private rollout branch adds cloudflared-to-Tessera ingress policy and updates the namespace-aware route helper. The route itself remains a cutover action.
+Local split DNS resolves the canonical hostname through Traefik. Public DNS is now a proxied Cloudflare record and the managed tunnel routes `tessera.hont.ro` to `http://tessera.tessera.svc.cluster.local:8080`. A forced Cloudflare-anycast request returned `server: cloudflare`, a `cf-ray`, the strict descriptor and healthy origin.
 
 ## Tailscale Classification
 

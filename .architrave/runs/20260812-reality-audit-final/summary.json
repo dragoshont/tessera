@@ -1,7 +1,7 @@
 {
   "schema": "architrave.run.v1",
   "runId": "20260812-reality-audit-final",
-  "status": "in-progress",
+  "status": "source-ready-publication-pending",
   "startedAt": "2026-08-12T15:51:43Z",
   "artifacts": {
     "intake": ".architrave/runs/20260812-reality-audit-final/intake.md",
@@ -24,6 +24,7 @@
     { "phase": 2, "name": "Canonical setup and discovery", "status": "completed", "result": "pass" },
     { "phase": 3, "name": "Client completion", "status": "completed", "result": "pass" },
     { "phase": 4, "name": "Adversarial correction", "status": "completed", "result": "pass" },
-    { "phase": 5, "name": "Publish, deploy and live E2E", "status": "in-progress", "result": "pending" }
+    { "phase": 5, "name": "Publish, deploy and authenticated model E2E", "status": "completed", "result": "pass-with-provider-checkpoints" },
+    { "phase": 6, "name": "Reviewed integration installation", "status": "completed", "result": "pass" }
   ]
 }
