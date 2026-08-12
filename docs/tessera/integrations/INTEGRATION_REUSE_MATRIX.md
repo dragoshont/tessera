@@ -4,7 +4,7 @@
 
 | Integration | Candidate | Source / license | Auth and transport | Decision |
 |---|---|---|---|---|
-| Regina Maria | Local `reginamaria-mcp` 0.5.37 | Private local source, Apache-2.0; clean tagged commit `a2ce5b4` | One rotating RM session per process; Streamable HTTP `/mcp`; optional Key Vault; exact-action mutation token | `REUSE_LOCAL_MCP` |
+| Regina Maria | Local `reginamaria-mcp` 0.5.38 | Private local source, Apache-2.0; clean tagged commit `16037af` | One rotating RM session per process; Streamable HTTP `/mcp`; optional Key Vault; exact-action mutation token | `REUSE_LOCAL_MCP` |
 | Regina Maria | Public/provider MCP | No credible provider-maintained or public alternative found | Unknown | Rejected: no verifiable candidate |
 | Gmail | Google Gmail remote MCP Developer Preview | Google-hosted; service implementation not portable; [configuration](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server) | OAuth 2.0; `gmail.readonly` + `gmail.compose`; Streamable HTTP | Defer: no send/history cursor, preview status, multi-account behavior undocumented |
 | Gmail | `taylorwilsdon/google_workspace_mcp` v1.23.1 | [MIT source](https://github.com/taylorwilsdon/google_workspace_mcp), active | OAuth 2.1, stdio/Streamable HTTP, self-hosted, multi-user, broad tool surface | Rejected for current custody boundary; retain as reference candidate |

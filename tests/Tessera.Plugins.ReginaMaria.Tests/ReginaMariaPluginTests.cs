@@ -209,7 +209,7 @@ public sealed class ReginaMariaPluginTests
     }
 
     private static McpServerContract RmContract(string serverId)
-        => new(serverId, "reginamaria-mcp", "0.5.37",
+        => new(serverId, "reginamaria-mcp", "0.5.38",
         [
             Tool("rm_session_status"),
             Tool("rm_account_identity"),
