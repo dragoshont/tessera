@@ -27,6 +27,8 @@ public sealed partial class SqliteKernelStore :
     private readonly string _connectionString;
     private readonly long? _maxDatabaseBytes;
 
+    internal Func<CancellationToken, Task>? RemoteHostBeforeCommitAsync { get; set; }
+
     public SqliteKernelStore(string databasePath, long? maxDatabaseBytes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);

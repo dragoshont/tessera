@@ -20,6 +20,34 @@ public sealed record PluginInstallCommitResult(
 
 public sealed partial class SqliteKernelStore
 {
+    public async Task<bool> AddIdempotencyReceiptAsync(
+        ProductIdempotencyReceipt receipt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR IGNORE INTO idempotency_receipts(
+                owner_principal_id,route_family,idempotency_key,request_hash,response_status,
+                response_body_json,resource_type,resource_id,created_at)
+            VALUES($owner,$route,$key,$hash,$status,$body,$resourceType,$resourceId,$created);
+            """;
+        command.Parameters.AddWithValue("$owner", receipt.OwnerPrincipalId);
+        command.Parameters.AddWithValue("$route", receipt.RouteFamily);
+        command.Parameters.AddWithValue("$key", receipt.IdempotencyKey);
+        command.Parameters.AddWithValue("$hash", receipt.RequestHash);
+        command.Parameters.AddWithValue("$status", receipt.ResponseStatus);
+        command.Parameters.AddWithValue("$body", receipt.ResponseBodyJson);
+        command.Parameters.AddWithValue("$resourceType", receipt.ResourceType);
+        command.Parameters.AddWithValue("$resourceId", receipt.ResourceId);
+        command.Parameters.AddWithValue("$created", FormatTimestamp(receipt.CreatedAt));
+        var inserted = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return inserted;
+    }
+
     public async Task<ProductIdempotencyReceipt?> GetIdempotencyReceiptAsync(
         string owner,
         string routeFamily,

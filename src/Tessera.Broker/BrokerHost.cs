@@ -486,6 +486,7 @@ public static class BrokerHost
         app.MapPortalEndpoints();
         app.MapContinuityEndpoints();
         app.MapR2ProductEndpoints();
+        if (status.ProductConfigured) app.MapRemoteHostEndpoints();
         if (status.ProductConfigured) app.MapRealtimeVoiceEndpoints();
         app.MapCallerBroker();
         app.MapEgressProxy();

@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using System.Collections.ObjectModel;
+using System.Security.Cryptography;
 using Tessera.Core.Kernel;
 using Tessera.Core.Product;
 using Xunit;
@@ -9,7 +10,7 @@ namespace Tessera.Persistence.Sqlite.Tests;
 public sealed class SqliteMigrationTests
 {
     [Fact]
-    public async Task Empty_store_bootstraps_and_repeatably_applies_v1_through_v17()
+    public async Task Empty_store_bootstraps_and_repeatably_applies_v1_through_v18()
     {
         using var database = new TemporaryDatabase();
         var store = database.CreateStore();
@@ -17,7 +18,7 @@ public sealed class SqliteMigrationTests
         await store.InitializeAsync();
         await store.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await store.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await store.GetAppliedMigrationVersionsAsync());
     }
 
     [Fact]
@@ -31,7 +32,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await restarted.GetAppliedMigrationVersionsAsync());
         Assert.Contains("actions", await ReadTableNamesAsync(database.Path));
         Assert.Contains("follow_ups", await ReadTableNamesAsync(database.Path));
     }
@@ -46,7 +47,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await restarted.GetAppliedMigrationVersionsAsync());
         Assert.Contains("follow_up_operations", await ReadTableNamesAsync(database.Path));
     }
 
@@ -60,7 +61,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await restarted.GetAppliedMigrationVersionsAsync());
         var columns = await ReadColumnNamesAsync(database.Path, ["follow_up_sources"]);
         Assert.Contains("follow_up_sources.source_payload_hash", columns);
     }
@@ -75,7 +76,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await restarted.GetAppliedMigrationVersionsAsync());
         var tables = await ReadTableNamesAsync(database.Path);
         Assert.Contains("connected_accounts", tables);
         Assert.Contains("plugin_installations", tables);
@@ -184,6 +185,93 @@ public sealed class SqliteMigrationTests
     }
 
     [Fact]
+    public async Task Populated_v17_store_upgrades_to_v18_without_rewriting_existing_data()
+    {
+        using var database = new TemporaryDatabase();
+        var store = database.CreateStore();
+        await store.InitializeAsync(17);
+        var owner = PrincipalRef.Create(
+            "https://issuer.example", "tenant", "v17-owner", "v17-owner", DateTimeOffset.UtcNow);
+        await store.AddAsync(owner);
+        var evidence = KernelTestData.Evidence(owner.PrincipalId, "v17-evidence", "v17-payload");
+        await store.AddAsync(owner.PrincipalId, evidence);
+
+        var restarted = database.CreateStore();
+        await restarted.InitializeAsync();
+
+        Assert.Equal(18, (await restarted.GetAppliedMigrationVersionsAsync())[^1]);
+        Assert.NotNull(await ((IEvidenceRepository)restarted).GetAsync(owner.PrincipalId, evidence.EvidenceId));
+        Assert.Contains("remote_hosts", await ReadTableNamesAsync(database.Path));
+    }
+
+    [Fact]
+    public async Task V18_closed_domains_and_single_active_grants_are_enforced_by_sql()
+    {
+        using var database = new TemporaryDatabase();
+        var store = database.CreateStore();
+        await store.InitializeAsync();
+        var owner = PrincipalRef.Create(
+            "https://issuer.example", "tenant", "sql-owner", "sql-owner", DateTimeOffset.UtcNow);
+        await store.AddAsync(owner);
+
+        await using var connection = new SqliteConnection(
+            $"Data Source={database.Path};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        var ownerId = owner.PrincipalId.Replace("'", "''", StringComparison.Ordinal);
+        var canonicalJwk = CanonicalJwk();
+        await ExecuteAsync(connection, $$"""
+            INSERT INTO remote_hosts(owner_principal_id,host_id,display_name,platform,architecture,
+                lifecycle,connection_status,public_key_jwk,key_version,protection,agent_version,
+                protocol_version,capability_catalog_version,last_accepted_sequence,last_seen_at,
+                paired_at,revoked_at,version)
+            VALUES('{{ownerId}}','host-sql','SQL Mac','macOS','arm64','OFFLINE','OFFLINE','{{canonicalJwk}}',1,
+                'KEYCHAIN_THIS_DEVICE_ONLY','1.0.0','1',1,0,NULL,'2026-08-14T00:00:00Z',NULL,1);
+            INSERT INTO host_capability_advertisements(owner_principal_id,host_id,capability_id,
+                capability_version,schema_hash,side_effect_class,advertised_at)
+            VALUES('{{ownerId}}','host-sql','host.repo.identity','1','{{new string('a', 64)}}',
+                'READ_ONLY','2026-08-14T00:00:00Z');
+            INSERT INTO host_resources(owner_principal_id,host_id,resource_id,type,display_name,
+                fingerprint,state,advertised_at,version)
+            VALUES('{{ownerId}}','host-sql','repo-sql','REPOSITORY','Repo','{{new string('b', 64)}}',
+                'AVAILABLE','2026-08-14T00:00:00Z',1);
+            INSERT INTO host_capability_grants(owner_principal_id,host_id,capability_id,
+                capability_version,granted_at,revoked_at,version)
+            VALUES('{{ownerId}}','host-sql','host.repo.identity','1','2026-08-14T00:00:00Z',NULL,1);
+            INSERT INTO host_resource_grants(owner_principal_id,host_id,resource_id,access_mode,
+                granted_at,revoked_at,version)
+            VALUES('{{ownerId}}','host-sql','repo-sql','READ_ONLY','2026-08-14T00:00:00Z',NULL,1);
+            """);
+
+        var invalidStatements = new[]
+        {
+            $"INSERT INTO host_pairings VALUES('{ownerId}','pairing-hex','{new string('g', 64)}','ISSUED',0,0,NULL,'2026-08-14T00:00:00Z','2026-08-14T00:05:00Z',NULL,NULL,NULL,1);",
+            RemoteHostInsert(ownerId, "host-jwk", "macOS", "arm64", "KEYCHAIN_THIS_DEVICE_ONLY", "1", "{}"),
+            RemoteHostInsert(ownerId, "host-platform", "Linux", "arm64", "KEYCHAIN_THIS_DEVICE_ONLY", "1", "{\"p\":1}"),
+            RemoteHostInsert(ownerId, "host-arch", "macOS", "x64", "KEYCHAIN_THIS_DEVICE_ONLY", "1", "{\"p\":2}"),
+            RemoteHostInsert(ownerId, "host-protection", "macOS", "arm64", "FILE", "1", "{\"p\":3}"),
+            RemoteHostInsert(ownerId, "host-protocol", "macOS", "arm64", "KEYCHAIN_THIS_DEVICE_ONLY", "2", "{\"p\":4}"),
+            $"INSERT INTO host_capability_advertisements VALUES('{ownerId}','host-sql','host.shell','1','{new string('a', 64)}','READ_ONLY','2026-08-14T00:00:00Z');",
+            $"INSERT INTO host_capability_advertisements VALUES('{ownerId}','host-sql','host.repo.identity','2','{new string('a', 64)}','READ_ONLY','2026-08-14T00:00:00Z');",
+            $"INSERT INTO host_capability_advertisements VALUES('{ownerId}','host-sql','host.repo.identity','1','{new string('g', 64)}','READ_ONLY','2026-08-14T00:00:00Z');",
+            $"INSERT INTO host_capability_advertisements VALUES('{ownerId}','host-sql','host.repo.identity','1','{new string('a', 64)}','WRITE','2026-08-14T00:00:00Z');",
+            $"INSERT INTO host_resources VALUES('{ownerId}','host-sql','repo-type','DIRECTORY','Repo','{new string('b', 64)}','AVAILABLE','2026-08-14T00:00:00Z',1);",
+            $"INSERT INTO host_resources VALUES('{ownerId}','host-sql','repo-fingerprint','REPOSITORY','Repo','{new string('g', 64)}','AVAILABLE','2026-08-14T00:00:00Z',1);",
+            $"INSERT INTO host_resources VALUES('{ownerId}','host-sql','repo-state','REPOSITORY','Repo','{new string('b', 64)}','MISSING','2026-08-14T00:00:00Z',1);",
+            $"INSERT INTO host_resource_grants VALUES('{ownerId}','host-sql','repo-sql','WRITE','2026-08-14T00:00:00Z',NULL,2);",
+            $"INSERT INTO host_accepted_messages VALUES('{ownerId}','host-sql','message-operation',1,'shell','-','{new string('c', 64)}',200,'{{}}','2026-08-14T00:00:00Z');",
+            $"INSERT INTO host_accepted_messages VALUES('{ownerId}','host-sql','message-hash',2,'poll','-','{new string('z', 64)}',200,'{{}}','2026-08-14T00:00:00Z');",
+            $"INSERT INTO host_capability_grants VALUES('{ownerId}','host-sql','host.repo.identity','1','2026-08-14T00:00:01Z',NULL,2);",
+            $"INSERT INTO host_resource_grants VALUES('{ownerId}','host-sql','repo-sql','READ_ONLY','2026-08-14T00:00:01Z',NULL,2);",
+        };
+
+        foreach (var statement in invalidStatements)
+        {
+            var error = await Record.ExceptionAsync(() => ExecuteAsync(connection, statement));
+            Assert.True(error is SqliteException, $"Expected SQLite to reject: {statement}");
+        }
+    }
+
+    [Fact]
     public async Task Schema_contains_product_state_only()
     {
         using var database = new TemporaryDatabase();
@@ -218,6 +306,12 @@ public sealed class SqliteMigrationTests
                 "follow_up_sources",
                 "follow_up_timeline",
                 "follow_ups",
+                "host_accepted_messages",
+                "host_capability_advertisements",
+                "host_capability_grants",
+                "host_pairings",
+                "host_resource_grants",
+                "host_resources",
                 "idempotency_receipts",
                 "job_account_grants",
                 "job_capability_grants",
@@ -239,6 +333,7 @@ public sealed class SqliteMigrationTests
                 "realtime_session_tools",
                 "realtime_tool_bindings",
                 "realtime_turn_receipts",
+                "remote_hosts",
                 "scheduler_leases",
                 "schema_migrations",
                 "workflow_checkpoints",
@@ -252,6 +347,8 @@ public sealed class SqliteMigrationTests
         Assert.Contains("credential_cleanup_receipts.credential_ref", columns);
         Assert.Contains("jobs.kind", columns);
         Assert.Contains("jobs.conversation_id", columns);
+        Assert.Contains("host_pairings.claim_secret_hash", columns);
+        Assert.Contains("remote_hosts.public_key_jwk", columns);
         var forbidden = new[]
         {
             "prompt",
@@ -267,6 +364,21 @@ public sealed class SqliteMigrationTests
         };
         Assert.DoesNotContain(columns, column => forbidden.Any(
             value => column.Contains(value, StringComparison.OrdinalIgnoreCase)));
+        var forbiddenHostColumns = new[]
+        {
+            "claim_secret",
+            "private_key",
+            "local_path",
+            "command",
+            "environment",
+            "signature",
+        };
+        var hostColumns = columns.Where(column =>
+            column.StartsWith("host_", StringComparison.Ordinal)
+            || column.StartsWith("remote_hosts.", StringComparison.Ordinal));
+        Assert.DoesNotContain(hostColumns, column => forbiddenHostColumns.Any(value =>
+            column.Contains(value, StringComparison.OrdinalIgnoreCase)
+            && !column.EndsWith("claim_secret_hash", StringComparison.Ordinal)));
     }
 
     private static async Task<ReadOnlyCollection<string>> ReadTableNamesAsync(string databasePath)
@@ -288,6 +400,37 @@ public sealed class SqliteMigrationTests
         }
 
         return names.AsReadOnly();
+    }
+
+    private static string RemoteHostInsert(
+        string owner, string hostId, string platform, string architecture,
+        string protection, string protocol, string publicKeyJson)
+        => $$"""
+            INSERT INTO remote_hosts(owner_principal_id,host_id,display_name,platform,architecture,
+                lifecycle,connection_status,public_key_jwk,key_version,protection,agent_version,
+                protocol_version,capability_catalog_version,last_accepted_sequence,last_seen_at,
+                paired_at,revoked_at,version)
+            VALUES('{{owner}}','{{hostId}}','SQL Mac','{{platform}}','{{architecture}}','OFFLINE',
+                'OFFLINE','{{publicKeyJson}}',1,'{{protection}}','1.0.0','{{protocol}}',1,0,NULL,
+                '2026-08-14T00:00:00Z',NULL,1);
+            """;
+
+    private static string CanonicalJwk()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var parameters = key.ExportParameters(false);
+        static string Encode(byte[] value)
+            => Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return RemoteHostValidation.NormalizeP256PublicJwk(
+            $$"""{"kty":"EC","crv":"P-256","x":"{{Encode(parameters.Q.X!)}}","y":"{{Encode(parameters.Q.Y!)}}"}""")
+            .CanonicalJson;
+    }
+
+    private static async Task ExecuteAsync(SqliteConnection connection, string sql)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
     }
 
     private static async Task<ReadOnlyCollection<string>> ReadColumnNamesAsync(

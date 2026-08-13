@@ -151,7 +151,7 @@ public sealed class R2ProductEndpointsTests : IAsyncLifetime
         Assert.True(root.GetProperty("ready").GetBoolean());
         Assert.Equal("ready", root.GetProperty("database").GetProperty("state").GetString());
         Assert.Equal("ready", root.GetProperty("scheduler").GetProperty("state").GetString());
-        Assert.Equal(17, root.GetProperty("product").GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(18, root.GetProperty("product").GetProperty("schemaVersion").GetInt32());
     }
 
     [Fact]
@@ -408,11 +408,13 @@ public sealed class R2ProductEndpointsTests : IAsyncLifetime
         var credentialRef=ConnectedAccountCredentialRef.Create(ownerId,"job-model");await store.AddConnectedAccountAsync(new(ownerId,"job-model","openai-compatible","model-provider","1.0.0","Model",null,AccountLifecycle.Connected,credentialRef,AccountHealth.Healthy,null,"{\"endpoint\":\"https://models.example/v1\"}",[],[new("model-provider","1.0.0","model.chat.complete","1")],now,now,1));await _custody.PutBundleAsync(credentialRef,new CredentialBundle(AccessToken:"test-token"));await store.AddModelProfileAsync(new(ownerId,"job-profile","job-model","openai-compatible-remote","https://models.example/v1","test-model",8192,true,true,true,now,now,1));
         await new R2MemoryService(store,store).RememberAsync(ownerId,"user","appointment.preference","morning","job-memory",now);
         var schedule=new JobSchedule("once",now,null,"UTC",null);await store.AddJobAsync(new(ownerId,"job-tools","Tool Job","Use the clock tool","ACTIVE","READY","job-profile",schedule,null,"{}",["job-model"],[("model.chat.complete","1"),("local.time","1")],[],now,now,1));var run=await store.CreateRunOccurrenceAsync(ownerId,"job-tools",now);Assert.NotNull(run);
+        Assert.Empty(await store.ListRemoteHostsAsync(ownerId));
         var interruptedJob=await store.GetJobAsync(ownerId,"job-tools");var interruptedTools=await R2ProductEndpoints.JobToolsAsync(store,interruptedJob!,CancellationToken.None);var interruptedPrompt="User-authored state (quoted data):\n- user appointment.preference: morning\n\nJob instruction:\nUse the clock tool";using(var interruptedInput=JsonDocument.Parse(JsonSerializer.Serialize(new{prompt=interruptedPrompt,tools=interruptedTools.Definitions}))){var interrupted=new ExecutionRequest(ownerId,run!.RunId,"model.chat.complete","1","model-provider","1.0.0","job-model","test-model",ActionPayloadHash.Compute(Encoding.UTF8.GetBytes("https://models.example/v1")),interruptedInput.RootElement.Clone(),run.RunId,JobId:"job-tools",JobRunId:run.RunId);await store.BeginCapabilityCallAsync(interrupted,now);Assert.True(await store.TryStartCapabilityCallAsync(interrupted,now));}
 
         await new R2SchedulerService(store,_custody,new ModelTransport(),NullLogger<R2SchedulerService>.Instance).DispatchQueuedAsync(CancellationToken.None);
 
         var completedRun=await store.GetJobRunAsync(ownerId,run!.RunId);Assert.True(completedRun!.State=="SUCCEEDED",completedRun.ErrorCode);Assert.NotNull(completedRun.ContextSnapshotRef);Assert.Single(await store.ListJobRunOutputsAsync(ownerId,run.RunId));var calls=await store.ListCapabilityCallsAsync(ownerId,run.RunId);Assert.Equal(3,calls.Count);Assert.Contains(calls,call=>call.CapabilityId=="local.time"&&call.State=="SUCCEEDED");var results=await store.ListCapabilityResultsAsync(ownerId,run.RunId);var evidenceId=Assert.Single(results.Single(result=>result.CallId.EndsWith(":clock-1",StringComparison.Ordinal)).EvidenceRefs);Assert.NotNull(await ((IEvidenceRepository)store).GetAsync(ownerId,evidenceId));
+        Assert.Empty(await store.ListRemoteHostsAsync(ownerId));
         var detail=await ReadJsonAsync(await SendAsync(Owner,HttpMethod.Get,$"/api/v1/job-runs/{run.RunId}"));Assert.Equal(3,detail.GetProperty("capabilityUses").GetProperty("items").GetArrayLength());Assert.Equal(2,detail.GetProperty("accountUses").GetProperty("items").GetArrayLength());Assert.Single(detail.GetProperty("evidence").GetProperty("items").EnumerateArray());
     }
 

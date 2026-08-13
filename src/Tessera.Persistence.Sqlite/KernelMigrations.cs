@@ -4,7 +4,7 @@ internal sealed record KernelMigration(int Version, string Sql);
 
 internal static class KernelMigrations
 {
-    public const int LatestVersion = 17;
+    public const int LatestVersion = 18;
 
     public static IReadOnlyList<KernelMigration> All { get; } =
     [
@@ -25,7 +25,152 @@ internal static class KernelMigrations
         new KernelMigration(15, Migration15),
         new KernelMigration(16, Migration16),
         new KernelMigration(17, Migration17),
+        new KernelMigration(18, Migration18),
     ];
+
+    private const string Migration18 = """
+        CREATE TABLE host_pairings (
+            owner_principal_id TEXT NOT NULL,
+            pairing_id TEXT NOT NULL,
+            claim_secret_hash TEXT NOT NULL CHECK (
+                length(claim_secret_hash) = 64 AND claim_secret_hash NOT GLOB '*[^0-9a-f]*'),
+            state TEXT NOT NULL CHECK (state IN ('ISSUED','CLAIMED','CONFIRMED','EXPIRED','CANCELED')),
+            failed_claims INTEGER NOT NULL CHECK (failed_claims BETWEEN 0 AND 5),
+            failed_confirmations INTEGER NOT NULL CHECK (failed_confirmations BETWEEN 0 AND 5),
+            requested_host_json TEXT NULL CHECK (requested_host_json IS NULL OR (json_valid(requested_host_json) AND json_type(requested_host_json) = 'object')),
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            claimed_at TEXT NULL,
+            confirmed_at TEXT NULL,
+            canceled_at TEXT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,pairing_id),
+            UNIQUE (pairing_id),
+            UNIQUE (owner_principal_id,claim_secret_hash),
+            FOREIGN KEY (owner_principal_id) REFERENCES principals(principal_id)
+        );
+
+        CREATE TABLE remote_hosts (
+            owner_principal_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            platform TEXT NOT NULL CHECK (platform = 'macOS'),
+            architecture TEXT NOT NULL CHECK (architecture IN ('arm64','x86_64')),
+            lifecycle TEXT NOT NULL CHECK (lifecycle IN ('PAIRING','ONLINE','BUSY','DEGRADED','OFFLINE','REVOKED','UPDATE_REQUIRED')),
+            connection_status TEXT NOT NULL,
+            public_key_jwk TEXT NOT NULL CHECK (COALESCE((
+                json_valid(public_key_jwk)
+                AND json_type(public_key_jwk) = 'object'
+                AND json_extract(public_key_jwk,'$.crv') = 'P-256'
+                AND json_extract(public_key_jwk,'$.kty') = 'EC'
+                AND length(json_extract(public_key_jwk,'$.x')) = 43
+                AND json_extract(public_key_jwk,'$.x') NOT GLOB '*[^A-Za-z0-9_-]*'
+                AND length(json_extract(public_key_jwk,'$.y')) = 43
+                AND json_extract(public_key_jwk,'$.y') NOT GLOB '*[^A-Za-z0-9_-]*'
+                AND json_remove(public_key_jwk,'$.crv','$.kty','$.x','$.y') = '{}'
+                AND public_key_jwk = '{"crv":"P-256","kty":"EC","x":"'
+                    || json_extract(public_key_jwk,'$.x') || '","y":"'
+                    || json_extract(public_key_jwk,'$.y') || '"}'
+            ), 0)),
+            key_version INTEGER NOT NULL CHECK (key_version >= 1),
+            protection TEXT NOT NULL CHECK (protection IN ('SECURE_ENCLAVE','KEYCHAIN_THIS_DEVICE_ONLY')),
+            agent_version TEXT NOT NULL,
+            protocol_version TEXT NOT NULL CHECK (protocol_version = '1'),
+            capability_catalog_version INTEGER NOT NULL CHECK (capability_catalog_version >= 1),
+            last_accepted_sequence INTEGER NOT NULL CHECK (last_accepted_sequence >= 0),
+            last_seen_at TEXT NULL,
+            paired_at TEXT NOT NULL,
+            revoked_at TEXT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,host_id),
+            UNIQUE (owner_principal_id,public_key_jwk),
+            FOREIGN KEY (owner_principal_id) REFERENCES principals(principal_id)
+        );
+
+        CREATE TABLE host_capability_advertisements (
+            owner_principal_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            capability_id TEXT NOT NULL CHECK (capability_id = 'host.repo.identity'),
+            capability_version TEXT NOT NULL CHECK (capability_version = '1'),
+            schema_hash TEXT NOT NULL CHECK (
+                length(schema_hash) = 64 AND schema_hash NOT GLOB '*[^0-9a-f]*'),
+            side_effect_class TEXT NOT NULL CHECK (side_effect_class = 'READ_ONLY'),
+            advertised_at TEXT NOT NULL,
+            PRIMARY KEY (owner_principal_id,host_id,capability_id,capability_version),
+            FOREIGN KEY (owner_principal_id,host_id) REFERENCES remote_hosts(owner_principal_id,host_id)
+        );
+
+        CREATE TABLE host_capability_grants (
+            owner_principal_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            capability_id TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            granted_at TEXT NOT NULL,
+            revoked_at TEXT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,host_id,capability_id,capability_version,version),
+            FOREIGN KEY (owner_principal_id,host_id,capability_id,capability_version)
+                REFERENCES host_capability_advertisements(owner_principal_id,host_id,capability_id,capability_version)
+        );
+
+        CREATE TABLE host_resources (
+            owner_principal_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            type TEXT NOT NULL CHECK (type = 'REPOSITORY'),
+            display_name TEXT NOT NULL,
+            fingerprint TEXT NOT NULL CHECK (
+                length(fingerprint) = 64 AND fingerprint NOT GLOB '*[^0-9a-f]*'),
+            state TEXT NOT NULL CHECK (state = 'AVAILABLE'),
+            advertised_at TEXT NOT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,host_id,resource_id),
+            FOREIGN KEY (owner_principal_id,host_id) REFERENCES remote_hosts(owner_principal_id,host_id)
+        );
+
+        CREATE TABLE host_resource_grants (
+            owner_principal_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            access_mode TEXT NOT NULL CHECK (access_mode = 'READ_ONLY'),
+            granted_at TEXT NOT NULL,
+            revoked_at TEXT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,host_id,resource_id,version),
+            FOREIGN KEY (owner_principal_id,host_id,resource_id)
+                REFERENCES host_resources(owner_principal_id,host_id,resource_id)
+        );
+
+        CREATE TABLE host_accepted_messages (
+            owner_principal_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK (sequence >= 1),
+            operation TEXT NOT NULL CHECK (operation IN (
+                'poll','lease-ack','lease-events','lease-complete','lease-reconcile')),
+            target_id TEXT NOT NULL,
+            request_hash TEXT NOT NULL CHECK (
+                length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'),
+            response_status INTEGER NOT NULL CHECK (response_status BETWEEN 100 AND 599),
+            response_body_json TEXT NOT NULL CHECK (json_valid(response_body_json)),
+            accepted_at TEXT NOT NULL,
+            PRIMARY KEY (owner_principal_id,host_id,message_id),
+            UNIQUE (owner_principal_id,host_id,sequence),
+            FOREIGN KEY (owner_principal_id,host_id) REFERENCES remote_hosts(owner_principal_id,host_id)
+        );
+
+        CREATE INDEX ix_host_pairings_owner_state_expiry
+            ON host_pairings(owner_principal_id,state,expires_at,pairing_id);
+        CREATE INDEX ix_remote_hosts_owner_lifecycle_paired
+            ON remote_hosts(owner_principal_id,lifecycle,paired_at,host_id);
+        CREATE UNIQUE INDEX ux_host_capability_grants_active
+            ON host_capability_grants(
+                owner_principal_id,host_id,capability_id,capability_version)
+            WHERE revoked_at IS NULL;
+        CREATE UNIQUE INDEX ux_host_resource_grants_active
+            ON host_resource_grants(owner_principal_id,host_id,resource_id)
+            WHERE revoked_at IS NULL;
+        """;
 
     private const string Migration16 = """
         ALTER TABLE execution_events RENAME TO execution_events_v15;

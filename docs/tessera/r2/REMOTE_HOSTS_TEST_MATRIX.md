@@ -1,6 +1,8 @@
 # R2 Remote Hosts Test Contract
 
-**Status:** Required gates for the Mac reference journey
+**Status:** Required phased gates for the Mac reference journey. Current
+implementation evidence covers the v18 registry subset; v19-v20, client/helper,
+and physical-device gates remain pending and must not be represented as shipped.
 
 Mocks prove contract behavior, not Secure Enclave protection, login-item lifecycle,
 Cloudflare transport, notarization, physical Mac execution, APNs or iPhone approval.
@@ -10,7 +12,7 @@ Cloudflare transport, notarization, physical Mac execution, APNs or iPhone appro
 | ID | Required deterministic test |
 |---|---|
 | RH-B01 | v18-v20 migrations are additive/idempotent; older data remains readable and no forbidden private/path/secret columns exist |
-| RH-B02 | Pairing ticket has 256-bit entropy, hash-only storage, five-minute bound, bounded attempts, single consumption, exact replay and changed-replay conflict |
+| RH-B02 | Initiator-generated ticket has 256-bit entropy; create accepts only canonical SHA-256, atomically commits pairing+receipt, exact/concurrent replay returns identical metadata, changed replay conflicts, and DB stores no recoverable secret |
 | RH-B03 | Claim validates strict canonical/on-curve P-256 JWK and low-S ES256; visual code derivation/mismatch/attempt bounds pass; confirmation is owner/version scoped and grants only requested intersection |
 | RH-B04 | Expired/canceled/confirmed pairing and cross-owner pairing/Host reads fail without disclosure |
 | RH-B05 | Immediate-transaction races prove one revocation/complete order: revoke-first requeues acknowledged work only with previously accepted signed NOT_STARTED proof, otherwise reconciles; complete-first preserves result then blocks future work |
@@ -26,6 +28,12 @@ Cloudflare transport, notarization, physical Mac execution, APNs or iPhone appro
 | RH-B15 | Cross-language vectors prove exact sorted resource tuple encoding/hash; Action and one-use authorization persist exact Host ID, lease ID and that hash; substitution/version drift/replay deny, and Host/model/client text cannot approve |
 | RH-B16 | Recovery after Broker restart fences stale polls/leases and recomputes blockers without claiming execution success |
 | RH-B17 | API/log/Problem/DB DLP canaries contain no claim secret, private key, local path, raw command/env, signature, unbounded output or hidden prompt |
+
+RH-B02/B03/B05/B07 additionally require concurrent exact/changed retries and an
+injected exception immediately before transaction commit, proving counters,
+state, grant history and receipts all roll back together. RH-B01 includes direct
+SQL negative inserts for every closed v18 domain and a populated-v17 upgrade. A
+zero-Host test runs an ordinary server Job through its existing lifecycle.
 
 Run focused tests after each migration/service slice and `dotnet test Tessera.slnx`
 at phase exit.

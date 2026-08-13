@@ -1,16 +1,28 @@
 # R2 Remote Hosts API And Protocol Contract
 
-**Status:** Accepted local implementation contract
+**Status:** Accepted phased contract; v18 registry routes are implemented, while
+the explicitly marked v19-v20 routes remain planned and are not shipped capability.
 
 All user routes are under `/api/v1`, require the existing verified owner boundary,
 and return `Cache-Control: no-store`. Unknown fields are rejected. Every mutation
-requires `Idempotency-Key` and exact replay semantics.
+requires `Idempotency-Key` and exact replay semantics. For target-addressed
+mutations, the persisted request identity is lowercase-hex SHA-256 of ASCII
+`targetId + "\n" + bodyRequestHash`; this prevents a key/body replay against a
+different pairing or Host. Pairing creation has no client-addressed target and
+uses the body request hash directly. An unknown claim pairing has no resolvable
+owner receipt namespace, so it returns deterministic `404 pairing_not_found`
+without persisting a receipt.
+
+Each request body is limited to 64 KiB before JSON parsing. Storage/transient
+failures return the existing redacted `503 product_storage_unavailable`; they are
+never converted to client-state conflicts.
 
 ## User/client routes
 
 ```text
 POST /host-pairings
-201 { pairingId, claimSecret, expiresAt, state, version }
+{ claimSecretHash }
+201 { pairingId, expiresAt, state, version }
 
 GET /host-pairings/{pairingId}
 200 { pairingId, state, requestedHost|null, expiresAt, version }
@@ -37,7 +49,11 @@ PUT /hosts/{hostId}/grants
 POST /hosts/{hostId}/revoke
 { expectedVersion }
 202 HostDetailDto
+```
 
+Planned for v19-v20; these routes are not implemented by the v18 registry slice:
+
+```text
 GET /hosts/{hostId}/activity
 200 Page<ActivityDto>
 
@@ -48,22 +64,29 @@ GET /job-runs/{runId}/remote-artifacts
 200 Page<HostArtifactDto>
 ```
 
-`claimSecret` is returned once. It is accepted only by the Host claim route and is
-never returned by later reads, logs, events, or Problem Details.
+The initiating trusted client/helper generates the 32-byte claim secret, retains
+it only in volatile or OS-protected local state, and sends lowercase SHA-256 as
+`claimSecretHash`. Tessera never receives the secret until the Host claim and never
+returns it. Pairing creation and its idempotency receipt commit atomically, so an
+exact retry returns identical pairing metadata without recoverable secret storage.
 
 ## Host routes
 
-Host channel routes use the signed request envelope below and do not accept user
-bearer tokens as Host identity. The pairing claim route is the sole exception: it
-is authenticated by the one-time claim secret because the Host identity does not
-exist yet.
+The implemented v18 pairing claim is authenticated by the one-time claim secret
+because the Host identity does not exist yet.
 
 ```text
 POST /host-pairings/{pairingId}/claim
 { claimSecret, publicKeyJwk, protection, platform, architecture,
   agentVersion, protocolVersion, requestedCapabilities[], requestedResources[] }
 202 { pairingId, state: CLAIMED, expiresAt, version }
+```
 
+The v19-v20 Host channel below is planned and is not implemented by the v18
+registry slice. These routes use the signed request envelope below and do not
+accept user bearer tokens as Host identity.
+
+```text
 POST /host-channel/poll
 { maxWaitSeconds: 1..25,
   activeAttempt: { leaseId, localAttemptId, state: NOT_STARTED|STARTED|COMPLETED }|null }
@@ -85,13 +108,13 @@ POST /host-channel/leases/{leaseId}/complete
 POST /host-channel/leases/{leaseId}/reconcile
 { leaseVersion, localAttemptId, observedState, outputSha256|null }
 200 { resolution, lease, run }
+```
 
 The helper generates one canonical local attempt ID before acknowledgement.
 Accepted acknowledgement atomically stores it on the lease and it is immutable.
 Every later event, completion, poll active-attempt report and reconciliation must
 carry the exact same value. A mismatch is `host_attempt_mismatch` and cannot prove
 non-execution.
-```
 
 ## Signed Host request
 
@@ -185,12 +208,24 @@ Pairing user-route failures are closed: `pairing_not_found`, `pairing_expired`,
 `pairing_version_conflict`, and `pairing_invalid_request`. Cross-owner access uses
 `pairing_not_found`.
 
+Host inventory/grant/revoke failures are closed: `host_not_found`,
+`host_revoked`, `host_version_conflict`, `host_grant_not_advertised`,
+`host_invalid_request`, and `idempotency_conflict`. Cross-owner access uses
+`host_not_found`.
+
+For claim, confirmation, cancellation, grant replacement and revocation, one
+immediate transaction first resolves the idempotency receipt, applies either the
+successful transition or deterministic rejection, captures the public-safe DTO
+snapshot, inserts the exact response receipt, and commits. Crash/rollback changes
+neither counters nor domain state nor receipt. Exact concurrent retries return the
+same status/body; changed retries conflict.
+
 ## Pairing
 
-`POST /host-pairings` creates 32 random bytes and stores only SHA-256. In the
-reference Mac flow Electron main passes the secret to the helper through an
-anonymous stdin pipe. It never enters argv, URL/deep link, clipboard,
-notification, preferences, renderer persistence, logs, or crash metadata. Ticket TTL
+The initiator creates 32 random bytes with the platform CSPRNG, sends only its
+SHA-256, and transfers the secret to the helper through an anonymous stdin pipe or
+an explicitly rendered one-time QR. It never enters argv, URL/deep link,
+clipboard, notification, durable preferences, logs, or crash metadata. Ticket TTL
 is at most five minutes, one active ticket per owner by default, and five failed
 claims consume/cancel the ticket. Claim atomically consumes the secret and records
 the pending public identity and requested grants. The helper and server derive the

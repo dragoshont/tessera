@@ -1,6 +1,7 @@
 # R2 Remote Hosts Data And Migration Contract
 
-**Status:** Accepted additive migrations v18-v20
+**Status:** Accepted phased additive contract. Migration v18 is implemented;
+migrations v19-v20 remain planned and are not current product capability.
 
 Remote adds Host bindings around canonical owner, Job, JobRun, Action, Evidence,
 Activity, output and scheduler records. It does not add Host-owned Jobs, Memory,
@@ -56,7 +57,21 @@ recomputed from pairing ID and RFC 7638 key thumbprint and is never persisted. P
 is non-secret but internal; public Host DTOs omit it. A unique owner/pairing secret
 hash and owner/Host public-key thumbprint prevent duplicate enrollment.
 
-## Migration v19: execution policy, blockers and Host leases
+Grant rows are append-only intervals. Their primary key includes `version`; a
+partial unique index permits only one active (`revokedAt IS NULL`) grant for each
+Host/capability-version or Host/resource. Removing a grant closes the active row.
+Re-granting inserts a new row with the next version and never clears or overwrites
+historical `grantedAt`/`revokedAt` values.
+
+Migration CHECK constraints independently enforce proof-slice closed values and
+canonical storage: 64 lowercase-hex hashes/fingerprints; canonical JSON JWK plus
+application validation; platform `macOS`; architecture `arm64|x86_64`; protocol
+version `1`; protection `SECURE_ENCLAVE|KEYCHAIN_THIS_DEVICE_ONLY`; capability
+`host.repo.identity@1`; side effect `READ_ONLY`; resource type `REPOSITORY`;
+resource state `AVAILABLE`; access mode `READ_ONLY`; and closed accepted-message
+operations.
+
+## Planned migration v19: execution policy, blockers and Host leases
 
 Extend the existing immutable `ActionR2Binding` and matching `actions` /
 `action_authorizations` columns with nullable `hostId`, `hostLeaseId`, and
@@ -154,7 +169,7 @@ HOST_DISCONNECTED | HOST_UPDATE_REQUIRED
 A blocker is owner/run scoped, has one active row per run, and is cleared rather
 than deleted so history can be projected to Activity.
 
-## Migration v20: artifact metadata and receipts
+## Planned migration v20: artifact metadata and receipts
 
 ```text
 host_artifacts
