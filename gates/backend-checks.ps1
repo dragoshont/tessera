@@ -31,12 +31,10 @@ if (-not $cfg.backend -and -not $cfg.iac) {
 function Run-Step($name, $cmd) {
   if ([string]::IsNullOrWhiteSpace($cmd)) { Write-Host "skip  $name (not configured)"; return }
   Write-Host "== $name`: $cmd =="
-  & $env:SHELL -c $cmd 2>&1 | Write-Host
-  if ($LASTEXITCODE -ne 0) {
-    # Fallback for Windows shells where $env:SHELL is unset.
-    if (-not $env:SHELL) { cmd /c $cmd 2>&1 | Write-Host }
-  }
-  if ($LASTEXITCODE -eq 0) { Write-Host "ok    $name" } else { Write-Host "FAIL  $name"; $script:fail = 1 }
+  $powerShellHost = (Get-Process -Id $PID).Path
+  & $powerShellHost -NoLogo -NoProfile -NonInteractive -Command $cmd 2>&1 | Write-Host
+  $stepExitCode = $LASTEXITCODE
+  if ($stepExitCode -eq 0) { Write-Host "ok    $name" } else { Write-Host "FAIL  $name"; $script:fail = 1 }
 }
 
 function Get-SolutionProjectPaths($solution) {

@@ -22,12 +22,8 @@ Design for **hierarchy, harmony, and consistency**; defer to content; use system
 - Padding: ~**12 pt** around bezeled controls, ~**24 pt** around non‑bezeled elements.
 - Repeated‑item corner radius ≤ 8 pt; align to a consistent grid; build on existing spacing tokens (8/12/20), don't invent parallel scales.
 
-## Materials & Liquid Glass (iOS·iPadOS·macOS 26+)
-- Materials + vibrancy belong in the **control/navigation layer** (sidebar, toolbar, tab bar, now‑playing bar) — **not** the content layer (lists, artwork). Don't fight system toolbar/tab‑bar materials with custom backgrounds.
-- **Liquid Glass** is the 26‑era material for that layer — it floats above content and lets it peek through. SwiftUI: apply with **`.glassEffect(_:in:)`** (default `.regular`, e.g. `in: .capsule`); group adjacent glass in a **`GlassEffectContainer`** so shapes blend/morph; tint via `Glass.regular.tint(_:)`; make tappable glass `.interactive()`; buttons use **`.buttonStyle(.glass)` / `.glassProminent`**. Keep it sparse — an accent, not a theme; never stack glass on glass.
-- **Floating tab bar:** on iOS 26 the tab bar floats on Liquid Glass and can **minimize on scroll** — `TabView { … }.tabBarMinimizeBehavior(.onScrollDown)` collapses it **into the current tab at the leading corner** (the Apple Music pattern); restored by tapping a tab or scrolling to top. A persistent accessory (now‑playing‑style) uses `tabViewBottomAccessory` + `TabViewBottomAccessoryPlacement`.
-- **Scroll edge effect** is automatic (content fades under the floating bars) — don't hand‑roll a gradient.
-- **Availability:** glass + `tabBarMinimizeBehavior` are **26.0+**. On an older deployment target, guard with `if #available(iOS 26, *)` and fall back to `.ultraThinMaterial` / a plain bar (no‑op degrade). Adopt by **rebuilding against the 26 SDK** and letting standard components restyle — don't hand‑paint glass on every view.
+## Materials (vibrancy / Liquid Glass)
+- Use materials + vibrancy in the **control/navigation layer** (sidebar, toolbar, now‑playing bar) — **not** the content layer (lists, artwork). Don't fight system toolbar materials with custom backgrounds.
 
 ## SF Symbols
 - Use SF Symbols for iconography (never in app icons/logos). Match symbol **weight/scale to adjacent text**; use **fill vs outline vs slash** to encode state. Keep symbol animation purposeful and rare.
@@ -54,11 +50,7 @@ What makes an app read as native macOS (Music.app / Apple Music / Mail are the I
 - A11y → `.accessibilityLabel/Value/Hint`, `.accessibilityElement`, Dynamic Type, `.controlSize`.
 - Validate the look in Storybook (light + dark + a11y) before building; reproduce by the design map's component/glossary name.
 
-## Where to look online (the HIG is versioned — re‑verify the live page before a big call)
-Apple revises the HIG (Liquid Glass landed across the 2025–26 updates); trust the live source over memory.
-- **HIG home** — https://developer.apple.com/design/human-interface-guidelines
-- **Foundations** — Materials (Liquid Glass) `…/materials` · Color `…/color` · Layout `…/layout` · Typography `…/typography` · SF Symbols `…/sf-symbols` · Accessibility `…/accessibility` · App icons `…/app-icons`
-- **Components** — Tab bars `…/tab-bars` · Toolbars `…/toolbars` · Sidebars `…/sidebars` · Lists & tables `…/lists-and-tables` · Search fields `…/search-fields` · Buttons `…/buttons` · Text fields `…/text-fields` · Text views `…/text-views` · Sheets `…/sheets` · Menus `…/menus`
-- **Dev / SwiftUI** — “Adopting Liquid Glass” (developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass) + the symbols `glassEffect(_:in:)`, `GlassEffectContainer`, `Glass`, `tabBarMinimizeBehavior(_:)` under developer.apple.com/documentation/swiftui
-- **Design resources** (Figma/Sketch templates) — https://developer.apple.com/design/resources · **WWDC** “Get to know the new design system” (WWDC25 #356) + “Meet Liquid Glass” — https://developer.apple.com/videos
-- **Cross‑check** third‑party patterns (NN/g for forms/affordances; Apple Music/Mail for IA) as references only — the live HIG + the repo Storybook/tokens outrank them.
+## Citations
+HIG home, Accessibility (sizes/contrast/targets/Reduce Motion), Color, Typography, Layout, Materials, SF Symbols — all under developer.apple.com/design/human-interface-guidelines.
+
+**Deep reference (in‑repo):** `constitution-apple.md` — the full native‑Swift synthesis constitution (verbatim macOS/iOS type tables, Liquid Glass functional‑layer rules, SF Symbols modes/variants/animations, macOS scene/`NavigationSplitView`/toolbar/inspector architecture, the reverse‑engineering protocol, and the WWDC25/26 grounding). Load it when generating or reverse‑engineering SwiftUI so components are reused, not reinvented.

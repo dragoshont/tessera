@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
-# Architrave audit harness - initialize durable artifacts for one agent run.
+# Architrave v1 compatibility bootstrap. New durable runs use
+# `python3 harness/architrave_runtime.py run ...` (Run v2).
 [CmdletBinding()]
 param([string]$RunId)
 $ErrorActionPreference = 'Stop'
@@ -18,6 +19,7 @@ function Find-Root {
 $root = Find-Root
 if (-not $root) { [Console]::Error.WriteLine('init-run: architrave.config.json not found'); exit 2 }
 Set-Location $root
+[Console]::Error.WriteLine('init-run: compatibility mode creates architrave.run.v1; use architrave_runtime.py for new Run v2 work')
 
 if (-not $RunId) { $RunId = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') }
 $runDir = Join-Path '.architrave/runs' $RunId
@@ -34,6 +36,7 @@ function New-Artifact($Name, $Title, $Body) {
 New-Artifact 'intake.md' 'Intake' "## Understanding`n`n## Acceptance Criteria`n`n## Grounding Sources`n`n## Assumptions`n`n## Blocking Questions"
 New-Artifact 'tournament.md' 'Tournament of Options' "## Option A - Minimal Safe Fix`n`n## Option B - Proper Architectural Fix`n`n## Option C - Defer / Ask More`n`n## Decision Matrix`n`n## Winner"
 New-Artifact 'recommended-plan.md' 'Recommended Plan' "## Summary`n`n## Implementation Sequence`n`n## Test Strategy`n`n## Rollback / Recovery`n`n## Human Approval Needed"
+New-Artifact 'phase-ledger.md' 'Phase Ledger' "| Phase | Name | Status | Scope | Gate | Result |`n|---:|---|---|---|---|---|`n| 0 | Intake / Grounding | in-progress | Define the request, acceptance criteria, and sources of truth. | Intake + tournament recorded | pending |`n`n## Phase Transition Log"
 New-Artifact 'deterministic-gates.md' 'Deterministic Gates' "## checks`n`n## backend-checks`n`n## reconcile`n`n## other"
 New-Artifact 'judge-pre.md' 'Judge Gate 1' "## Verdict`n`n## Findings"
 New-Artifact 'judge-post.md' 'Judge Gate 2' "## Verdict`n`n## Findings"
@@ -50,6 +53,7 @@ if (-not (Test-Path $summary)) {
       intake = "$runDir/intake.md"
       tournament = "$runDir/tournament.md"
       recommendedPlan = "$runDir/recommended-plan.md"
+      phaseLedger = "$runDir/phase-ledger.md"
       deterministicGates = "$runDir/deterministic-gates.md"
       judgePre = "$runDir/judge-pre.md"
       judgePost = "$runDir/judge-post.md"
@@ -61,6 +65,16 @@ if (-not (Test-Path $summary)) {
       candidateLessons = 0
       promotionsProposed = 0
     }
+    phases = @(
+      [ordered]@{
+        phase = 0
+        name = 'Intake / Grounding'
+        status = 'in-progress'
+        scope = 'Define the request, acceptance criteria, and sources of truth.'
+        gate = 'Intake + tournament recorded'
+        result = 'pending'
+      }
+    )
   }
   $obj | ConvertTo-Json -Depth 10 | Set-Content -Path $summary -Encoding utf8
 }
