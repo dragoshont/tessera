@@ -349,6 +349,16 @@ public sealed class RemoteHostEndpointsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, cancelTargetConflict.StatusCode);
     }
 
+    [Fact]
+    public async Task Host_channel_routes_remain_unmapped_in_the_v18_proof_slice()
+    {
+        using var poll = await _client.PostAsync("/host-channel/poll", JsonContent.Create(new { }));
+        Assert.Equal(HttpStatusCode.NotFound, poll.StatusCode);
+
+        using var ack = await _client.PostAsync("/host-channel/leases/lease-123/ack", JsonContent.Create(new { }));
+        Assert.Equal(HttpStatusCode.NotFound, ack.StatusCode);
+    }
+
     public async Task DisposeAsync()
     {
         _client.Dispose();

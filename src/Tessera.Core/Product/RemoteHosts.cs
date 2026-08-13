@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -38,6 +40,334 @@ public static class HostAcceptedMessageOperations
 
     public static bool IsValid(string value)
         => value is Poll or LeaseAck or LeaseEvents or LeaseComplete or LeaseReconcile;
+}
+
+public sealed record HostSignedRequestEnvelope(
+    string Method,
+    string Operation,
+    string TargetId,
+    string HostId,
+    long ProtocolVersion,
+    long KeyVersion,
+    string MessageId,
+    long Sequence,
+    long UnixTimestampSeconds,
+    string BodySha256,
+    string Signature,
+    string RequestHash);
+
+public static class RemoteHostSignedRequestErrors
+{
+    public const string HostAuthInvalid = "host_auth_invalid";
+    public const string HostRevoked = "host_revoked";
+    public const string HostReplay = "host_replay";
+    public const string HostSequenceInvalid = "host_sequence_invalid";
+    public const string HostClockSkew = "host_clock_skew";
+    public const string HostProtocolUnsupported = "host_protocol_unsupported";
+
+    public static bool IsValid(string value)
+        => value is HostAuthInvalid or HostRevoked or HostReplay or HostSequenceInvalid
+            or HostClockSkew or HostProtocolUnsupported;
+
+    public static int StatusCode(string value) => value switch
+    {
+        HostAuthInvalid => 401,
+        HostProtocolUnsupported => 409,
+        HostRevoked or HostReplay or HostSequenceInvalid or HostClockSkew => 409,
+        _ => 400,
+    };
+}
+
+public static class RemoteHostProtocol
+{
+    public const string CanonicalPrefix = "TESSERA-HOST-V1";
+    public const long SupportedProtocolVersion = 1;
+    public const long SupportedKeyVersion = 1;
+    public const long MaximumUnixTimestampSeconds = 253402300799;
+    public const long MaximumClockSkewSeconds = 300;
+    public const int MaximumBodyBytes = 64 * 1024;
+
+    private const int CoordinateLength = 32;
+    private const int SignatureLength = 64;
+    private static readonly BigInteger P256Order = new(
+        Convert.FromHexString("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551"),
+        isUnsigned: true,
+        isBigEndian: true);
+    private static readonly BigInteger P256HalfOrder = P256Order / 2;
+
+    public static HostSignedRequestEnvelope ParseSignedRequest(
+        string method,
+        string operation,
+        string targetId,
+        string hostId,
+        string protocolVersion,
+        string keyVersion,
+        string messageId,
+        string sequence,
+        string unixTimestampSeconds,
+        string bodySha256,
+        string signature)
+    {
+        ValidateMethod(method, nameof(method));
+        ValidateOperation(operation, nameof(operation));
+        ValidateTarget(operation, targetId, nameof(targetId));
+        RemoteHostValidation.ValidateIdentifier(hostId, nameof(hostId));
+        RemoteHostValidation.ValidateIdentifier(messageId, nameof(messageId));
+        var parsedProtocolVersion = ParseCanonicalDecimal(
+            protocolVersion, 19, 0, long.MaxValue, nameof(protocolVersion));
+        var parsedKeyVersion = ParseCanonicalDecimal(
+            keyVersion, 19, 0, long.MaxValue, nameof(keyVersion));
+        var parsedSequence = ParseCanonicalDecimal(
+            sequence, 19, 1, long.MaxValue, nameof(sequence));
+        var parsedTimestamp = ParseCanonicalDecimal(
+            unixTimestampSeconds, 12, 0, MaximumUnixTimestampSeconds, nameof(unixTimestampSeconds));
+        RemoteHostValidation.ValidateLowerHex(bodySha256, 64, nameof(bodySha256));
+        _ = DecodeCanonicalBase64Url(signature, SignatureLength, nameof(signature));
+        var requestHash = Convert.ToHexStringLower(SHA256.HashData(BuildCanonicalSigningInput(
+            method,
+            operation,
+            targetId,
+            hostId,
+            parsedProtocolVersion,
+            parsedKeyVersion,
+            messageId,
+            parsedSequence,
+            parsedTimestamp,
+            bodySha256)));
+        return new(
+            method,
+            operation,
+            targetId,
+            hostId,
+            parsedProtocolVersion,
+            parsedKeyVersion,
+            messageId,
+            parsedSequence,
+            parsedTimestamp,
+            bodySha256,
+            signature,
+            requestHash);
+    }
+
+    public static byte[] BuildCanonicalSigningInput(HostSignedRequestEnvelope envelope)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        return BuildCanonicalSigningInput(
+            envelope.Method,
+            envelope.Operation,
+            envelope.TargetId,
+            envelope.HostId,
+            envelope.ProtocolVersion,
+            envelope.KeyVersion,
+            envelope.MessageId,
+            envelope.Sequence,
+            envelope.UnixTimestampSeconds,
+            envelope.BodySha256);
+    }
+
+    public static byte[] BuildCanonicalSigningInput(
+        string method,
+        string operation,
+        string targetId,
+        string hostId,
+        long protocolVersion,
+        long keyVersion,
+        string messageId,
+        long sequence,
+        long unixTimestampSeconds,
+        string bodySha256)
+    {
+        ValidateMethod(method, nameof(method));
+        ValidateOperation(operation, nameof(operation));
+        ValidateTarget(operation, targetId, nameof(targetId));
+        RemoteHostValidation.ValidateIdentifier(hostId, nameof(hostId));
+        RemoteHostValidation.ValidateIdentifier(messageId, nameof(messageId));
+        ValidateVersion(protocolVersion, nameof(protocolVersion));
+        ValidateVersion(keyVersion, nameof(keyVersion));
+        ValidateSequence(sequence, nameof(sequence));
+        ValidateTimestamp(unixTimestampSeconds, nameof(unixTimestampSeconds));
+        RemoteHostValidation.ValidateLowerHex(bodySha256, 64, nameof(bodySha256));
+        var canonical = string.Join('\n',
+            CanonicalPrefix,
+            method,
+            operation,
+            targetId,
+            hostId,
+            protocolVersion.ToString(CultureInfo.InvariantCulture),
+            keyVersion.ToString(CultureInfo.InvariantCulture),
+            messageId,
+            sequence.ToString(CultureInfo.InvariantCulture),
+            unixTimestampSeconds.ToString(CultureInfo.InvariantCulture),
+            bodySha256);
+        return Encoding.UTF8.GetBytes(canonical);
+    }
+
+    public static string ComputeBodyHash(ReadOnlySpan<byte> body)
+        => Convert.ToHexStringLower(SHA256.HashData(body));
+
+    public static bool UsesSupportedProtocol(HostSignedRequestEnvelope envelope)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        return envelope.ProtocolVersion == SupportedProtocolVersion
+            && envelope.KeyVersion == SupportedKeyVersion;
+    }
+
+    public static bool HasAcceptableClockSkew(
+        HostSignedRequestEnvelope envelope,
+        DateTimeOffset now,
+        long maximumClockSkewSeconds = MaximumClockSkewSeconds)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        if (maximumClockSkewSeconds < 0 || maximumClockSkewSeconds > MaximumClockSkewSeconds)
+            throw new ArgumentOutOfRangeException(nameof(maximumClockSkewSeconds));
+        return Math.Abs(now.ToUnixTimeSeconds() - envelope.UnixTimestampSeconds) <= maximumClockSkewSeconds;
+    }
+
+    public static bool VerifyEs256Signature(HostSignedRequestEnvelope envelope, P256PublicJwk publicKey)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(publicKey);
+        byte[] signature;
+        try
+        {
+            signature = DecodeCanonicalBase64Url(envelope.Signature, SignatureLength, nameof(envelope.Signature));
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        var r = new BigInteger(signature.AsSpan(0, CoordinateLength), isUnsigned: true, isBigEndian: true);
+        var s = new BigInteger(signature.AsSpan(CoordinateLength, CoordinateLength), isUnsigned: true, isBigEndian: true);
+        if (r <= BigInteger.Zero || r >= P256Order || s <= BigInteger.Zero || s >= P256Order || s > P256HalfOrder)
+            return false;
+
+        try
+        {
+            using var key = ECDsa.Create(new ECParameters
+            {
+                Curve = ECCurve.NamedCurves.nistP256,
+                Q = new ECPoint
+                {
+                    X = DecodeCanonicalBase64Url(publicKey.X, CoordinateLength, nameof(publicKey)),
+                    Y = DecodeCanonicalBase64Url(publicKey.Y, CoordinateLength, nameof(publicKey)),
+                },
+            });
+            return key.VerifyData(
+                BuildCanonicalSigningInput(envelope),
+                signature,
+                HashAlgorithmName.SHA256,
+                DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
+
+    public static void ValidateTarget(string operation, string targetId, string parameterName)
+    {
+        ValidateOperation(operation, nameof(operation));
+        if (operation == HostAcceptedMessageOperations.Poll)
+        {
+            if (targetId != "-")
+                throw new ArgumentException("Poll targets must be '-'.", parameterName);
+            return;
+        }
+
+        RemoteHostValidation.ValidateIdentifier(targetId, parameterName);
+    }
+
+    private static void ValidateMethod(string method, string parameterName)
+    {
+        ValidateAscii(method, parameterName);
+        if (method != "POST")
+            throw new ArgumentException("Host requests must use POST.", parameterName);
+    }
+
+    private static void ValidateOperation(string operation, string parameterName)
+    {
+        ValidateAscii(operation, parameterName);
+        if (!HostAcceptedMessageOperations.IsValid(operation))
+            throw new ArgumentException("Host operation is not supported.", parameterName);
+    }
+
+    private static void ValidateVersion(long value, string parameterName)
+    {
+        if (value < 0)
+            throw new ArgumentOutOfRangeException(parameterName);
+    }
+
+    private static void ValidateSequence(long value, string parameterName)
+    {
+        if (value < 1)
+            throw new ArgumentOutOfRangeException(parameterName);
+    }
+
+    private static void ValidateTimestamp(long value, string parameterName)
+    {
+        if (value < 0 || value > MaximumUnixTimestampSeconds)
+            throw new ArgumentOutOfRangeException(parameterName);
+    }
+
+    private static long ParseCanonicalDecimal(
+        string value,
+        int maximumDigits,
+        long minimum,
+        long maximum,
+        string parameterName)
+    {
+        ValidateAscii(value, parameterName);
+        if (value.Length > maximumDigits
+            || (value.Length > 1 && value[0] == '0')
+            || value.Any(character => character is < '0' or > '9')
+            || !long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+            || parsed < minimum
+            || parsed > maximum)
+        {
+            throw new ArgumentException("Value is not a canonical decimal.", parameterName);
+        }
+
+        return parsed;
+    }
+
+    private static void ValidateAscii(string value, string parameterName)
+    {
+        if (string.IsNullOrEmpty(value) || value.Any(character => character is < '!' or > '~'))
+            throw new ArgumentException("Value must be visible ASCII.", parameterName);
+    }
+
+    private static byte[] DecodeCanonicalBase64Url(string value, int expectedLength, string parameterName)
+    {
+        if (string.IsNullOrEmpty(value)
+            || value.Contains('=', StringComparison.Ordinal)
+            || value.Any(character => character is not (>= 'A' and <= 'Z')
+                and not (>= 'a' and <= 'z')
+                and not (>= '0' and <= '9')
+                and not '-'
+                and not '_'))
+        {
+            throw new ArgumentException("Value is not canonical base64url.", parameterName);
+        }
+
+        byte[] decoded;
+        try
+        {
+            decoded = Convert.FromBase64String(
+                value.Replace('-', '+').Replace('_', '/') + new string('=', (4 - value.Length % 4) % 4));
+        }
+        catch (FormatException exception)
+        {
+            throw new ArgumentException("Value is not canonical base64url.", parameterName, exception);
+        }
+
+        if (decoded.Length != expectedLength || Base64UrlEncode(decoded) != value)
+            throw new ArgumentException("Value is not canonical base64url.", parameterName);
+        return decoded;
+    }
+
+    private static string Base64UrlEncode(ReadOnlySpan<byte> value)
+        => Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }
 
 public sealed record P256PublicJwk(string CanonicalJson, string X, string Y, string Thumbprint);

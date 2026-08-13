@@ -39,6 +39,28 @@ public sealed record RemoteHostReceiptMutation(
     public bool Succeeded => Error is null;
 }
 
+internal sealed record HostAcceptedMessageReceipt(
+    string OwnerPrincipalId,
+    string HostId,
+    string MessageId,
+    long Sequence,
+    string Operation,
+    string TargetId,
+    string RequestHash,
+    int ResponseStatus,
+    string ResponseBodyJson,
+    DateTimeOffset AcceptedAt);
+
+internal sealed record HostMessageBusinessResponse(int ResponseStatus, string ResponseBodyJson);
+
+internal sealed record HostMessageAcceptanceResult(
+    HostAcceptedMessageReceipt? Receipt,
+    bool Replayed,
+    string? Error)
+{
+    public bool Succeeded => Error is null;
+}
+
 public sealed partial class SqliteKernelStore
 {
     public async Task<HostPairingCreateResult> CreateHostPairingAsync(
@@ -659,6 +681,107 @@ public sealed partial class SqliteKernelStore
         return new(detail, receipt, false, null);
     }
 
+    internal async Task<HostMessageAcceptanceResult> AcceptSignedHostMessageAsync(
+        HostSignedRequestEnvelope envelope,
+        DateTimeOffset now,
+        Func<SqliteConnection, SqliteTransaction, RemoteHost, CancellationToken, Task<HostMessageBusinessResponse>> applyAsync,
+        CancellationToken token = default)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(applyAsync);
+
+        await using var connection = await OpenConnectionAsync(token).ConfigureAwait(false);
+        var verifiedHost = await ReadHostByIdAsync(connection, null, envelope.HostId, token).ConfigureAwait(false);
+        if (verifiedHost is null)
+            return new(null, false, RemoteHostSignedRequestErrors.HostAuthInvalid);
+        if (!RemoteHostProtocol.UsesSupportedProtocol(envelope)
+            || verifiedHost.ProtocolVersion != RemoteHostValidation.SupportedProtocolVersion
+            || verifiedHost.KeyVersion != RemoteHostProtocol.SupportedKeyVersion)
+        {
+            return new(null, false, RemoteHostSignedRequestErrors.HostProtocolUnsupported);
+        }
+        if (verifiedHost.KeyVersion != envelope.KeyVersion
+            || !string.Equals(
+                envelope.RequestHash,
+                Convert.ToHexStringLower(SHA256.HashData(RemoteHostProtocol.BuildCanonicalSigningInput(envelope))),
+                StringComparison.Ordinal)
+            || !RemoteHostProtocol.VerifyEs256Signature(envelope, verifiedHost.PublicKey))
+        {
+            return new(null, false, RemoteHostSignedRequestErrors.HostAuthInvalid);
+        }
+
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var host = await ReadHostByIdAsync(connection, transaction, envelope.HostId, token).ConfigureAwait(false);
+        if (host is null
+            || !string.Equals(host.OwnerPrincipalId, verifiedHost.OwnerPrincipalId, StringComparison.Ordinal)
+            || !string.Equals(host.PublicKey.CanonicalJson, verifiedHost.PublicKey.CanonicalJson, StringComparison.Ordinal)
+            || host.KeyVersion != verifiedHost.KeyVersion
+            || !string.Equals(host.ProtocolVersion, verifiedHost.ProtocolVersion, StringComparison.Ordinal))
+        {
+            return new(null, false, RemoteHostSignedRequestErrors.HostAuthInvalid);
+        }
+        var owner = host.OwnerPrincipalId;
+        var prior = await ReadAcceptedHostMessageAsync(
+            connection,
+            transaction,
+            owner,
+            envelope.HostId,
+            envelope.MessageId,
+            token).ConfigureAwait(false);
+        if (prior is not null)
+        {
+            if (string.Equals(prior.Operation, envelope.Operation, StringComparison.Ordinal)
+                && string.Equals(prior.TargetId, envelope.TargetId, StringComparison.Ordinal)
+                && string.Equals(prior.RequestHash, envelope.RequestHash, StringComparison.Ordinal))
+            {
+                await transaction.CommitAsync(token).ConfigureAwait(false);
+                return new(prior, true, null);
+            }
+
+            await transaction.CommitAsync(token).ConfigureAwait(false);
+            return new(null, false, RemoteHostSignedRequestErrors.HostReplay);
+        }
+
+        if (host.Lifecycle == RemoteHostLifecycles.Revoked)
+        {
+            await transaction.CommitAsync(token).ConfigureAwait(false);
+            return new(null, false, RemoteHostSignedRequestErrors.HostRevoked);
+        }
+        if (host.Lifecycle is not (RemoteHostLifecycles.Online or RemoteHostLifecycles.Busy or RemoteHostLifecycles.Degraded))
+        {
+            await transaction.CommitAsync(token).ConfigureAwait(false);
+            return new(null, false, RemoteHostSignedRequestErrors.HostAuthInvalid);
+        }
+        if (!RemoteHostProtocol.HasAcceptableClockSkew(envelope, now))
+        {
+            await transaction.CommitAsync(token).ConfigureAwait(false);
+            return new(null, false, RemoteHostSignedRequestErrors.HostClockSkew);
+        }
+        if (host.LastAcceptedSequence == long.MaxValue
+            || envelope.Sequence != host.LastAcceptedSequence + 1)
+        {
+            await transaction.CommitAsync(token).ConfigureAwait(false);
+            return new(null, false, RemoteHostSignedRequestErrors.HostSequenceInvalid);
+        }
+
+        var response = await applyAsync(connection, transaction, host, token).ConfigureAwait(false);
+        ValidateAcceptedResponse(response);
+        await AdvanceHostSequenceAsync(connection, transaction, owner, host, envelope, now, response, token)
+            .ConfigureAwait(false);
+        var receipt = new HostAcceptedMessageReceipt(
+            owner,
+            envelope.HostId,
+            envelope.MessageId,
+            envelope.Sequence,
+            envelope.Operation,
+            envelope.TargetId,
+            envelope.RequestHash,
+            response.ResponseStatus,
+            response.ResponseBodyJson,
+            now);
+        return new(receipt, false, null);
+    }
+
     private const string HostSelect = """
         SELECT host_id,display_name,platform,architecture,lifecycle,connection_status,
                public_key_jwk,key_version,protection,agent_version,protocol_version,
@@ -958,6 +1081,143 @@ public sealed partial class SqliteKernelStore
             while (await reader.ReadAsync(token).ConfigureAwait(false)) resourceGrants.Add(new(owner, hostId, reader.GetString(0), reader.GetString(1), ParseTimestamp(reader.GetString(2)), ReadNullableTimestamp(reader, 3), reader.GetInt64(4)));
         }
         return new(host, capabilities.AsReadOnly(), capabilityGrants.AsReadOnly(), resources.AsReadOnly(), resourceGrants.AsReadOnly());
+    }
+
+    private static async Task<RemoteHost?> ReadHostAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string owner,
+        string hostId,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = HostSelect + " WHERE owner_principal_id=$owner AND host_id=$host;";
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$host", hostId);
+        await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        return await reader.ReadAsync(token).ConfigureAwait(false) ? ReadHost(reader, owner) : null;
+    }
+
+    private static async Task<RemoteHost?> ReadHostByIdAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string hostId,
+        CancellationToken token)
+    {
+        string? owner = null;
+        var ambiguous = false;
+        await using (var ownerCommand = connection.CreateCommand())
+        {
+            ownerCommand.Transaction = transaction;
+            ownerCommand.CommandText = "SELECT owner_principal_id FROM remote_hosts WHERE host_id=$host ORDER BY owner_principal_id LIMIT 2;";
+            ownerCommand.Parameters.AddWithValue("$host", hostId);
+            await using var reader = await ownerCommand.ExecuteReaderAsync(token).ConfigureAwait(false);
+            if (await reader.ReadAsync(token).ConfigureAwait(false))
+            {
+                owner = reader.GetString(0);
+                ambiguous = await reader.ReadAsync(token).ConfigureAwait(false);
+            }
+        }
+        if (owner is null || ambiguous)
+            return null;
+        return await ReadHostAsync(connection, transaction, owner, hostId, token).ConfigureAwait(false);
+    }
+
+    private static async Task<HostAcceptedMessageReceipt?> ReadAcceptedHostMessageAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string owner,
+        string hostId,
+        string messageId,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT owner_principal_id,host_id,message_id,sequence,operation,target_id,request_hash,
+                   response_status,response_body_json,accepted_at
+            FROM host_accepted_messages
+            WHERE owner_principal_id=$owner AND host_id=$host AND message_id=$message;
+            """;
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$host", hostId);
+        command.Parameters.AddWithValue("$message", messageId);
+        await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+        if (!await reader.ReadAsync(token).ConfigureAwait(false))
+            return null;
+        return new(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetInt64(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetString(6),
+            reader.GetInt32(7),
+            reader.GetString(8),
+            ParseTimestamp(reader.GetString(9)));
+    }
+
+    private async Task AdvanceHostSequenceAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string owner,
+        RemoteHost host,
+        HostSignedRequestEnvelope envelope,
+        DateTimeOffset now,
+        HostMessageBusinessResponse response,
+        CancellationToken token)
+    {
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE remote_hosts
+                SET last_accepted_sequence=$sequence
+                WHERE owner_principal_id=$owner AND host_id=$host AND last_accepted_sequence=$expected;
+                """;
+            update.Parameters.AddWithValue("$sequence", envelope.Sequence);
+            update.Parameters.AddWithValue("$owner", owner);
+            update.Parameters.AddWithValue("$host", envelope.HostId);
+            update.Parameters.AddWithValue("$expected", host.LastAcceptedSequence);
+            if (await update.ExecuteNonQueryAsync(token).ConfigureAwait(false) != 1)
+                throw new InvalidOperationException("Host acceptance sequence changed concurrently.");
+        }
+
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO host_accepted_messages(owner_principal_id,host_id,message_id,sequence,
+                    operation,target_id,request_hash,response_status,response_body_json,accepted_at)
+                VALUES($owner,$host,$message,$sequence,$operation,$target,$hash,$status,$body,$acceptedAt);
+                """;
+            insert.Parameters.AddWithValue("$owner", owner);
+            insert.Parameters.AddWithValue("$host", envelope.HostId);
+            insert.Parameters.AddWithValue("$message", envelope.MessageId);
+            insert.Parameters.AddWithValue("$sequence", envelope.Sequence);
+            insert.Parameters.AddWithValue("$operation", envelope.Operation);
+            insert.Parameters.AddWithValue("$target", envelope.TargetId);
+            insert.Parameters.AddWithValue("$hash", envelope.RequestHash);
+            insert.Parameters.AddWithValue("$status", response.ResponseStatus);
+            insert.Parameters.AddWithValue("$body", response.ResponseBodyJson);
+            insert.Parameters.AddWithValue("$acceptedAt", FormatTimestamp(now));
+            await insert.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }
+
+        if (RemoteHostBeforeCommitAsync is not null)
+            await RemoteHostBeforeCommitAsync(token).ConfigureAwait(false);
+        await transaction.CommitAsync(token).ConfigureAwait(false);
+    }
+
+    private static void ValidateAcceptedResponse(HostMessageBusinessResponse response)
+    {
+        if (response.ResponseStatus is < 100 or > 599)
+            throw new ArgumentOutOfRangeException(nameof(response));
+        if (Encoding.UTF8.GetByteCount(response.ResponseBodyJson) > RemoteHostProtocol.MaximumBodyBytes)
+            throw new ArgumentOutOfRangeException(nameof(response));
+        _ = JsonDocument.Parse(response.ResponseBodyJson, new JsonDocumentOptions { MaxDepth = 16 });
     }
 
     private static RemoteHost ReadHost(SqliteDataReader reader, string owner)
