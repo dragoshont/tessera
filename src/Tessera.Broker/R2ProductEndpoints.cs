@@ -2000,6 +2000,75 @@ internal static class R2ProductEndpoints
             }
         );
         app.MapGet(
+            "/api/v1/conversations/{id}/development-workspaces",
+            async (
+                HttpContext context,
+                string id,
+                ITokenValidator validator,
+                TesseraConfig config,
+                IServiceProvider services,
+                CancellationToken token
+            ) =>
+            {
+                var boundary = await Boundary(context, validator, config, services, token);
+                if (boundary.Error is not null) return boundary.Error;
+                if (await boundary.Store!.GetConversationAsync(boundary.Owner!, id, token) is null)
+                    return Problem(404, "not_found");
+                var workspaces = await boundary.Store.ListDevelopmentWorkspacesAsync(boundary.Owner!, id, token);
+                return Page(context, boundary.Owner!, workspaces.Select(DevelopmentWorkspaceDto));
+            }
+        );
+        app.MapPost(
+            "/api/v1/conversations/{id}/development-tasks",
+            async (
+                HttpContext context,
+                string id,
+                CreateDevelopmentTaskRequest? request,
+                ITokenValidator validator,
+                TesseraConfig config,
+                IServiceProvider services,
+                CancellationToken token
+            ) =>
+            {
+                var boundary = await Boundary(context, validator, config, services, token);
+                if (boundary.Error is not null) return boundary.Error;
+                if (request is null || !TryIdempotencyKey(context, out var key))
+                    return Problem(400, request is null ? "invalid_request" : "invalid_idempotency_key");
+                string name;
+                try
+                {
+                    name = ProductContentValidation.Text(request.Name, nameof(request.Name), 256);
+                }
+                catch (ArgumentException)
+                {
+                    return Problem(400, "invalid_request");
+                }
+                if (string.IsNullOrWhiteSpace(request.WorkspaceId))
+                    return Problem(400, "invalid_request");
+                if (!DevelopmentCommandProfiles.TryResolve(request.CommandProfile, request.Arguments, out var profile))
+                    return Problem(422, "development_command_not_allowed");
+                var executorOptions = services.GetService<DevelopmentExecutorOptions>();
+                if (executorOptions is null || !executorOptions.IsComplete || services.GetService<IDevelopmentExecutor>() is null)
+                    return Problem(422, "development_executor_unavailable");
+                var requestHash = DevelopmentCommandProfiles.CanonicalRequestHash(
+                    name, request.WorkspaceId, request.CommandProfile, request.Arguments);
+                var result = await boundary.Store!.CreateDevelopmentTaskAsync(
+                    boundary.Owner!, id, key!, requestHash,
+                    RouteId(boundary.Owner!, id, "development-job", key!),
+                    RouteId(boundary.Owner!, id, "development-run", key!),
+                    name, request.WorkspaceId, profile!, executorOptions.ImageDigest, DateTimeOffset.UtcNow, token);
+                if (result.ErrorCode is not null)
+                    return result.ErrorCode switch
+                    {
+                        "not_found" => Problem(404, result.ErrorCode),
+                        "idempotency_conflict" or "workspace_unavailable" => Problem(409, result.ErrorCode),
+                        _ => Problem(422, result.ErrorCode),
+                    };
+                context.Response.Headers["Idempotency-Replayed"] = result.Replayed ? "true" : "false";
+                return Results.Content(result.ResponseBodyJson!, "application/json", statusCode: 202);
+            }
+        );
+        app.MapGet(
             "/api/v1/jobs/{id}",
             async (
                 HttpContext context,
@@ -4491,6 +4560,17 @@ internal static class R2ProductEndpoints
                 .ToArray(),
             sideEffectGrants = item.SideEffectGrants,
             contextPolicy = JsonDocument.Parse(item.ContextPolicyJson).RootElement.Clone(),
+            item.Kind,
+            item.ConversationId,
+            developmentSpec = item.DevelopmentSpec is null ? null : new
+            {
+                item.DevelopmentSpec.WorkspaceId,
+                item.DevelopmentSpec.CommandProfile,
+                item.DevelopmentSpec.Arguments,
+                item.DevelopmentSpec.Effect,
+                item.DevelopmentSpec.TimeoutSeconds,
+                item.DevelopmentSpec.OutputLimitBytes,
+            },
             lastRun = lastRun is null ? null : JobRunDto(lastRun),
             item.Version,
         };
@@ -4538,6 +4618,17 @@ internal static class R2ProductEndpoints
             item.BoundedExcerpt,
             item.ContentReference,
         };
+
+    private static object DevelopmentWorkspaceDto(DevelopmentWorkspace item) => new
+    {
+        id = item.WorkspaceId,
+        item.ConversationId,
+        item.DisplayName,
+        item.SnapshotHash,
+        item.State,
+        item.CreatedAt,
+        item.Version,
+    };
 
     private static object CapabilityCallDto(ProductCapabilityCall item) =>
         new
@@ -4888,6 +4979,13 @@ internal static class R2ProductEndpoints
         string[]? AccountGrants,
         CapabilityGrantRequest[]? CapabilityGrants,
         string[]? SideEffectGrants
+    );
+
+    private sealed record CreateDevelopmentTaskRequest(
+        string Name,
+        string WorkspaceId,
+        string CommandProfile,
+        string[] Arguments
     );
 
     private sealed record UpdateJobRequest(

@@ -28,6 +28,8 @@ spec:
       labels:
         app: tessera
     spec:
+      serviceAccountName: tessera
+      automountServiceAccountToken: true
       # If your image is private, reference your pull secret here.
       # imagePullSecrets:
       #   - name: your-ghcr-pull-secret
@@ -73,6 +75,10 @@ spec:
               value: "/app/plugins"
             - name: TESSERA_PLUGIN_CATALOG
               value: "/app/plugins/catalog.json"
+            # Development execution remains fail-closed unless an operator overlay
+            # supplies reviewed TESSERA_DEVELOPMENT_EXECUTOR_JSON and
+            # TESSERA_DEVELOPMENT_WORKSPACES_JSON values. The executor namespace is
+            # tessera-development; image digests and snapshot mappings must be real.
             # Optional server-owned model bootstrap. Project this from secret
             # custody so clients never ask users to paste an already-configured
             # homelab gateway key.

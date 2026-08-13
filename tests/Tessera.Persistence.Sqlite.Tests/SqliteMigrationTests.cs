@@ -9,7 +9,7 @@ namespace Tessera.Persistence.Sqlite.Tests;
 public sealed class SqliteMigrationTests
 {
     [Fact]
-    public async Task Empty_store_bootstraps_and_repeatably_applies_v1_through_v16()
+    public async Task Empty_store_bootstraps_and_repeatably_applies_v1_through_v17()
     {
         using var database = new TemporaryDatabase();
         var store = database.CreateStore();
@@ -17,7 +17,7 @@ public sealed class SqliteMigrationTests
         await store.InitializeAsync();
         await store.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], await store.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await store.GetAppliedMigrationVersionsAsync());
     }
 
     [Fact]
@@ -31,7 +31,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await restarted.GetAppliedMigrationVersionsAsync());
         Assert.Contains("actions", await ReadTableNamesAsync(database.Path));
         Assert.Contains("follow_ups", await ReadTableNamesAsync(database.Path));
     }
@@ -46,7 +46,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await restarted.GetAppliedMigrationVersionsAsync());
         Assert.Contains("follow_up_operations", await ReadTableNamesAsync(database.Path));
     }
 
@@ -60,7 +60,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await restarted.GetAppliedMigrationVersionsAsync());
         var columns = await ReadColumnNamesAsync(database.Path, ["follow_up_sources"]);
         Assert.Contains("follow_up_sources.source_payload_hash", columns);
     }
@@ -75,7 +75,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], await restarted.GetAppliedMigrationVersionsAsync());
         var tables = await ReadTableNamesAsync(database.Path);
         Assert.Contains("connected_accounts", tables);
         Assert.Contains("plugin_installations", tables);
@@ -207,6 +207,8 @@ public sealed class SqliteMigrationTests
                 "conversation_capability_grants",
                 "conversations",
                 "credential_cleanup_receipts",
+                "development_job_specs",
+                "development_workspaces",
                 "durable_execution_requests",
                 "evidence",
                 "execution_controls",
@@ -248,6 +250,8 @@ public sealed class SqliteMigrationTests
         var columns = await ReadColumnNamesAsync(database.Path, tables);
         Assert.Contains("connected_accounts.credential_ref", columns);
         Assert.Contains("credential_cleanup_receipts.credential_ref", columns);
+        Assert.Contains("jobs.kind", columns);
+        Assert.Contains("jobs.conversation_id", columns);
         var forbidden = new[]
         {
             "prompt",

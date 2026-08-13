@@ -20,7 +20,7 @@ public sealed class RealtimeVoicePersistenceTests
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1));
 
         var restarted = database.CreateStore();
-        await restarted.InitializeAsync();
+        await restarted.InitializeAsync(16);
 
         Assert.Equal(16, (await restarted.GetAppliedMigrationVersionsAsync())[^1]);
         Assert.NotNull(await restarted.GetConversationAsync(principal.PrincipalId, "conversation-1"));

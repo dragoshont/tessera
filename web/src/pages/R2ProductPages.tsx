@@ -23,6 +23,7 @@ import {
 } from "../api/r2";
 import {
   ActionApprovalCard,
+  DevelopmentTaskCreator,
   JobRunTimeline,
   ProductStateBadge,
 } from "../components/product/R2ProductComponents";
@@ -524,6 +525,17 @@ export function JobsPage() {
   const [selected, setSelected] = useState<R2Job | null>(null);
   const [cancelJob, setCancelJob] = useState<R2Job | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
+  const [developmentConversationId, setDevelopmentConversationId] = useState("");
+  const [developmentWorkspaceId, setDevelopmentWorkspaceId] = useState("");
+  const conversations = useQuery({
+    queryKey: ["r2", "conversations", "development"],
+    queryFn: r2Api.conversations,
+  });
+  const developmentWorkspaces = useQuery({
+    queryKey: ["r2", "development-workspaces", developmentConversationId],
+    queryFn: () => r2Api.developmentWorkspaces(developmentConversationId),
+    enabled: Boolean(developmentConversationId),
+  });
   const runs = useQuery({
     queryKey: ["r2", "job-runs", selected?.id],
     queryFn: () => r2Api.jobRuns(selected!.id),
@@ -612,6 +624,24 @@ export function JobsPage() {
       void client.invalidateQueries({ queryKey: ["r2", "jobs"] });
     },
   });
+  const createDevelopment = useMutation({
+    mutationFn: () => {
+      const workspace = developmentWorkspaces.data?.items.find((item) => item.id === developmentWorkspaceId);
+      if (!workspace) throw new Error("workspace_unavailable");
+      return r2Api.createDevelopmentTask(developmentConversationId, {
+        name: `Repository status: ${workspace.displayName}`,
+        workspaceId: workspace.id,
+        commandProfile: "repository.status",
+        arguments: [],
+      });
+    },
+    onSuccess: (task) => {
+      setSelected(task.job);
+      setSelectedRun(task.run.id);
+      void client.invalidateQueries({ queryKey: ["r2", "jobs"] });
+      void client.invalidateQueries({ queryKey: ["r2", "job-runs", task.job.id] });
+    },
+  });
   const mutate = useMutation<
     unknown,
     Error,
@@ -639,6 +669,27 @@ export function JobsPage() {
       loading={query.isLoading}
       error={query.error}
     >
+      <DevelopmentTaskCreator
+        conversations={conversations.data?.items ?? []}
+        workspaces={developmentWorkspaces.data?.items ?? []}
+        conversationId={developmentConversationId}
+        workspaceId={developmentWorkspaceId}
+        conversationsLoading={conversations.isLoading}
+        workspacesLoading={developmentWorkspaces.isLoading}
+        submitting={createDevelopment.isPending}
+        errorCode={createDevelopment.error instanceof R2Problem ? createDevelopment.error.code : createDevelopment.error?.message ?? (conversations.error instanceof Error ? conversations.error.message : developmentWorkspaces.error instanceof Error ? developmentWorkspaces.error.message : null)}
+        onConversationChange={(value) => {
+          setDevelopmentConversationId(value);
+          setDevelopmentWorkspaceId("");
+          createDevelopment.reset();
+        }}
+        onWorkspaceChange={(value) => {
+          setDevelopmentWorkspaceId(value);
+          createDevelopment.reset();
+        }}
+        onSubmit={() => createDevelopment.mutate()}
+        onRefresh={() => void developmentWorkspaces.refetch()}
+      />
       <form
         className="grid gap-3 border-b border-border py-5 md:grid-cols-2"
         onSubmit={(event) => {
@@ -752,6 +803,7 @@ export function JobsPage() {
                   </span>
                 </button>
                 <div className="flex gap-2">
+                  {job.kind === "DEVELOPMENT" ? <Badge variant="outline">Development</Badge> : null}
                   <ProductStateBadge state={job.health} />
                   <ProductStateBadge state={job.desiredState} />
                 </div>
@@ -765,40 +817,40 @@ export function JobsPage() {
                 {job.capabilityGrants.length}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => mutate.mutate({ job, operation: "run" })}
-                >
-                  Run now
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    mutate.mutate({
-                      job,
-                      operation:
-                        job.desiredState === "PAUSED" ? "resume" : "pause",
-                    })
-                  }
-                >
-                  {job.desiredState === "PAUSED" ? "Resume" : "Pause"}
-                </Button>
+                {job.kind !== "DEVELOPMENT" ? <><Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => mutate.mutate({ job, operation: "run" })}
+                  >
+                    Run now
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      mutate.mutate({
+                        job,
+                        operation:
+                          job.desiredState === "PAUSED" ? "resume" : "pause",
+                      })
+                    }
+                  >
+                    {job.desiredState === "PAUSED" ? "Resume" : "Pause"}
+                  </Button></> : null}
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => setSelected(job)}
                 >
-                  History
+                  {job.kind === "DEVELOPMENT" ? "View run" : "History"}
                 </Button>
-                <Button
+                {job.kind !== "DEVELOPMENT" ? <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => setCancelJob(job)}
-                >
-                  Cancel
-                </Button>
+                  >
+                    Cancel
+                  </Button> : null}
               </div>
             </li>
           ))}
@@ -828,7 +880,7 @@ export function JobsPage() {
               <ProductStateBadge state={run.state} />
             </button>
           ))}
-          {runDetail.data ? <JobRunTimeline detail={runDetail.data} /> : null}
+          {runDetail.data ? <JobRunTimeline detail={runDetail.data} job={selected} /> : null}
         </DialogContent>
       </Dialog>
       <Dialog

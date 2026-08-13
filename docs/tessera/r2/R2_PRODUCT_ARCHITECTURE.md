@@ -15,6 +15,11 @@ Chat / Scheduler -> ExecutionCoordinator -> ContextBuilder -> ModelAdapter
                          policy -> Action/approval -> executor -> verify
                                              |
                                   Evidence/Event -> coordinator result
+
+                Conversation -> Development Job -> DevelopmentExecutor -> ephemeral Kubernetes Job
+                              |                    |
+                              v                    v
+                          Action approval       bounded redacted Job output
 ```
 
 ## Boundaries
@@ -26,6 +31,10 @@ Chat / Scheduler -> ExecutionCoordinator -> ContextBuilder -> ModelAdapter
 - Credential stores own secret values. Product tables contain opaque references only.
 - Plugins declare schemas and known executor kinds; they never receive global database or raw custody access.
 - UI renders real DTOs and honest empty/blocked/error states; fixtures live only in tests/Storybook.
+- Development execution is a typed Job specialization. Core owns its strict
+    command/workspace contract, Broker owns orchestration, and an executor adapter
+    owns Kubernetes API mechanics. The executor never receives client-selected
+    paths, images, executables, namespaces, mounts, or egress policy.
 
 ## Data And Concurrency
 
@@ -41,4 +50,10 @@ The coordinator builds bounded ContextEnvelope candidates from recent messages, 
 
 ## Out Of Scope
 
-No agents framework, model-owned memory, plugin-owned canonical state, graph/vector store, microservices, queue, arbitrary remote code, arbitrary HTTP URL, Kubernetes requirement, or autonomous consequential communication.
+The proof slice has no installable agent registry or third-party app UI sandbox;
+those contracts are defined in `EXTENSION_MODEL.md` and require separate slices.
+Model-owned memory, plugin-owned canonical state, graph/vector store,
+microservices, arbitrary remote code, arbitrary HTTP URLs, interactive
+development shells, client-owned repository paths, and autonomous consequential
+communication remain out of scope. Kubernetes is optional for ordinary Tessera
+operation and required only when the isolated development executor is enabled.

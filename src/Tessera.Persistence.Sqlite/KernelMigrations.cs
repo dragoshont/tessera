@@ -4,7 +4,7 @@ internal sealed record KernelMigration(int Version, string Sql);
 
 internal static class KernelMigrations
 {
-    public const int LatestVersion = 16;
+    public const int LatestVersion = 17;
 
     public static IReadOnlyList<KernelMigration> All { get; } =
     [
@@ -24,6 +24,7 @@ internal static class KernelMigrations
         new KernelMigration(14, Migration14),
         new KernelMigration(15, Migration15),
         new KernelMigration(16, Migration16),
+        new KernelMigration(17, Migration17),
     ];
 
     private const string Migration16 = """
@@ -140,6 +141,54 @@ internal static class KernelMigrations
             ON realtime_session_receipts(owner_principal_id,conversation_id,state,expires_at);
         CREATE INDEX ix_realtime_tools_owner_capability
             ON realtime_session_tools(owner_principal_id,plugin_id,plugin_version,capability_id,capability_version,account_id);
+        """;
+
+    private const string Migration17 = """
+        ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'AUTOMATION'
+            CHECK (kind IN ('AUTOMATION','DEVELOPMENT'));
+        ALTER TABLE jobs ADD COLUMN conversation_id TEXT NULL;
+
+        CREATE UNIQUE INDEX ux_jobs_owner_job_conversation
+            ON jobs(owner_principal_id,job_id,conversation_id);
+
+        CREATE TABLE development_workspaces (
+            owner_principal_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            snapshot_ref TEXT NOT NULL,
+            snapshot_hash TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('READY','REVOKED')),
+            created_at TEXT NOT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,workspace_id),
+            UNIQUE (owner_principal_id,workspace_id,conversation_id),
+            FOREIGN KEY (owner_principal_id,conversation_id)
+                REFERENCES conversations(owner_principal_id,conversation_id)
+        );
+
+        CREATE TABLE development_job_specs (
+            owner_principal_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            command_profile TEXT NOT NULL,
+            arguments_json TEXT NOT NULL CHECK (json_valid(arguments_json) AND json_type(arguments_json) = 'array'),
+            effect TEXT NOT NULL CHECK (effect IN ('READ_ONLY','WORKSPACE_WRITE')),
+            timeout_seconds INTEGER NOT NULL CHECK (timeout_seconds BETWEEN 1 AND 3600),
+            output_limit_bytes INTEGER NOT NULL CHECK (output_limit_bytes BETWEEN 1 AND 32768),
+            executor_image_digest TEXT NOT NULL CHECK (length(executor_image_digest) > 0),
+            PRIMARY KEY (owner_principal_id,job_id),
+            FOREIGN KEY (owner_principal_id,job_id,conversation_id)
+                REFERENCES jobs(owner_principal_id,job_id,conversation_id),
+            FOREIGN KEY (owner_principal_id,workspace_id,conversation_id)
+                REFERENCES development_workspaces(owner_principal_id,workspace_id,conversation_id)
+        );
+
+        CREATE INDEX ix_development_workspaces_owner_conversation_state
+            ON development_workspaces(owner_principal_id,conversation_id,state,created_at,workspace_id);
+        CREATE INDEX ix_development_specs_owner_workspace
+            ON development_job_specs(owner_principal_id,workspace_id,job_id);
         """;
 
     private const string Migration15 = """

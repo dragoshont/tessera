@@ -108,6 +108,29 @@ needs them — they are demand-driven, not iteration-deferred:
   backend) — the `ICredentialStore` seam exists from day one
   ([ADR 0003](adr/0003-credential-store-pluggable.md)).
 
+## Isolated software development slices
+
+The development mandate follows [ADR 0035](adr/0035-server-owned-isolated-development-workspaces.md)
+and the [R2 development contract](tessera/r2/DEVELOPMENT_WORKSPACE.md). Each slice
+must preserve one canonical owner-scoped Conversation/Job across web, packaged
+macOS, and iOS.
+
+1. **Proof slice (implemented; deployment approval pending):** a pre-provisioned immutable server snapshot, one read-only
+  `repository.status` command profile, an ephemeral hardened Kubernetes Job,
+  bounded redacted JobRun output, and cross-client run detail.
+2. **Reviewed edits:** durable patch artifacts, exact Action approval, apply in an
+  ephemeral copy, and explicit discard/export semantics.
+3. **Repository acquisition:** reviewed server-side repository catalog, pinned
+  revisions, narrow source-host egress, provenance, quotas, and revocation.
+4. **Build/test profiles:** language-specific reviewed images, dependency-cache
+  isolation, package-registry allowlists, and resource policy.
+5. **Agent orchestration:** agents create typed Jobs; MCP servers contribute
+  reviewed tools; apps remain client surfaces; hash-pinned disabled-by-default
+  plugins may declare reviewed profiles only after a separate compatibility ADR.
+
+Interactive shells, arbitrary images/commands/URLs, broad egress, privileged
+containers, host paths, and host container-runtime sockets are not roadmap goals.
+
 ---
 
 ## On a separate admin UI

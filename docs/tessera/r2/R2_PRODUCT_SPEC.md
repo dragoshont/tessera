@@ -20,6 +20,8 @@ All routes are under `/api/v1`, require the existing authenticated Broker princi
 | POST | `/conversations/{id}/retry` | Idempotent retry of one failed assistant turn |
 | POST | `/conversations/{id}/stop` | Persist cancellation request |
 | GET | `/conversations/{id}/events?after={sequence}` | Resumable SSE of public execution events |
+| GET | `/conversations/{id}/development-workspaces` | List owner/conversation-scoped READY server snapshots |
+| POST | `/conversations/{id}/development-tasks` | Create one typed development Job/run from a server snapshot and command profile |
 | GET/POST | `/accounts` | List/create metadata and opaque credential reference |
 | POST | `/accounts/{id}/validate` | Real adapter validation; updates health |
 | POST | `/accounts/{id}/disable` | Disable future dispatch |
@@ -53,10 +55,10 @@ Lists use stable cursor pagination and a server maximum of 100. Mutations accept
 
 ## Errors And Public Events
 
-Errors use RFC 9457 Problem Details with stable `code`: `invalid_request`/`invalid_cursor` (400), `unauthenticated` (401), `forbidden` (403), `not_found` (404), `version_conflict`/`idempotency_conflict`/`invalid_state` (409), `configuration_required`/`account_ambiguous`/`invalid_model` (422), `rate_limited` (429), `provider_auth_required` (502), `provider_unavailable`/`provider_malformed` (502), `provider_timeout` (504), and `storage_unavailable` (503). Provider detail is bounded and secret-redacted.
+Errors use RFC 9457 Problem Details with stable `code`: `invalid_request`/`invalid_cursor` (400), `unauthenticated` (401), `forbidden` (403), `not_found` (404), `version_conflict`/`idempotency_conflict`/`invalid_state`/`workspace_unavailable` (409), `configuration_required`/`account_ambiguous`/`invalid_model`/`development_command_not_allowed`/`development_executor_unavailable` (422), `rate_limited` (429), `provider_auth_required` (502), `provider_unavailable`/`provider_malformed` (502), `provider_timeout` (504), and `storage_unavailable` (503). Provider and executor detail is bounded and secret-redacted.
 
 SSE emits monotonically sequenced `status`, `text`, `capability_requested`, `approval_required`, `capability_result`, `failure`, and `completed`. Reconnect with `after`; hidden prompts and chain-of-thought are never events.
 
 ## Product Truth
 
-Unconfigured adapters show `Configuration required`; revoked accounts and disabled plugins show recovery actions; blocked Jobs remain visible. Production routes contain no demo switch or fixture fallback.
+Unconfigured adapters show `Configuration required`; revoked accounts and disabled plugins show recovery actions; blocked Jobs remain visible. An unavailable development executor or absent write profile is shown as blocked/unsupported and never as queued success. Production routes contain no demo switch or fixture fallback.

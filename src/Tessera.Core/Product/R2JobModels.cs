@@ -1,10 +1,15 @@
 namespace Tessera.Core.Product;
 
 public sealed record JobSchedule(string Kind, DateTimeOffset? At, TimeOnly? LocalTime, string TimeZone, DayOfWeek[]? Days);
+public sealed record DevelopmentWorkspace(string OwnerPrincipalId,string WorkspaceId,string ConversationId,string DisplayName,
+    string SnapshotRef,string SnapshotHash,string State,DateTimeOffset CreatedAt,long Version);
+public sealed record DevelopmentJobSpec(string WorkspaceId,string CommandProfile,IReadOnlyList<string> Arguments,string Effect,
+    int TimeoutSeconds,int OutputLimitBytes,string ExecutorImageDigest);
 public sealed record ProductJob(string OwnerPrincipalId,string JobId,string Name,string Instruction,string DesiredState,string Health,
     string? ModelProfileId,JobSchedule Schedule,DateTimeOffset? NextOccurrence,string ContextPolicyJson,
     IReadOnlyList<string> AccountGrants,IReadOnlyList<(string Id,string Version)> CapabilityGrants,
-    IReadOnlyList<string> SideEffectGrants,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt,long Version);
+    IReadOnlyList<string> SideEffectGrants,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt,long Version,
+    string Kind="AUTOMATION",string? ConversationId=null,DevelopmentJobSpec? DevelopmentSpec=null);
 public sealed record ProductJobRun(string OwnerPrincipalId,string RunId,string JobId,DateTimeOffset ScheduledFor,string State,long Fence,long Version,
     DateTimeOffset? StartedAt=null,DateTimeOffset? EndedAt=null,string? ModelProfileId=null,string? ContextSnapshotRef=null,string? ErrorCode=null);
 public sealed record ProductSettings(string OwnerPrincipalId,string? DefaultChatModelProfileId,string? DefaultLightweightModelProfileId,

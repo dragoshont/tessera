@@ -30,3 +30,17 @@ export const JobWaitingForApproval: StoryObj<typeof JobRunTimeline> = {
     trace: { items: [{ sequence: 1, occurredAt: '2026-08-10T17:00:01Z', type: 'awaiting_user_approval', summary: 'Waiting for exact user approval', actionId: 'action-1', errorCode: null }], nextCursor: null },
   }} />,
 }
+
+export const DevelopmentOutput: StoryObj<typeof JobRunTimeline> = {
+  render: () => <JobRunTimeline job={{
+    id: 'job-dev', jobId: 'job-dev', name: 'Repository status: Tessera', instruction: 'Development command profile: repository.status',
+    desiredState: 'ACTIVE', health: 'READY', modelProfileId: null,
+    schedule: { kind: 'once', at: '2026-08-12T18:00:00Z', localTime: null, timeZone: 'UTC', days: null }, nextOccurrence: null,
+    accountGrants: [], capabilityGrants: [], sideEffectGrants: [], contextPolicy: {}, lastRun: null,
+    kind: 'DEVELOPMENT', conversationId: 'conversation-1', developmentSpec: { workspaceId: 'workspace-1', commandProfile: 'repository.status', arguments: [], effect: 'READ_ONLY', timeoutSeconds: 300, outputLimitBytes: 32768 }, version: 1,
+  }} detail={{
+    run: { id: 'run-dev', runId: 'run-dev', jobId: 'job-dev', scheduledFor: '2026-08-12T18:00:00Z', state: 'SUCCEEDED', startedAt: '2026-08-12T18:00:01Z', endedAt: '2026-08-12T18:00:02Z', modelProfileId: null, contextSnapshotRef: null, capabilityCallIds: [], accountIds: [], actionIds: [], outputRefs: ['output:run-dev:log'], evidenceRefs: [], errorCode: null, version: 3 },
+    contextSnapshot: null, capabilityUses: { items: [], nextCursor: null }, accountUses: { items: [], nextCursor: null }, actions: { items: [], nextCursor: null }, evidence: { items: [], nextCursor: null }, trace: { items: [{ sequence: 1, occurredAt: '2026-08-12T18:00:02Z', type: 'development_completed', summary: 'Repository status completed', actionId: null, errorCode: null }], nextCursor: null },
+    outputs: { items: [{ outputRef: 'output:run-dev:log', runId: 'run-dev', kind: 'DEVELOPMENT_LOG', mediaType: 'text/plain; charset=utf-8', summary: 'Development command log', text: '## main\n M src/Tessera.Broker/R2SchedulerService.cs', truncated: true, createdAt: '2026-08-12T18:00:02Z' }], nextCursor: null },
+  }} />,
+}

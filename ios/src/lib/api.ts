@@ -4,6 +4,8 @@ import {
   type Action,
   type Activity,
   type Conversation,
+  type DevelopmentTask,
+  type DevelopmentWorkspace,
   type Job,
   type JobRun,
   type Memory,
@@ -48,12 +50,16 @@ export class TesseraApi {
   saveRealtimeTurn = (conversationId: string, sessionId: string, input: RealtimeTurnInput) => this.http.mutate<RealtimeTurnReceipt>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions/${encodeURIComponent(sessionId)}/turns`, 'POST', input, 'realtime-turn')
   invokeRealtimeTool = (conversationId: string, sessionId: string, clientCallId: string, name: string, args: Record<string, unknown>, idempotencyKey?: string) => this.http.mutate<RealtimeToolCallResult>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions/${encodeURIComponent(sessionId)}/tool-calls`, 'POST', { clientCallId, name, arguments: args }, 'realtime-tool', idempotencyKey)
   endRealtimeVoice = (conversationId: string, sessionId: string, reason: string) => this.http.mutate<{ id: string; resourceType: string; version: number }>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions/${encodeURIComponent(sessionId)}/end`, 'POST', { reason }, 'realtime-end')
+  developmentWorkspaces = (id: string) => this.http.request<Page<DevelopmentWorkspace>>(`/conversations/${encodeURIComponent(id)}/development-workspaces`)
+  createDevelopmentTask = (conversationId: string, input: { name: string; workspaceId: string; commandProfile: 'repository.status'; arguments: string[] }) => this.http.mutate<DevelopmentTask>(`/conversations/${encodeURIComponent(conversationId)}/development-tasks`, 'POST', input, 'development-task')
   sendMessage = (id: string, modelProfileId: string, text: string) => this.http.mutate<{ messageId: string; executionId: string; replayed: boolean }>(`/conversations/${encodeURIComponent(id)}/messages`, 'POST', { text, modelProfileId }, 'message')
   modelProfiles = () => this.http.request<Page<ModelProfile>>('/settings/model-profiles')
   settings = () => this.http.request<Settings>('/settings')
   jobs = () => this.http.request<Page<Job>>('/jobs')
+  job = (id: string) => this.http.request<Job>(`/jobs/${encodeURIComponent(id)}`)
   runJob = (item: Job) => this.http.mutate<JobRun>(`/jobs/${encodeURIComponent(item.id)}/run`, 'POST', { expectedVersion: item.version }, 'job-run')
   setJobState = (item: Job, operation: 'pause' | 'resume') => this.http.mutate<Job>(`/jobs/${encodeURIComponent(item.id)}/${operation}`, 'POST', { expectedVersion: item.version })
+  jobRun = (runId: string) => this.http.request<{ run: JobRun; outputs: Page<{ outputRef: string; kind: string; mediaType: string; summary: string; text: string | null; truncated: boolean; createdAt: string }> }>(`/job-runs/${encodeURIComponent(runId)}`)
   accounts = () => this.http.request<Page<Account>>('/accounts')
   beginGmailOAuth = (displayName: string) => this.http.mutate<{ authorizeUrl: string }>('/accounts/gmail/connect', 'POST', { displayName })
   reginaMariaConnectors = () => this.http.request<{ items: ReginaMariaConnector[] }>('/accounts/regina-maria/connectors')

@@ -1,0 +1,85 @@
+# PLAN-ONLY: identity, RBAC, network policy, and storage require human review.
+# The executor remains disabled until an operator supplies reviewed server-owned
+# executor and workspace JSON to the broker Deployment.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tessera-development
+  labels:
+    app.kubernetes.io/part-of: tessera
+    tessera.dev/purpose: development-executor
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tessera
+  namespace: default
+  labels:
+    app.kubernetes.io/name: tessera
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tessera-development-executor
+  namespace: tessera-development
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tessera-development-executor
+  namespace: tessera-development
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tessera-development-executor
+subjects:
+  - kind: ServiceAccount
+    name: tessera
+    namespace: default
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tessera-development-deny-all
+  namespace: tessera-development
+spec:
+  podSelector:
+    matchLabels:
+      tessera.dev/network: deny-all
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []
+---
+# Contract for a human-provisioned, server-owned immutable snapshot volume.
+# Dynamic provisioning is disabled. A reviewed static PV must carry the matching
+# label and expose immutable snapshot directories selected by configured subPath.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tessera-development-snapshots
+  namespace: tessera-development
+  labels:
+    app.kubernetes.io/name: tessera-development-snapshots
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  selector:
+    matchLabels:
+      tessera.dev/snapshot-source: reviewed
+  resources:
+    requests:
+      storage: 1Gi

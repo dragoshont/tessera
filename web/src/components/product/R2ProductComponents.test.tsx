@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import axe from 'axe-core'
 import { describe, expect, it, vi } from 'vitest'
-import { ActionApprovalCard, JobRunTimeline } from './R2ProductComponents'
+import { ActionApprovalCard, DevelopmentTaskCreator, JobRunTimeline } from './R2ProductComponents'
 import type { R2Action, R2JobRunDetail } from '../../api/r2'
 
 const action: R2Action = {
@@ -14,6 +14,28 @@ const action: R2Action = {
 }
 
 describe('R2 product execution components', () => {
+  it('launches only the fixed read-only command from explicit conversation and workspace selections', async () => {
+    const user = userEvent.setup()
+    const submit = vi.fn()
+    render(<DevelopmentTaskCreator
+      conversations={[{ id: 'conversation-1', conversationId: 'conversation-1', title: 'Development', state: 'ACTIVE', modelProfileId: null, createdAt: '2026-08-12T18:00:00Z', updatedAt: '2026-08-12T18:00:00Z', version: 1 }]}
+      workspaces={[{ id: 'workspace-1', displayName: 'Tessera', snapshotHash: 'sha256:snapshot', state: 'READY', createdAt: '2026-08-12T18:00:00Z', version: 1 }]}
+      conversationId="conversation-1"
+      workspaceId="workspace-1"
+      onConversationChange={vi.fn()}
+      onWorkspaceChange={vi.fn()}
+      onSubmit={submit}
+    />)
+
+    expect(screen.getByText('repository.status')).toBeInTheDocument()
+    expect(screen.getByText('Read only')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Run repository status' }))
+    expect(submit).toHaveBeenCalledOnce()
+    const result = await axe.run(document.body, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations.filter((item) => item.impact === 'critical' || item.impact === 'serious')).toEqual([])
+  })
+
   it('shows exact proposal identity and requires an explicit approval click', async () => {
     const user = userEvent.setup()
     const approve = vi.fn()
@@ -67,5 +89,23 @@ describe('R2 product execution components', () => {
     expect(screen.getByText('Waiting for exact user approval')).toBeInTheDocument()
     const result = await axe.run(document.body, { rules: { 'color-contrast': { enabled: false } } })
     expect(result.violations.filter((item) => item.impact === 'critical' || item.impact === 'serious')).toEqual([])
+  })
+
+  it('renders development output without model, account, or approval controls', () => {
+    const detail: R2JobRunDetail = {
+      run: { id: 'run-dev', runId: 'run-dev', jobId: 'job-dev', scheduledFor: '2026-08-12T18:00:00Z', state: 'SUCCEEDED', startedAt: '2026-08-12T18:00:01Z', endedAt: '2026-08-12T18:00:02Z', modelProfileId: null, contextSnapshotRef: null, capabilityCallIds: [], accountIds: [], actionIds: [], outputRefs: ['output:run-dev:log'], evidenceRefs: [], errorCode: null, version: 3 },
+      contextSnapshot: null, capabilityUses: { items: [], nextCursor: null }, accountUses: { items: [], nextCursor: null }, actions: { items: [], nextCursor: null }, evidence: { items: [], nextCursor: null },
+      outputs: { items: [{ outputRef: 'output:run-dev:log', runId: 'run-dev', kind: 'DEVELOPMENT_LOG', mediaType: 'text/plain', summary: 'Development command log', text: '## main', truncated: true, createdAt: '2026-08-12T18:00:02Z' }], nextCursor: null },
+      trace: { items: [], nextCursor: null },
+    }
+    const job = { id: 'job-dev', jobId: 'job-dev', name: 'Repository status: Tessera', instruction: 'Development command profile: repository.status', desiredState: 'ACTIVE', health: 'READY', modelProfileId: null, schedule: { kind: 'once' as const, at: '2026-08-12T18:00:00Z', localTime: null, timeZone: 'UTC', days: null }, nextOccurrence: null, accountGrants: [], capabilityGrants: [], sideEffectGrants: [], contextPolicy: {}, lastRun: detail.run, kind: 'DEVELOPMENT' as const, conversationId: 'conversation-1', developmentSpec: { workspaceId: 'workspace-1', commandProfile: 'repository.status' as const, arguments: [], effect: 'READ_ONLY' as const, timeoutSeconds: 300, outputLimitBytes: 32768 }, version: 1 }
+    render(<JobRunTimeline detail={detail} job={job} />)
+
+    expect(screen.getByText('Repository status log')).toBeInTheDocument()
+    expect(screen.getByText('## main')).toBeInTheDocument()
+    expect(screen.getByText('Output truncated at the server limit.')).toBeInTheDocument()
+    expect(screen.queryByText('Model profile')).not.toBeInTheDocument()
+    expect(screen.queryByText('Capability and account use')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument()
   })
 })

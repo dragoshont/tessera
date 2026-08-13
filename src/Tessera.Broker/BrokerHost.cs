@@ -105,6 +105,15 @@ public sealed record BrokerHostOptions
     /// <summary>Optional outbound MCP client override for deterministic tests.</summary>
     public IMcpClientRuntime? McpClientRuntimeOverride { get; init; }
 
+    /// <summary>Reviewed server-owned development executor configuration.</summary>
+    public DevelopmentExecutorOptions? DevelopmentExecutor { get; init; }
+
+    /// <summary>Reviewed server-owned immutable development workspace snapshots.</summary>
+    public IReadOnlyList<DevelopmentWorkspace>? DevelopmentWorkspaces { get; init; }
+
+    /// <summary>Optional isolated development executor override for deterministic tests.</summary>
+    public IDevelopmentExecutor? DevelopmentExecutorOverride { get; init; }
+
     /// <summary>Optional fixed Foundry realtime signaling transport override for tests.</summary>
     public IRealtimeFoundryTransport? RealtimeTransportOverride { get; init; }
 }
@@ -112,6 +121,12 @@ public sealed record BrokerHostOptions
 /// <summary>The broker composition root: config → pipeline → host + endpoints + MCP.</summary>
 public static class BrokerHost
 {
+    private static readonly JsonSerializerOptions StrictEnvironmentJson = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
+    };
+
     /// <summary>Parses <c>--config</c>/<c>--grants</c> and builds the app.</summary>
     public static Task<WebApplication> BuildAppAsync(string[] args, CancellationToken cancellationToken = default)
     {
@@ -242,10 +257,26 @@ public static class BrokerHost
         {
             var productStore = new SqliteKernelStore(productDatabasePath, productDatabaseMaxBytes);
             await productStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            var developmentExecutorOptions = options.DevelopmentExecutor
+                ?? DeserializeEnvironment<DevelopmentExecutorOptions>(options.Environment, "TESSERA_DEVELOPMENT_EXECUTOR_JSON");
+            var developmentWorkspaces = options.DevelopmentWorkspaces
+                ?? DeserializeEnvironment<DevelopmentWorkspace[]>(options.Environment, "TESSERA_DEVELOPMENT_WORKSPACES_JSON")
+                ?? [];
+            foreach (var workspace in developmentWorkspaces)
+                await productStore.RegisterDevelopmentWorkspaceAsync(workspace, cancellationToken).ConfigureAwait(false);
             status.ProductConfigured = true;
             services.AddSingleton(productStore);
             services.AddSingleton(new R2CursorSigner(RandomNumberGenerator.GetBytes(32)));
             services.AddSingleton<ICapabilityAvailability>(productStore);
+            if (developmentExecutorOptions is not null)
+            {
+                services.AddSingleton(developmentExecutorOptions);
+                services.AddSingleton<IDevelopmentExecutor>(options.DevelopmentExecutorOverride
+                    ?? new KubernetesDevelopmentExecutor(
+                        KubernetesDevelopmentExecutor.CreateHttpClient(developmentExecutorOptions),
+                        developmentExecutorOptions,
+                        token => File.ReadAllTextAsync(developmentExecutorOptions.ServiceAccountTokenPath, token)));
+            }
             var pluginRoot = options.PluginRoot ?? Get(options.Environment, "TESSERA_PLUGIN_ROOT")
                 ?? Path.Combine(AppContext.BaseDirectory, "plugins");
             if (!Directory.Exists(pluginRoot) && Directory.Exists(Path.GetFullPath("plugins")))
@@ -537,6 +568,14 @@ public static class BrokerHost
         var callerToken = Get(options.Environment, "TESSERA_LIVEVIEW_WORKER_TOKEN");
         var worker = new HttpLiveViewWorker(new Uri(config.LiveView.WorkerArmUrl, UriKind.Absolute), callerToken);
         return new WorkerLiveViewProvider(worker, config.LiveView.DefaultTtlSeconds);
+    }
+
+    private static T? DeserializeEnvironment<T>(IReadOnlyDictionary<string, string?>? environment, string name)
+    {
+        var value = Get(environment, name);
+        return string.IsNullOrWhiteSpace(value)
+            ? default
+            : JsonSerializer.Deserialize<T>(value, StrictEnvironmentJson);
     }
 
     private static void MapEndpoints(WebApplication app)

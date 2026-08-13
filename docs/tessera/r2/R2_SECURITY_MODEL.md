@@ -20,7 +20,21 @@ Browser, model output, plugin manifests, capability results, provider HTTP, and 
 - prompt-injection-resistant handling of capability results as quoted data;
 - no secret columns, logs, events, results, context, examples, or run artifacts;
 - stable Problem Details without upstream bodies or credential material.
+- development clients cannot select repository paths/URLs, images, namespaces,
+	executables, environment, mounts, manifests, or egress; the server resolves an
+	opaque snapshot and reviewed command profile into direct argv;
+- development pods are non-root, non-privileged, capability-free, service-token
+	free, resource/time bounded, default-deny egress, and limited to read-only PVC
+	snapshot input plus ephemeral `emptyDir` work;
+- executor output is normalized, control-character stripped, secret-pattern
+	redacted, bounded before persistence, and treated as untrusted quoted data.
 
 ## Adversarial Gates
 
 Tests cover prompt injection, model authorization claims, malicious manifest/path/hash/schema, arbitrary URL and private-address egress, cross-user/account access, consequential ambiguity, approval replay/payload/account/target substitution, job grant escalation/mismatch, revoke/disable race, lease fence race, malicious result size/content, credential leakage scans, timeout, malformed provider output, and unknown external outcomes. No Critical/High finding may remain.
+
+Development tests additionally cover forbidden command/path/image/environment
+input, other-owner workspace selection, snapshot revocation, absent write profiles,
+concurrent idempotency, stale fences, cancellation/restart, unknown Kubernetes
+outcomes without duplicate creation, hardened manifest construction, malformed
+UTF-8/control output, prompt-like repository text, truncation, and redaction scans.

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Tessera.Core.Kernel;
 using Tessera.Core.Product;
@@ -12,9 +13,10 @@ using Tessera.Providers.R2;
 
 namespace Tessera.Broker;
 
-internal sealed partial class R2SchedulerService(SqliteKernelStore store, ICredentialStore custody, IHttpTransport transport, ILogger<R2SchedulerService> logger, BrokerStatus? brokerStatus = null, TesseraPluginRegistry? plugins = null, IMcpClientRuntime? mcpRuntime = null) : BackgroundService
+internal sealed partial class R2SchedulerService(SqliteKernelStore store, ICredentialStore custody, IHttpTransport transport, ILogger<R2SchedulerService> logger, BrokerStatus? brokerStatus = null, TesseraPluginRegistry? plugins = null, IMcpClientRuntime? mcpRuntime = null, IDevelopmentExecutor? developmentExecutor = null) : BackgroundService
 {
     private static readonly TimeSpan DispatchLeaseDuration=TimeSpan.FromMinutes(10);
+    private readonly ConcurrentDictionary<string, Task> _developmentDispatches = new(StringComparer.Ordinal);
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
@@ -90,9 +92,15 @@ internal sealed partial class R2SchedulerService(SqliteKernelStore store, ICrede
         foreach (var run in await store.ListQueuedRunsAsync(token).ConfigureAwait(false))
         {
             var now=DateTimeOffset.UtcNow;var fence=await store.AcquireRunLeaseAsync(run.OwnerPrincipalId,run.RunId,Environment.MachineName,now,DispatchLeaseDuration,token).ConfigureAwait(false);if(fence is null||!await store.StartRunAsync(run.OwnerPrincipalId,run.RunId,run.Version,fence.Value,now,token).ConfigureAwait(false))continue;await store.ResetInterruptedCapabilityCallsAsync(run.OwnerPrincipalId,run.RunId,token).ConfigureAwait(false);
+            ProductJob? job=null;
             try
             {
-                var job=(await store.ListJobsAsync(run.OwnerPrincipalId,token).ConfigureAwait(false)).Single(item=>item.JobId==run.JobId);
+                job=(await store.ListJobsAsync(run.OwnerPrincipalId,token).ConfigureAwait(false)).Single(item=>item.JobId==run.JobId);
+                if(job.Kind=="DEVELOPMENT")
+                {
+                    StartDevelopmentDispatch(job,run,fence.Value,token);
+                    continue;
+                }
                 if(job.ModelProfileId is null)throw new InvalidOperationException("configuration_required");
                 var profile=await store.GetModelProfileAsync(run.OwnerPrincipalId,job.ModelProfileId,token).ConfigureAwait(false)??throw new InvalidOperationException("invalid_model");
                 var account=await store.GetConnectedAccountAsync(run.OwnerPrincipalId,profile.AccountId,token).ConfigureAwait(false)??throw new InvalidOperationException("account_unavailable");
@@ -112,8 +120,65 @@ internal sealed partial class R2SchedulerService(SqliteKernelStore store, ICrede
                 if(result.Outcome==CapabilityOutcome.Succeeded){var text=ProductContentValidation.Text(result.Output.GetProperty("text").GetString()??string.Empty,"jobOutput",16384);await store.AddJobRunOutputAsync(run.OwnerPrincipalId,new($"output:{run.RunId}",run.RunId,"TEXT","text/plain","Job completed",text,false,DateTimeOffset.UtcNow),token).ConfigureAwait(false);}else if(result.FailureCode=="provider_auth_required")await R2ProductEndpoints.MarkAccountAuthRequiredAsync(store,run.OwnerPrincipalId,profile.AccountId,token).ConfigureAwait(false);await store.CompleteRunAsync(run.OwnerPrincipalId,run.RunId,fence.Value,result.Outcome==CapabilityOutcome.Succeeded?"SUCCEEDED":"FAILED",result.FailureCode,DateTimeOffset.UtcNow,token).ConfigureAwait(false);
             }
             catch(Exception exception) when(exception is not OperationCanceledException)
-            {await store.CompleteRunAsync(run.OwnerPrincipalId,run.RunId,fence.Value,"FAILED",exception is InvalidOperationException?exception.Message:"job_execution_failed",DateTimeOffset.UtcNow,token).ConfigureAwait(false);}
+            {
+                var error=exception is InvalidOperationException?exception.Message:"job_execution_failed";
+                await store.CompleteRunAsync(run.OwnerPrincipalId,run.RunId,fence.Value,"FAILED",error,DateTimeOffset.UtcNow,token).ConfigureAwait(false);
+            }
         }
+    }
+
+    private void StartDevelopmentDispatch(ProductJob job,ProductJobRun run,long fence,CancellationToken token)
+    {
+        var task=RunDevelopmentDispatchAsync(job,run,fence,token);
+        if(!_developmentDispatches.TryAdd(run.RunId,task))return;
+        _=task.ContinueWith(_=>_developmentDispatches.TryRemove(run.RunId,out Task? removedTask),
+            CancellationToken.None,TaskContinuationOptions.ExecuteSynchronously,TaskScheduler.Default);
+    }
+
+    private async Task RunDevelopmentDispatchAsync(ProductJob job,ProductJobRun run,long fence,CancellationToken token)
+    {
+        try
+        {
+            await DispatchDevelopmentAsync(job,run,fence,token).ConfigureAwait(false);
+        }
+        catch(OperationCanceledException) when(token.IsCancellationRequested)
+        {
+        }
+        catch(Exception exception)
+        {
+            var error=exception is InvalidOperationException?exception.Message:"job_execution_failed";
+            await store.CompleteDevelopmentRunAsync(run.OwnerPrincipalId,job.ConversationId!,run.JobId,
+                run.RunId,fence,"FAILED",error,new("",false),DateTimeOffset.UtcNow,CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+    }
+
+    internal Task WaitForDevelopmentDispatchesAsync()
+        =>Task.WhenAll(_developmentDispatches.Values.ToArray());
+
+    private async Task DispatchDevelopmentAsync(ProductJob job,ProductJobRun run,long fence,CancellationToken token)
+    {
+        var spec=job.DevelopmentSpec??throw new InvalidOperationException("development_command_not_allowed");
+        if(spec.Effect!="READ_ONLY"||!DevelopmentCommandProfiles.TryResolve(spec.CommandProfile,spec.Arguments,out var profile))
+            throw new InvalidOperationException("development_command_not_allowed");
+        var workspace=job.ConversationId is null?null:await store.GetDevelopmentWorkspaceAsync(
+            run.OwnerPrincipalId,job.ConversationId,spec.WorkspaceId,token).ConfigureAwait(false);
+        if(workspace is null||workspace.State!="READY")throw new InvalidOperationException("workspace_unavailable");
+        if(developmentExecutor is null)throw new InvalidOperationException("development_executor_unavailable");
+        var result=await developmentExecutor.ExecuteAsync(new(
+            run.OwnerPrincipalId,job.ConversationId!,job.JobId,run.RunId,spec.WorkspaceId,
+            workspace.SnapshotRef,profile!,spec.Arguments),token).ConfigureAwait(false);
+        var output=DevelopmentOutputNormalizer.Normalize(result.Log,spec.OutputLimitBytes);
+        var state=result.Outcome switch
+        {
+            "SUCCEEDED"=>"SUCCEEDED",
+            "UNKNOWN"=>"RECONCILIATION_REQUIRED",
+            _=>"FAILED",
+        };
+        if(!await store.CompleteDevelopmentRunAsync(run.OwnerPrincipalId,job.ConversationId!,job.JobId,
+            run.RunId,fence,state,result.ErrorCode,output,
+            DateTimeOffset.UtcNow,token).ConfigureAwait(false))
+            throw new ProductConcurrencyException("Development run lost its execution fence.");
     }
 
     private sealed class JobModelCapability(IHttpTransport transport,ModelProfile profile,string token) : ICapability

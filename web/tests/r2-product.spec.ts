@@ -307,6 +307,7 @@ test('Chat voice negotiates SDP only, persists captions, and stops local media',
     state.channel.onmessage?.({ data: JSON.stringify({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'input-1', transcript: 'Hello voice' }) })
     state.channel.onmessage?.({ data: JSON.stringify({ type: 'response.output_audio_transcript.done', item_id: 'output-1', transcript: 'Hello back' }) })
   })
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { fetches: string[] } }).__tesseraVoiceTest.fetches)).toContain('/api/v1/conversations/conversation-voice/realtime-sessions/session-1/turns')
   const fetches = await page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { fetches: string[] } }).__tesseraVoiceTest.fetches)
   expect(fetches.some((url) => /foundry|openai\.azure\.com/i.test(url))).toBe(false)
   await expect.poll(() => saved).toBe(true)
@@ -337,6 +338,42 @@ test('Jobs expose durable run history and waiting approval state', async ({ page
   await expect(page.getByLabel(/Run run-/).locator('[data-product-state="WAITING_FOR_APPROVAL"]')).toBeVisible()
   await expect(page.getByText('Waiting for exact user approval')).toBeVisible()
   await page.screenshot({ path: `test-results/screens/${testInfo.project.name}-r2-jobs.png`, fullPage: true })
+})
+
+test('Jobs launch a fixed read-only development task and continue through durable run output', async ({ page }) => {
+  const conversation = { id: 'conversation-1', conversationId: 'conversation-1', title: 'Tessera development', state: 'ACTIVE', modelProfileId: null, createdAt: '2026-08-12T18:00:00Z', updatedAt: '2026-08-12T18:00:00Z', version: 1 }
+  const workspace = { id: 'workspace-1', displayName: 'Tessera', snapshotHash: 'sha256:snapshot', state: 'READY', createdAt: '2026-08-12T18:00:00Z', version: 1 }
+  const run = { id: 'run-dev', runId: 'run-dev', jobId: 'job-dev', scheduledFor: '2026-08-12T18:01:00Z', state: 'SUCCEEDED', startedAt: '2026-08-12T18:01:01Z', endedAt: '2026-08-12T18:01:02Z', modelProfileId: null, contextSnapshotRef: null, capabilityCallIds: [], accountIds: [], actionIds: [], outputRefs: ['output:run-dev:log'], evidenceRefs: [], errorCode: null, version: 3 }
+  const job = { id: 'job-dev', jobId: 'job-dev', name: 'Repository status: Tessera', instruction: 'Development command profile: repository.status', desiredState: 'ACTIVE', health: 'READY', modelProfileId: null, schedule: { kind: 'once', at: '2026-08-12T18:01:00Z', localTime: null, timeZone: 'UTC', days: null }, nextOccurrence: null, accountGrants: [], capabilityGrants: [], sideEffectGrants: [], contextPolicy: {}, lastRun: run, kind: 'DEVELOPMENT', conversationId: conversation.id, developmentSpec: { workspaceId: workspace.id, commandProfile: 'repository.status', arguments: [], effect: 'READ_ONLY', timeoutSeconds: 300, outputLimitBytes: 32768 }, version: 1 }
+  let submitted: Record<string, unknown> | null = null
+  let created = false
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/settings/model-profiles') || path.endsWith('/accounts') || path.endsWith('/capabilities')) return fulfill(route, pageOf([]))
+    if (path.endsWith('/settings')) return fulfill(route, { defaultChatModelProfileId: null, defaultLightweightModelProfileId: null, timezone: 'UTC', approvalDefaults: {}, memoryControls: {}, version: 1 })
+    if (path.endsWith('/conversations/conversation-1/development-workspaces')) return fulfill(route, pageOf([workspace]))
+    if (path.endsWith('/conversations/conversation-1/development-tasks') && route.request().method() === 'POST') {
+      submitted = route.request().postDataJSON() as Record<string, unknown>
+      created = true
+      return fulfill(route, { job, run }, 202)
+    }
+    if (path.endsWith('/conversations')) return fulfill(route, pageOf([conversation]))
+    if (path.endsWith('/jobs/job-dev/runs')) return fulfill(route, pageOf([run]))
+    if (path.endsWith('/job-runs/run-dev')) return fulfill(route, { run, contextSnapshot: null, capabilityUses: pageOf([]), accountUses: pageOf([]), actions: pageOf([]), outputs: pageOf([{ outputRef: 'output:run-dev:log', runId: run.id, kind: 'DEVELOPMENT_LOG', mediaType: 'text/plain', summary: 'Development command log', text: '## main', truncated: false, createdAt: run.endedAt }]), evidence: pageOf([]), trace: pageOf([{ sequence: 1, occurredAt: run.endedAt, type: 'development_completed', summary: 'Repository status completed', actionId: null, errorCode: null }]) })
+    if (path.endsWith('/jobs')) return fulfill(route, pageOf(created ? [job] : []))
+    return fulfill(route, { code: 'not_found' }, 404)
+  })
+
+  await signIn(page)
+  await page.goto('/jobs')
+  await page.getByLabel('Conversation').selectOption(conversation.id)
+  await page.getByLabel('Workspace').selectOption(workspace.id)
+  await page.getByRole('button', { name: 'Run repository status' }).click()
+  await expect.poll(() => submitted).toEqual({ name: 'Repository status: Tessera', workspaceId: workspace.id, commandProfile: 'repository.status', arguments: [] })
+  await expect(page.getByText('Repository status log')).toBeVisible()
+  await expect(page.getByText('## main')).toBeVisible()
+  await expect(page.getByRole('dialog').getByText('repository.status', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Run now' })).toHaveCount(0)
 })
 
 test('Plugin disable and Account revoke show truthful recovery states', async ({ page }, testInfo) => {

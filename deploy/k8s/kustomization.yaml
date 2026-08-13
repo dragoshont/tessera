@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - configmap.yaml
   - pvc.yaml
+  - development-executor.yaml
   - deployment.yaml
   - networkpolicy.yaml
   - backup.yaml

@@ -46,12 +46,14 @@ CapabilityDto        { id, version, pluginId, description, accountRequired, requ
 PluginConfigurationDto { pluginId, pluginVersion, values: object, configured, version }
 ActionDto             { id, conversationId|null, messageId|null, jobId|null, jobRunId|null, pluginId, pluginVersion, capabilityId, capabilityVersion, accountId|null, target, payloadPreview, state, expiresAt, providerReceipt|null, verificationState|null, failureCode|null, version }
 JobDto                { id, name, instruction, desiredState, health, modelProfileId|null, schedule, nextOccurrence|null, accountGrants: string[], capabilityGrants: string[], sideEffectGrants: string[], contextPolicy, lastRun|null, version }
+DevelopmentWorkspaceDto { id, conversationId, displayName, snapshotHash, state, createdAt, version }
+DevelopmentSpecDto    { workspaceId, commandProfile, arguments: string[0..8] (each <= 256 UTF-8 bytes), effect, timeoutSeconds, outputLimitBytes: 32768 }
 JobRunDto             { id, jobId, scheduledFor, state, startedAt|null, endedAt|null, modelProfileId|null, contextSnapshotRef|null, capabilityCallIds: string[], accountIds: string[], actionIds: string[], outputRefs: string[], evidenceRefs: string[], errorCode|null, version }
 JobRunDetailDto       { run: JobRunDto, contextSnapshot: ContextSnapshotDto|null, capabilityUses: Page<CapabilityUseDto>, accountUses: Page<AccountUseDto>, actions: Page<ActionDto>, outputs: Page<JobRunOutputDto>, evidence: Page<EvidenceCitationDto>, trace: Page<ExecutionTraceEntryDto> }
 ContextSnapshotDto    { ref, capturedAt, sourceRefs: string[], omittedCount, sensitivityClasses: string[] }
 CapabilityUseDto      { callId, pluginId, pluginVersion, capabilityId, capabilityVersion, accountId|null, state, resultSummary|null, evidenceRefs: string[], errorCode|null }
 AccountUseDto         { accountId, providerId, displayName, lifecycleAtDispatch }
-JobRunOutputDto       { ref, kind, mediaType, summary, text|null, truncated, createdAt }
+JobRunOutputDto       { ref, kind: TEXT|ACTION|DEVELOPMENT_LOG, mediaType, summary, text|null, truncated, createdAt }
 ExecutionTraceEntryDto { sequence, occurredAt, type, summary, capabilityCallId|null, actionId|null, approvalState|null, verificationState|null, outputRef|null, evidenceRefs: string[], errorCode|null }
 MemoryDto             { assertionId, subjectKey, predicate, value, status, validFrom, validTo|null, evidenceRefs: string[], version }
 MemoryChangeDto       { assertionId, kind, occurredAt, previous: MemoryDto|null, current: MemoryDto|null, evidenceRefs: string[] }
@@ -108,6 +110,8 @@ IntegrationSearchDto    { items: IntegrationCatalogDto[], sources: IntegrationSo
 | `DELETE /jobs/{id}` | `{ expectedVersion }` | `202 JobDto` | desired state CANCELED; active lease observes cancellation |
 | `POST /jobs/{id}/run` | `{ expectedVersion }` + idempotency | `202 JobRunDto` | unique manual scheduledFor/idempotency receipt |
 | `POST /jobs/{id}/pause|resume` | `{ expectedVersion }` | `200 JobDto` | legal desired-state transition only |
+| `GET /conversations/{id}/development-workspaces` | `cursor?, limit?` | `200 Page<DevelopmentWorkspaceDto>` | owner/conversation-scoped READY server snapshots only |
+| `POST /conversations/{id}/development-tasks` | `{ name, workspaceId, commandProfile, arguments }` + idempotency | `202 { job: JobDto, run: JobRunDto }` | owner-scoped READY server snapshot; server-resolved command profile; no client path/URL/image/executable; `422 development_command_not_allowed/development_executor_unavailable` |
 | `GET /jobs/{id}/runs` | `state?, from?, to?, cursor?, limit?` | `200 Page<JobRunDto>` | sort `(scheduledFor DESC,id)`; interval is UTC and `from <= to` |
 | `GET /job-runs/{id}` | none | `200 JobRunDetailDto` | bounded public product trace; no prompt, reasoning, secret, or raw provider body |
 | `GET /job-runs/{id}/capability-uses` | `cursor?, limit?` | `200 Page<CapabilityUseDto>` | durable call sequence order |
@@ -139,6 +143,12 @@ GET list/detail routes return their named DTOs/Page DTOs and `404 not_found` wit
 List filters reject unknown enum values and malformed timestamps with `400 invalid_request`. `query` is trimmed, limited to 200 Unicode scalar values, and treated as literal text rather than SQL or a regular expression. `from` and `to` are inclusive UTC bounds. Plugin routes always address `(id, version)`; a bare plugin ID is never sufficient for mutation when versions coexist.
 
 `JobRunDetailDto` embeds the first page of each canonical child collection using the common default/max limits and supplies `nextCursor` when more exists. Output `text` is bounded to 32 KiB and `truncated=true` when more content exists; binary/provider payloads are never returned. `approvalState` and `verificationState` are projections of the referenced durable Action, not independently mutable run fields. `ContextSnapshotDto` exposes provenance references and omission counts only, not the hidden assembled model prompt.
+
+Development Job DTOs add `kind=DEVELOPMENT`, the canonical `conversationId`, and
+`developmentSpec`; existing Jobs return `kind=AUTOMATION`, `conversationId=null`,
+and `developmentSpec=null`. The exact execution and isolation contract is
+normative in `DEVELOPMENT_WORKSPACE.md`. Development output uses the existing
+JobRun detail route and is redacted and bounded before persistence.
 
 ## Idempotency
 

@@ -29,6 +29,7 @@ function Navigation() {
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="action/[id]" options={{ title: 'Review action', presentation: 'modal' }} />
+          <Stack.Screen name="job-run/[id]" options={{ title: 'Development run', presentation: 'modal' }} />
           <Stack.Screen name="plugins" options={{ title: 'Plugins' }} />
           <Stack.Screen name="activity" options={{ title: 'Activity' }} />
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />

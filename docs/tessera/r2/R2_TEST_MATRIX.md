@@ -50,6 +50,22 @@ Status values are `PASS`, `PARTIAL`, `REVISE`, `FAIL`, and `BLOCKED_EXTERNAL`. `
 | AC-R2-44 | 7 | Independent product adversary | PASS |
 | AC-R2-45 | 7 | All deterministic gates | PASS |
 | AC-R2-46 | 7 | R2 report Journey A-J table | PASS implementation; live A/C/D/E BLOCKED_EXTERNAL |
+| AC-DEV-01 | D1 | Additive/idempotent v17 migration and rollback readability | PASS |
+| AC-DEV-02 | D1 | Owner/conversation snapshot list and cross-owner indistinguishable 404 | PASS |
+| AC-DEV-03 | D1 | Atomic idempotent task+run creation; changed/concurrent key conflict | PASS |
+| AC-DEV-04 | D1 | Server profile resolves direct argv; path/URL/image/env/shell/write rejected | PASS |
+| AC-DEV-05 | D1 | Fenced executor success/failure/cancel/restart/unknown-outcome recovery | PASS |
+| AC-DEV-06 | D1 | Non-root, non-privileged, no-token/no-hostPath/no-socket/default-deny manifest | PASS plan; live run BLOCKED_EXTERNAL |
+| AC-DEV-07 | D1 | UTF-8/control normalization, redaction scan, 32 KiB truncation | PASS |
+| AC-DEV-08 | D1 | Durable JobRun output and canonical Conversation system event | PASS |
+| AC-DEV-09 | D1 | Web/macOS/iOS loading/empty/running/output/error/blocked/a11y states | PASS automated/layout; VoiceOver manual checkpoint BLOCKED_EXTERNAL |
+| AC-DEV-10 | D1 | Plan/policy output, no apply/runtime mutation, dual semantic PASS | PASS |
+
+Development-workspace client validation includes `npm --prefix ios run typecheck`.
+The iOS package currently defines no automated test script, so native behavior must
+also be covered by the existing Release device/simulator build plus manual VoiceOver,
+Dynamic Type, and Reduce Motion checks; this limitation must remain visible in the
+delivery evidence rather than being reported as automated test coverage.
 
 ## Journey Mapping
 

@@ -32,7 +32,7 @@
       "story": "Product/ChatWorkspace",
       "code": "web/src/components/chat/ChatWorkspace.tsx",
       "reuses": ["AppShell"],
-      "states": ["Empty", "Configured", "Loading", "Error", "ConfigurationRequired"]
+      "states": ["Empty", "Configured", "Loading", "Error", "ConfigurationRequired", "VoiceReady", "VoiceUnavailable", "VoicePermission", "VoiceNegotiating", "VoiceListening", "VoiceSpeaking", "VoiceMuted", "VoiceToolRunning", "VoiceApprovalRequired", "VoiceInterrupted", "VoiceExpired", "VoiceAudioBlocked", "VoiceError"]
     },
     "SetupCenter": {
       "story": "Product/SetupCenter",
@@ -56,7 +56,13 @@
       "story": "Product/ActionApprovalCard/JobWaitingForApproval",
       "code": "web/src/components/product/R2ProductComponents.tsx",
       "reuses": ["ActionApprovalCard", "ActivityFeed"],
-      "states": ["Queued", "Running", "WaitingForApproval", "Succeeded", "Failed", "ReconciliationRequired"]
+      "states": ["Queued", "Running", "WaitingForApproval", "Succeeded", "Failed", "ReconciliationRequired", "DevelopmentOutput", "DevelopmentOutputTruncated"]
+    },
+    "DevelopmentTaskCreator": {
+      "story": "Product/DevelopmentTaskCreator",
+      "code": "web/src/components/product/R2ProductComponents.tsx",
+      "reuses": ["JobRunTimeline"],
+      "states": ["Ready", "LoadingConversations", "LoadingWorkspaces", "NoReadyWorkspaces", "Submitting", "WorkspaceUnavailable", "ExecutorUnavailable"]
     }
   },
   "semanticTokens": {
