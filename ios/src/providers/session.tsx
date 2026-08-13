@@ -5,7 +5,7 @@ import * as Crypto from 'expo-crypto'
 import * as LocalAuthentication from 'expo-local-authentication'
 import * as Network from 'expo-network'
 import * as SecureStore from 'expo-secure-store'
-import { createHttpClient, GenerationFence, readBoundedJsonResponse, RouteManager, type AuthLease, type ConnectionDiagnostics, type ServerDescriptor } from '@tessera/client'
+import { createHttpClient, GenerationFence, readBoundedJsonResponse, requestOidcToken, RouteManager, type AuthLease, type ConnectionDiagnostics, type ServerDescriptor } from '@tessera/client'
 
 import { TesseraApi } from '@/lib/api'
 import { runtimeConfig } from '@/lib/config'
@@ -73,14 +73,21 @@ export function SessionProvider({ children }: PropsWithChildren) {
     if (!current || !current.expiresAt || current.expiresAt > Date.now() + 60_000) return current
     const oidc = portalConfigRef.current?.oidc
     if (!current.refreshToken || !oidc) return current
+    const refreshToken = current.refreshToken
     if (!refreshRef.current) {
       const generation = sessionFenceRef.current.capture()
       refreshRef.current = (async () => {
         const discovery = await AuthSession.fetchDiscoveryAsync(oidc.authority)
-        const token = await AuthSession.refreshAsync({ clientId: oidc.clientId, refreshToken: current.refreshToken, scopes: oidc.scope.split(/\s+/).filter(Boolean) }, discovery)
+        if (!discovery.tokenEndpoint) throw new Error('oidc_token_endpoint_missing')
+        const token = await requestOidcToken(discovery.tokenEndpoint, {
+          grant_type: 'refresh_token',
+          client_id: oidc.clientId,
+          refresh_token: refreshToken,
+          scope: oidc.scope.split(/\s+/).filter(Boolean).join(' '),
+        })
         const refreshed: StoredSession = {
           accessToken: token.accessToken,
-          refreshToken: token.refreshToken ?? current.refreshToken,
+          refreshToken: token.refreshToken ?? refreshToken,
           expiresAt: token.expiresIn ? Date.now() + token.expiresIn * 1000 : undefined,
         }
         if (!sessionFenceRef.current.isCurrent(generation) || sessionRef.current !== current) return null
@@ -199,13 +206,22 @@ export function SessionProvider({ children }: PropsWithChildren) {
     })
     await request.makeAuthUrlAsync(discovery)
     const result = await request.promptAsync(discovery)
-    if (result.type !== 'success' || !result.params.code || !request.codeVerifier) throw new Error('sign_in_cancelled')
-    const token = await AuthSession.exchangeCodeAsync({
-      clientId: oidc.clientId,
+    if (result.type === 'error') {
+      const code = result.params.error
+      throw new Error(typeof code === 'string' && /^[a-z0-9_.-]{1,64}$/i.test(code)
+        ? `oidc_authorize_${code.toLowerCase()}`
+        : 'oidc_authorize_failed')
+    }
+    if (result.type !== 'success') throw new Error(`sign_in_${result.type}`)
+    if (!result.params.code || !request.codeVerifier) throw new Error('oidc_authorize_response_invalid')
+    if (!discovery.tokenEndpoint) throw new Error('oidc_token_endpoint_missing')
+    const token = await requestOidcToken(discovery.tokenEndpoint, {
+      grant_type: 'authorization_code',
+      client_id: oidc.clientId,
       code: result.params.code,
-      redirectUri,
-      extraParams: { code_verifier: request.codeVerifier },
-    }, discovery)
+      redirect_uri: redirectUri,
+      code_verifier: request.codeVerifier,
+    })
     const stored: StoredSession = {
       accessToken: token.accessToken,
       refreshToken: token.refreshToken,
