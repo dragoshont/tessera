@@ -46,7 +46,7 @@ export function Button({ label, icon, tone = 'secondary', busy, disabled, style,
   return (
     <Pressable accessibilityRole="button" disabled={disabled || busy} style={({ pressed }) => [styles.button, { backgroundColor, opacity: disabled || busy ? 0.45 : pressed ? 0.72 : 1 }, style as ViewStyle]} {...props}>
       {busy ? <ActivityIndicator color={color} /> : icon ? <Icon name={icon} color={color} size={17} /> : null}
-      <Text style={[styles.buttonLabel, { color }]}>{label}</Text>
+      <Text maxFontSizeMultiplier={1.5} style={[styles.buttonLabel, { color }]}>{label}</Text>
     </Pressable>
   )
 }
@@ -56,7 +56,7 @@ export function Status({ value }: { value: string }) {
   const normalized = value.toUpperCase()
   const color = normalized.includes('FAIL') || normalized.includes('ERROR') || normalized.includes('REVOK') || normalized.includes('OFFLINE') ? palette.danger
     : normalized.includes('WARN') || normalized.includes('WAIT') || normalized.includes('DEGRA') ? palette.warning : palette.success
-  return <View style={[styles.status, { borderColor: color }]}><View style={[styles.dot, { backgroundColor: color }]} /><Text style={[styles.statusText, { color }]}>{value.replaceAll('_', ' ')}</Text></View>
+  return <View style={[styles.status, { borderColor: color }]}><View style={[styles.dot, { backgroundColor: color }]} /><Text maxFontSizeMultiplier={1.4} style={[styles.statusText, { color }]}>{value.replaceAll('_', ' ')}</Text></View>
 }
 
 export function Empty({ icon, title, detail, action }: { icon: SymbolViewProps['name']; title: string; detail: string; action?: ReactNode }) {
