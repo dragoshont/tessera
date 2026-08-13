@@ -104,6 +104,9 @@ public sealed record BrokerHostOptions
 
     /// <summary>Optional outbound MCP client override for deterministic tests.</summary>
     public IMcpClientRuntime? McpClientRuntimeOverride { get; init; }
+
+    /// <summary>Optional fixed Foundry realtime signaling transport override for tests.</summary>
+    public IRealtimeFoundryTransport? RealtimeTransportOverride { get; init; }
 }
 
 /// <summary>The broker composition root: config → pipeline → host + endpoints + MCP.</summary>
@@ -340,6 +343,11 @@ public static class BrokerHost
                 sp.GetService<R2PluginCatalog>(),
                 sp.GetRequiredService<Tessera.Providers.IHttpTransport>(),
                 pluginRegistry.ListPlugins().OfType<ITesseraCatalogPlugin>().ToArray()));
+            services.AddSingleton<IRealtimeFoundryTransport>(options.RealtimeTransportOverride
+                ?? new RealtimeFoundryTransport());
+            services.AddSingleton<RealtimeReadinessService>();
+            services.AddSingleton<RealtimeVoiceService>();
+            services.AddHostedService(sp => sp.GetRequiredService<RealtimeReadinessService>());
         }
         services.AddSingleton(pluginRegistry);
         services.AddSingleton<IMcpClientRuntime>(options.McpClientRuntimeOverride
@@ -447,6 +455,7 @@ public static class BrokerHost
         app.MapPortalEndpoints();
         app.MapContinuityEndpoints();
         app.MapR2ProductEndpoints();
+        if (status.ProductConfigured) app.MapRealtimeVoiceEndpoints();
         app.MapCallerBroker();
         app.MapEgressProxy();
         if (config.OAuthMcp.Enabled)

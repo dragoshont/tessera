@@ -35,6 +35,7 @@ test('delivered primary controls have real targets, accessible names, and no con
     if (path.endsWith('/settings/model-profiles')) return fulfill(route, pageOf([]))
     if (path.endsWith('/settings/model-gateways')) return fulfill(route, { items: [{ id: 'homelab', displayName: 'Homelab LiteLLM' }] })
     if (path.endsWith('/settings')) return fulfill(route, { defaultChatModelProfileId: null, defaultLightweightModelProfileId: null, timezone: 'Europe/Bucharest', approvalDefaults: {}, memoryControls: {}, version: 1 })
+    if (path.endsWith('/realtime-voice/status')) return fulfill(route, { state: 'UNAVAILABLE', blockedCode: 'not_configured', supportsTools: false, maxSessionSeconds: 900, checkedAt: null, validUntil: null, version: 1 })
     if (path.endsWith('/integrations/sources')) return fulfill(route, { items: [{ id: 'local', name: 'Installed and local', state: 'READY', errorCode: null }] })
     if (path.endsWith('/accounts/regina-maria/connectors')) return fulfill(route, { items: [] })
     if (path.endsWith('/conversations') || path.endsWith('/accounts') || path.endsWith('/plugins') || path.endsWith('/capabilities') || path.endsWith('/jobs') || path.endsWith('/memory') || path.endsWith('/activity') || path.endsWith('/actions')) return fulfill(route, pageOf([]))

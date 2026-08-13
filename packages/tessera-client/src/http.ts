@@ -47,9 +47,10 @@ export function createHttpClient(options: HttpClientOptions) {
     if (authLease && !authLease.isCurrent()) throw new Error('session_invalidated')
     return result
   }
-  function mutate<T>(path: string, method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', body: unknown, prefix?: string) {
+  function mutate<T>(path: string, method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', body: unknown, prefix?: string, idempotencyKey?: string) {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (prefix) headers['Idempotency-Key'] = key(prefix)
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey
+    else if (prefix) headers['Idempotency-Key'] = key(prefix)
     return request<T>(path, { method, headers, body: JSON.stringify(body) })
   }
   return { request, mutate }

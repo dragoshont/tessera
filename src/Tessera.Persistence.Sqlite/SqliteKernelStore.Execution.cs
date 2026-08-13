@@ -362,7 +362,7 @@ public sealed partial class SqliteKernelStore
                                         AND candidate.plugin_version IS $pluginVersion
                                         AND candidate.target_hash IS $targetHash
                                         AND candidate.execution_id IS $executionId
-                                        AND (candidate.plugin_id IS NULL OR EXISTS (
+                                        AND (candidate.plugin_id IS NULL OR candidate.plugin_id='local' OR EXISTS (
                                                 SELECT 1 FROM plugin_installations plugin
                                                 WHERE plugin.owner_principal_id=candidate.owner_principal_id
                                                     AND plugin.plugin_id=candidate.plugin_id
@@ -506,7 +506,7 @@ public sealed partial class SqliteKernelStore
               AND plugin_version IS $pluginVersion
               AND target_hash IS $targetHash
               AND execution_id IS $executionId
-                            AND (plugin_id IS NULL OR EXISTS(
+                            AND (plugin_id IS NULL OR plugin_id='local' OR EXISTS(
                                         SELECT 1 FROM plugin_installations plugin
                                         WHERE plugin.owner_principal_id=actions.owner_principal_id
                                             AND plugin.plugin_id=actions.plugin_id AND plugin.plugin_version=actions.plugin_version

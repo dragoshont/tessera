@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { router } from 'expo-router'
-import { GenerationFence, type Conversation, type Message, type ModelProfile } from '@tessera/client'
+import { GenerationFence, type Conversation, type Message, type ModelProfile, type RealtimeVoiceStatus } from '@tessera/client'
 
 import { Button, Empty, ErrorState, Icon, Loading, Status, sharedStyles } from '@/components/ui'
 import { Radius, Space, usePalette } from '@/constants/theme'
 import { useSession } from '@/providers/session'
+import { useNativeRealtimeVoice, type NativeVoiceView } from '@/hooks/use-native-realtime-voice'
 
 export default function ChatScreen() {
   const palette = usePalette()
@@ -14,6 +15,7 @@ export default function ChatScreen() {
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [profile, setProfile] = useState<ModelProfile | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [voiceStatus, setVoiceStatus] = useState<RealtimeVoiceStatus>()
   const [input, setInput] = useState('')
   const [streamStatus, setStreamStatus] = useState<string | null>(null)
   const [streamingText, setStreamingText] = useState('')
@@ -27,6 +29,13 @@ export default function ChatScreen() {
   const messageFence = useRef(new GenerationFence())
   const streamFence = useRef(new GenerationFence())
   const streamAbort = useRef<AbortController | null>(null)
+  const realtimeVoice = useNativeRealtimeVoice({
+    api,
+    conversationId: conversation?.id,
+    status: voiceStatus,
+    onTurnSaved: () => conversation && void loadMessages(conversation.id),
+    onApprovalRequired: (actionId) => router.push(`/action/${actionId}`),
+  })
 
   const loadMessages = async (id: string) => {
     const result = await messageFence.current.runLatest(() => api.messages(id))
@@ -40,13 +49,17 @@ export default function ChatScreen() {
     try {
       const setup = await api.setupStatus()
       if (setup.ai.state === 'READY_TO_CONNECT') await api.bootstrapSetup()
-      const [conversations, profiles, settings] = await Promise.all([api.conversations(), api.modelProfiles(), api.settings()])
+      const [conversations, profiles, settings, realtimeStatus] = await Promise.all([
+        api.conversations(), api.modelProfiles(), api.settings(),
+        api.realtimeVoiceStatus().catch(() => ({ state: 'UNAVAILABLE' as const, blockedCode: 'Realtime voice is not enabled on this server.', supportsTools: false, maxSessionSeconds: 900, checkedAt: null, validUntil: null, version: 1 })),
+      ])
       const selectedProfile = profiles.items.find((item) => item.profileId === settings.defaultChatModelProfileId) ?? profiles.items.find((item) => item.enabled) ?? null
       const selectedConversation = conversations.items.find((item) => item.id === activeConversationId.current)
         ?? conversations.items.find((item) => item.state === 'ACTIVE')
         ?? null
       setConversations(conversations.items.filter((item) => item.state !== 'DELETED'))
       setProfile(selectedProfile)
+      setVoiceStatus(realtimeStatus)
       setConversation(selectedConversation)
       activeConversationId.current = selectedConversation?.id ?? null
       if (selectedConversation) await loadMessages(selectedConversation.id)
@@ -163,6 +176,7 @@ export default function ChatScreen() {
             </ScrollView>
             <Button label="New" icon="square.and.pencil" busy={creating} disabled={sending} onPress={() => void createConversation()} />
           </View>
+          {conversation ? <NativeVoicePanel voice={realtimeVoice.voice} onStart={() => void realtimeVoice.start()} onRetry={() => void realtimeVoice.retry()} onToggleMute={realtimeVoice.toggleMute} onInterrupt={realtimeVoice.interrupt} onEnd={() => void realtimeVoice.end()} /> : null}
           <FlatList ref={list} data={messages} keyExtractor={(item) => item.id} renderItem={renderMessage} contentContainerStyle={[styles.list, !messages.length && !streamingText && styles.emptyList]} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />} ListEmptyComponent={streamingText ? null : <Empty icon="message" title="What should Tessera help with?" detail="Ask a question, inspect connected information, or explicitly ask Tessera to remember something." />} ListFooterComponent={streamingText ? <View style={[styles.message, styles.theirs, { backgroundColor: palette.surface, borderColor: palette.line }]}><Text style={[styles.speaker, { color: palette.muted }]}>Tessera · streaming</Text><Text style={[sharedStyles.body, { color: palette.text }]}>{streamingText}</Text></View> : null} />
           {streamStatus ? <View style={[styles.stream, { backgroundColor: palette.accentSoft }]}><Status value={streamStatus} /></View> : null}
           {error ? <Text accessibilityRole="alert" style={[styles.error, { color: palette.danger }]}>{error}</Text> : null}
@@ -176,12 +190,45 @@ export default function ChatScreen() {
   )
 }
 
+function NativeVoicePanel({ voice, onStart, onRetry, onToggleMute, onInterrupt, onEnd }: {
+  voice: NativeVoiceView; onStart: () => void; onRetry: () => void; onToggleMute: () => void; onInterrupt: () => void; onEnd: () => void
+}) {
+  const palette = usePalette()
+  const active = ['NEGOTIATING', 'LISTENING', 'USER_SPEAKING', 'ASSISTANT_SPEAKING', 'TOOL_RUNNING', 'APPROVAL_REQUIRED', 'ENDING'].includes(voice.state)
+  const retryable = ['PERMISSION_DENIED', 'INTERRUPTED', 'SESSION_EXPIRED', 'ERROR'].includes(voice.state)
+  const detail = voice.state === 'UNAVAILABLE' ? (voice.blockedCode ?? 'Realtime voice is unavailable.')
+    : voice.state === 'PERMISSION_DENIED' ? 'Allow microphone access in Settings, then retry explicitly.'
+    : voice.state === 'NEGOTIATING' ? 'Exchanging SDP only. Audio goes directly between this iPhone and Foundry.'
+    : voice.state === 'INTERRUPTED' ? 'Voice stopped after an audio or network interruption.'
+    : voice.state === 'SESSION_EXPIRED' ? 'The session expired. Start a new voice session to continue.'
+    : voice.state === 'TOOL_RUNNING' ? `Running ${voice.toolName ?? 'a reviewed tool'} through Tessera.`
+    : voice.state === 'APPROVAL_REQUIRED' ? 'Voice cannot approve this action. Review the exact Action now.'
+    : voice.state === 'ERROR' ? (voice.blockedCode ?? 'Voice ended safely. Typed Chat remains available.')
+    : voice.muted ? 'Microphone muted.' : 'Captions are visible and completed turns are saved here.'
+  return <View style={[styles.voice, { borderColor: palette.line, backgroundColor: palette.background }]} accessibilityLabel="Realtime voice">
+    <View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>Realtime voice</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>Direct WebRTC media</Text></View><Status value={voice.state.replaceAll('_', ' ')} /></View>
+    <Text accessibilityLiveRegion="polite" style={[sharedStyles.detail, { color: palette.muted }]}>{detail}</Text>
+    {voice.userCaption ? <Text style={[sharedStyles.body, { color: palette.text }]}><Text style={{ fontWeight: '700' }}>You: </Text>{voice.userCaption}</Text> : null}
+    {voice.assistantCaption ? <Text style={[sharedStyles.body, { color: palette.text }]}><Text style={{ fontWeight: '700' }}>Tessera: </Text>{voice.assistantCaption}</Text> : null}
+    <View style={sharedStyles.actions}>
+      {voice.state === 'IDLE' ? <Button label="Start voice" icon="mic.fill" tone="primary" onPress={onStart} /> : null}
+      {voice.state === 'UNAVAILABLE' ? <Button label="Voice unavailable" icon="mic.slash" disabled /> : null}
+      {voice.state === 'REQUESTING_PERMISSION' || voice.state === 'NEGOTIATING' || voice.state === 'ENDING' ? <Button label={voice.state === 'ENDING' ? 'Ending voice' : 'Connecting voice'} busy disabled /> : null}
+      {retryable ? <Button label="Retry voice" icon="arrow.clockwise" onPress={onRetry} /> : null}
+      {active && voice.state !== 'NEGOTIATING' && voice.state !== 'ENDING' ? <Button label={voice.muted ? 'Unmute' : 'Mute'} icon={voice.muted ? 'mic.fill' : 'mic.slash'} accessibilityState={{ selected: Boolean(voice.muted) }} onPress={onToggleMute} /> : null}
+      {voice.state === 'ASSISTANT_SPEAKING' ? <Button label="Interrupt" icon="stop.circle" onPress={onInterrupt} /> : null}
+      {active && voice.state !== 'ENDING' ? <Button label="End voice" icon="phone.down.fill" tone="danger" onPress={onEnd} /> : null}
+    </View>
+  </View>
+}
+
 const styles = StyleSheet.create({
   list: { padding: Space.lg, gap: Space.md, paddingBottom: Space.xl },
   conversationBar: { borderBottomWidth: StyleSheet.hairlineWidth, padding: Space.sm, flexDirection: 'row', alignItems: 'center', gap: Space.sm },
   conversationList: { gap: Space.sm, alignItems: 'center' },
   conversationChip: { maxWidth: 180, minHeight: 44, justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, paddingHorizontal: Space.md },
   conversationText: { fontSize: 13, fontWeight: '600' },
+  voice: { borderBottomWidth: StyleSheet.hairlineWidth, padding: Space.md, gap: Space.sm },
   emptyList: { flexGrow: 1 },
   message: { maxWidth: '88%', borderRadius: Radius.md, padding: Space.md, gap: Space.xs, borderWidth: StyleSheet.hairlineWidth },
   mine: { alignSelf: 'flex-end', borderBottomRightRadius: 3 },

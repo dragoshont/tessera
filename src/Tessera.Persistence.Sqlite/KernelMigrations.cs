@@ -4,7 +4,7 @@ internal sealed record KernelMigration(int Version, string Sql);
 
 internal static class KernelMigrations
 {
-    public const int LatestVersion = 15;
+    public const int LatestVersion = 16;
 
     public static IReadOnlyList<KernelMigration> All { get; } =
     [
@@ -23,7 +23,124 @@ internal static class KernelMigrations
         new KernelMigration(13, Migration13),
         new KernelMigration(14, Migration14),
         new KernelMigration(15, Migration15),
+        new KernelMigration(16, Migration16),
     ];
+
+    private const string Migration16 = """
+        ALTER TABLE execution_events RENAME TO execution_events_v15;
+        DROP INDEX ix_events_owner_execution_sequence;
+        CREATE TABLE execution_events (
+            owner_principal_id TEXT NOT NULL, event_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK (sequence > 0),
+            event_type TEXT NOT NULL CHECK (event_type IN (
+                'status','text','capability_requested','approval_required','capability_result','failure','completed',
+                'realtime_negotiated','realtime_ended','realtime_turn_saved')),
+            occurred_at TEXT NOT NULL, message_id TEXT NULL, capability_call_id TEXT NULL,
+            action_id TEXT NULL, data_json TEXT NOT NULL,
+            PRIMARY KEY (owner_principal_id, event_id),
+            FOREIGN KEY (owner_principal_id) REFERENCES principals(principal_id),
+            UNIQUE (owner_principal_id, execution_id, sequence)
+        );
+        INSERT INTO execution_events(owner_principal_id,event_id,execution_id,sequence,event_type,
+            occurred_at,message_id,capability_call_id,action_id,data_json)
+        SELECT owner_principal_id,event_id,execution_id,sequence,event_type,occurred_at,message_id,
+            capability_call_id,action_id,data_json FROM execution_events_v15;
+        DROP TABLE execution_events_v15;
+        CREATE INDEX ix_events_owner_execution_sequence
+            ON execution_events(owner_principal_id,execution_id,sequence);
+
+        CREATE TABLE realtime_session_receipts (
+            owner_principal_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            client_attempt_id TEXT NOT NULL,
+            idempotency_key_hash TEXT NOT NULL,
+            offer_hash TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('NEGOTIATING','NEGOTIATED','CLIENT_ENDED','EXPIRED','FAILED')),
+            negotiation_generation INTEGER NOT NULL CHECK (negotiation_generation >= 1),
+            negotiation_deadline TEXT NOT NULL,
+            provider_model_id TEXT NOT NULL,
+            provider_model_version TEXT NOT NULL,
+            provider_deployment_ref TEXT NOT NULL,
+            negotiated_at TEXT NULL,
+            expires_at TEXT NOT NULL,
+            ended_at TEXT NULL,
+            end_reason TEXT NULL,
+            failure_code TEXT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,session_id),
+            UNIQUE (owner_principal_id,client_attempt_id),
+            UNIQUE (owner_principal_id,idempotency_key_hash),
+            FOREIGN KEY (owner_principal_id,conversation_id)
+                REFERENCES conversations(owner_principal_id,conversation_id)
+        );
+
+        CREATE TABLE realtime_session_tools (
+            owner_principal_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            exposed_name TEXT NOT NULL,
+            plugin_id TEXT NOT NULL,
+            plugin_version TEXT NOT NULL,
+            capability_id TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            account_id TEXT NULL,
+            schema_hash TEXT NOT NULL,
+            side_effect_class TEXT NOT NULL,
+            PRIMARY KEY (owner_principal_id,session_id,exposed_name),
+            FOREIGN KEY (owner_principal_id,session_id)
+                REFERENCES realtime_session_receipts(owner_principal_id,session_id),
+            FOREIGN KEY (owner_principal_id,account_id)
+                REFERENCES connected_accounts(owner_principal_id,account_id)
+        );
+
+        CREATE TABLE realtime_turn_receipts (
+            owner_principal_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            client_turn_id TEXT NOT NULL,
+            input_item_id TEXT NOT NULL,
+            output_item_id TEXT NULL,
+            user_message_id TEXT NOT NULL,
+            assistant_message_id TEXT NULL,
+            assistant_disposition TEXT NOT NULL CHECK (assistant_disposition IN ('COMPLETED','INTERRUPTED','FAILED')),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (owner_principal_id,session_id,client_turn_id),
+            UNIQUE (owner_principal_id,session_id,input_item_id),
+            UNIQUE (owner_principal_id,session_id,output_item_id),
+            FOREIGN KEY (owner_principal_id,session_id)
+                REFERENCES realtime_session_receipts(owner_principal_id,session_id),
+            FOREIGN KEY (owner_principal_id,user_message_id)
+                REFERENCES messages(owner_principal_id,message_id),
+            FOREIGN KEY (owner_principal_id,assistant_message_id)
+                REFERENCES messages(owner_principal_id,message_id)
+        );
+
+        CREATE TABLE realtime_tool_bindings (
+            owner_principal_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            client_call_id TEXT NOT NULL,
+            capability_call_id TEXT NULL,
+            capability_result_id TEXT NULL,
+            action_id TEXT NULL,
+            state TEXT NOT NULL CHECK (state IN ('REQUESTED','RUNNING','APPROVAL_REQUIRED','COMPLETED','FAILED','RECONCILIATION_REQUIRED')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,session_id,client_call_id),
+            FOREIGN KEY (owner_principal_id,session_id)
+                REFERENCES realtime_session_receipts(owner_principal_id,session_id),
+            FOREIGN KEY (owner_principal_id,capability_call_id)
+                REFERENCES capability_calls(owner_principal_id,call_id),
+            FOREIGN KEY (owner_principal_id,capability_result_id)
+                REFERENCES capability_results(owner_principal_id,result_id),
+            FOREIGN KEY (owner_principal_id,action_id)
+                REFERENCES actions(owner_principal_id,action_id)
+        );
+
+        CREATE INDEX ix_realtime_sessions_owner_conversation_state
+            ON realtime_session_receipts(owner_principal_id,conversation_id,state,expires_at);
+        CREATE INDEX ix_realtime_tools_owner_capability
+            ON realtime_session_tools(owner_principal_id,plugin_id,plugin_version,capability_id,capability_version,account_id);
+        """;
 
     private const string Migration15 = """
         ALTER TABLE capability_calls ADD COLUMN external_server_id TEXT NULL;

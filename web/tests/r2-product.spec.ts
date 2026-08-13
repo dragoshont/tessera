@@ -237,6 +237,86 @@ test('Chat grants an arbitrary integration from account capability metadata', as
   await expect(page.getByRole('button', { name: 'Integration allowed' })).toBeVisible()
 })
 
+test('Chat voice negotiates SDP only, persists captions, and stops local media', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { permissionCalls: 0, peerCalls: 0, addTrackCalls: 0, dataChannelCalls: 0, offerCalls: 0, localDescriptionCalls: 0, stopped: false, channel: null as null | { onmessage?: (event: { data: string }) => void }, sent: [] as string[], fetches: [] as string[] }
+    const originalFetch = globalThis.fetch.bind(globalThis)
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => { state.fetches.push(String(input)); return originalFetch(input, init) }) as typeof fetch
+    class FakeTrack { enabled = true; stop() { state.stopped = true } }
+    const track = new FakeTrack()
+    const stream = { getTracks: () => [track], getAudioTracks: () => [track] }
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => { state.permissionCalls += 1; return stream } } })
+    class FakeChannel {
+      readyState = 'open'; onopen?: () => void; onmessage?: (event: { data: string }) => void; onerror?: () => void
+      constructor() { state.channel = this }
+      send(value: string) { state.sent.push(value) }
+      close() { this.readyState = 'closed' }
+    }
+    class FakePeer {
+      connectionState = 'new'; onconnectionstatechange?: () => void; ontrack?: () => void; channel = new FakeChannel()
+      constructor() { state.peerCalls += 1 }
+      addTrack() { state.addTrackCalls += 1; return {} }
+      createDataChannel() { state.dataChannelCalls += 1; return this.channel }
+      async createOffer() { state.offerCalls += 1; return { type: 'offer', sdp: 'v=0\r\nm=audio 9 RTP/AVP 111\r\n' } }
+      async setLocalDescription() { state.localDescriptionCalls += 1 }
+      async setRemoteDescription() { this.connectionState = 'connected'; this.onconnectionstatechange?.(); this.channel.onopen?.() }
+      close() { this.connectionState = 'closed' }
+    }
+    Object.defineProperty(globalThis, 'RTCPeerConnection', { configurable: true, value: FakePeer })
+    Object.defineProperty(globalThis, '__tesseraVoiceTest', { configurable: true, value: state })
+  })
+  const profile = { profileId: 'profile-1', accountId: 'model-account', adapterKind: 'openai-compatible-remote', endpoint: 'https://model.example/v1', model: 'alpha', contextLimit: 8192, enabled: true, streamingSupported: true, toolSupport: true, version: 1 }
+  const conversation = { id: 'conversation-voice', conversationId: 'conversation-voice', title: 'Voice thread', state: 'ACTIVE', modelProfileId: 'profile-1', createdAt: '2026-08-13T08:00:00Z', updatedAt: '2026-08-13T08:00:00Z', version: 1 }
+  let negotiation: Record<string, unknown> | null = null
+  let saved = false
+  let ended = false
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/setup/status')) return fulfill(route, connectedSetup)
+    if (path.endsWith('/settings/model-profiles')) return fulfill(route, pageOf([profile]))
+    if (path.endsWith('/settings')) return fulfill(route, { defaultChatModelProfileId: profile.profileId, defaultLightweightModelProfileId: profile.profileId, timezone: 'UTC', approvalDefaults: {}, memoryControls: {}, version: 1 })
+    if (path.endsWith('/realtime-voice/status')) return fulfill(route, { state: 'READY', blockedCode: null, supportsTools: false, maxSessionSeconds: 900, checkedAt: '2026-08-13T08:00:00Z', validUntil: '2026-08-13T08:05:00Z', version: 1 })
+    if (path.endsWith('/conversations/conversation-voice/realtime-sessions') && route.request().method() === 'POST') { negotiation = route.request().postDataJSON() as Record<string, unknown>; return fulfill(route, { sessionId: 'session-1', answerSdp: 'v=0\r\nm=audio 9 RTP/AVP 111\r\n', negotiatedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), maxSessionSeconds: 900 }, 201) }
+    if (path.endsWith('/conversations/conversation-voice/realtime-sessions/session-1/turns')) { saved = true; return fulfill(route, { sessionId: 'session-1', clientTurnId: 'turn-1', replayed: false }, 201) }
+    if (path.endsWith('/conversations/conversation-voice/realtime-sessions/session-1/end')) { ended = true; return fulfill(route, { id: 'session-1', resourceType: 'realtime_session', version: 2 }) }
+    if (path.endsWith('/conversations/conversation-voice/active-execution')) return fulfill(route, null)
+    if (path.endsWith('/conversations/conversation-voice/grants')) return fulfill(route, { accountGrants: [], capabilityGrants: [], version: 1 })
+    if (path.endsWith('/conversations/conversation-voice/messages')) return fulfill(route, pageOf(saved ? [
+      { id: 'voice-user', messageId: 'voice-user', conversationId: conversation.id, role: 'USER', status: 'PERSISTED', parts: [{ id: 'part-user', kind: 'TEXT', text: 'Hello voice', capabilityCallId: null, capabilityResultId: null, actionId: null, evidenceRefs: [], errorCode: null }], createdAt: '2026-08-13T08:00:01Z', completedAt: '2026-08-13T08:00:01Z', retryOf: null, version: 1 },
+      { id: 'voice-assistant', messageId: 'voice-assistant', conversationId: conversation.id, role: 'ASSISTANT', status: 'COMPLETED', parts: [{ id: 'part-assistant', kind: 'TEXT', text: 'Hello back', capabilityCallId: null, capabilityResultId: null, actionId: null, evidenceRefs: [], errorCode: null }], createdAt: '2026-08-13T08:00:02Z', completedAt: '2026-08-13T08:00:02Z', retryOf: null, version: 1 },
+    ] : []))
+    if (path.endsWith('/conversations')) return fulfill(route, pageOf([conversation]))
+    if (path.endsWith('/accounts') || path.endsWith('/capabilities') || path.endsWith('/actions')) return fulfill(route, pageOf([]))
+    return fulfill(route, { code: 'not_found' }, 404)
+  })
+  await signIn(page)
+  await page.getByRole('button', { name: 'Start voice' }).click()
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { permissionCalls: number } }).__tesseraVoiceTest.permissionCalls), { timeout: 15_000 }).toBe(1)
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { peerCalls: number } }).__tesseraVoiceTest.peerCalls), { timeout: 15_000 }).toBe(1)
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { addTrackCalls: number } }).__tesseraVoiceTest.addTrackCalls), { timeout: 15_000 }).toBe(1)
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { dataChannelCalls: number } }).__tesseraVoiceTest.dataChannelCalls), { timeout: 15_000 }).toBe(1)
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { offerCalls: number } }).__tesseraVoiceTest.offerCalls), { timeout: 15_000 }).toBe(1)
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { localDescriptionCalls: number } }).__tesseraVoiceTest.localDescriptionCalls), { timeout: 15_000 }).toBe(1)
+  await expect.poll(() => negotiation, { timeout: 15_000 }).toMatchObject({ offerSdp: 'v=0\r\nm=audio 9 RTP/AVP 111\r\n' })
+  expect(negotiation).toEqual(expect.objectContaining({ clientAttemptId: expect.any(String) }))
+  expect(negotiation).not.toHaveProperty('endpoint')
+  expect(negotiation).not.toHaveProperty('model')
+  await expect(page.getByText('Listening', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await page.evaluate(() => {
+    const state = (globalThis as unknown as { __tesseraVoiceTest: { channel: { onmessage?: (event: { data: string }) => void } } }).__tesseraVoiceTest
+    state.channel.onmessage?.({ data: JSON.stringify({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'input-1', transcript: 'Hello voice' }) })
+    state.channel.onmessage?.({ data: JSON.stringify({ type: 'response.output_audio_transcript.done', item_id: 'output-1', transcript: 'Hello back' }) })
+  })
+  const fetches = await page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { fetches: string[] } }).__tesseraVoiceTest.fetches)
+  expect(fetches.some((url) => /foundry|openai\.azure\.com/i.test(url))).toBe(false)
+  await expect.poll(() => saved).toBe(true)
+  await expect(page.getByText('Hello voice', { exact: true })).toBeVisible()
+  await expect(page.getByText('Hello back', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'End voice' }).click()
+  await expect.poll(() => ended).toBe(true)
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __tesseraVoiceTest: { stopped: boolean } }).__tesseraVoiceTest.stopped)).toBe(true)
+})
+
 test('Jobs expose durable run history and waiting approval state', async ({ page }, testInfo) => {
   const job = { id: 'job-1', jobId: 'job-1', name: 'Weekly review', instruction: 'Review open FollowUps', desiredState: 'ACTIVE', health: 'READY', modelProfileId: 'profile-1', schedule: { kind: 'weekday', at: null, localTime: '08:00', timeZone: 'UTC', days: [1,2,3,4,5] }, nextOccurrence: '2026-08-11T08:00:00Z', accountGrants: ['github-account'], capabilityGrants: ['github.issues.create@1'], sideEffectGrants: ['ExternalCommunication'], contextPolicy: {}, lastRun: null, version: 1 }
   const run = { id: 'run-1', runId: 'run-1', jobId: 'job-1', scheduledFor: '2026-08-10T08:00:00Z', state: 'WAITING_FOR_APPROVAL', startedAt: '2026-08-10T08:00:01Z', endedAt: null, modelProfileId: 'profile-1', contextSnapshotRef: null, capabilityCallIds: [], accountIds: ['github-account'], actionIds: ['action-1'], outputRefs: [], evidenceRefs: [], errorCode: null, version: 2 }

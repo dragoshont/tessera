@@ -18,6 +18,11 @@ import {
   type ModelProfile,
   type Page,
   type Plugin,
+  type RealtimeNegotiation,
+  type RealtimeTurnInput,
+  type RealtimeTurnReceipt,
+  type RealtimeToolCallResult,
+  type RealtimeVoiceStatus,
   type ProblemBody,
   type Settings,
 } from '@tessera/client'
@@ -85,6 +90,12 @@ export const r2Api = {
     const emit=()=>{while(true){const lf=pending.indexOf('\n\n');const crlf=pending.indexOf('\r\n\r\n');const index=lf<0?crlf:crlf<0?lf:Math.min(lf,crlf);if(index<0)return;const separator=index===crlf&&crlf>=0?4:2;const block=pending.slice(0,index);pending=pending.slice(index+separator);let type='message';const data:string[]=[];for(const line of block.split(/\r?\n/)){if(line.startsWith('event:'))type=line.slice(6).trim();else if(line.startsWith('data:'))data.push(line.slice(5).trimStart())}if(data.length){const raw=data.join('\n');let value:unknown=raw;try{value=JSON.parse(raw)}catch{/* non-JSON provider-safe status */}onEvent({type,data:value})}}}
     while(true){const chunk=await reader.read();if(chunk.done)break;pending+=decoder.decode(chunk.value,{stream:true});emit()}pending+=decoder.decode();emit()
   },
+
+  realtimeVoiceStatus: () => request<RealtimeVoiceStatus>('/realtime-voice/status'),
+  negotiateRealtimeVoice: (conversationId: string, clientAttemptId: string, offerSdp: string) => mutate<RealtimeNegotiation>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions`, 'POST', { clientAttemptId, offerSdp }, 'realtime-negotiation'),
+  saveRealtimeTurn: (conversationId: string, sessionId: string, input: RealtimeTurnInput) => mutate<RealtimeTurnReceipt>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions/${encodeURIComponent(sessionId)}/turns`, 'POST', input, 'realtime-turn'),
+  invokeRealtimeTool: (conversationId: string, sessionId: string, clientCallId: string, name: string, args: Record<string, unknown>, idempotencyKey?: string) => mutate<RealtimeToolCallResult>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions/${encodeURIComponent(sessionId)}/tool-calls`, 'POST', { clientCallId, name, arguments: args }, 'realtime-tool', idempotencyKey),
+  endRealtimeVoice: (conversationId: string, sessionId: string, reason: string) => mutate<{ id: string; resourceType: string; version: number }>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions/${encodeURIComponent(sessionId)}/end`, 'POST', { reason }, 'realtime-end'),
 
   modelProfiles: () => request<R2Page<R2ModelProfile>>('/settings/model-profiles'),
   settings: () => request<R2Settings>('/settings'),

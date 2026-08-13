@@ -12,6 +12,11 @@ import {
   type ModelProfile,
   type Page,
   type Plugin,
+  type RealtimeNegotiation,
+  type RealtimeTurnInput,
+  type RealtimeTurnReceipt,
+  type RealtimeToolCallResult,
+  type RealtimeVoiceStatus,
   type Settings,
   type AuthLease,
   type RouteManager,
@@ -38,6 +43,11 @@ export class TesseraApi {
   conversations = () => this.http.request<Page<Conversation>>('/conversations')
   createConversation = (modelProfileId: string | null) => this.http.mutate<Conversation>('/conversations', 'POST', { title: 'New conversation', modelProfileId }, 'conversation')
   messages = (id: string) => this.http.request<Page<Message>>(`/conversations/${encodeURIComponent(id)}/messages`)
+  realtimeVoiceStatus = () => this.http.request<RealtimeVoiceStatus>('/realtime-voice/status')
+  negotiateRealtimeVoice = (conversationId: string, clientAttemptId: string, offerSdp: string) => this.http.mutate<RealtimeNegotiation>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions`, 'POST', { clientAttemptId, offerSdp }, 'realtime-negotiation')
+  saveRealtimeTurn = (conversationId: string, sessionId: string, input: RealtimeTurnInput) => this.http.mutate<RealtimeTurnReceipt>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions/${encodeURIComponent(sessionId)}/turns`, 'POST', input, 'realtime-turn')
+  invokeRealtimeTool = (conversationId: string, sessionId: string, clientCallId: string, name: string, args: Record<string, unknown>, idempotencyKey?: string) => this.http.mutate<RealtimeToolCallResult>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions/${encodeURIComponent(sessionId)}/tool-calls`, 'POST', { clientCallId, name, arguments: args }, 'realtime-tool', idempotencyKey)
+  endRealtimeVoice = (conversationId: string, sessionId: string, reason: string) => this.http.mutate<{ id: string; resourceType: string; version: number }>(`/conversations/${encodeURIComponent(conversationId)}/realtime-sessions/${encodeURIComponent(sessionId)}/end`, 'POST', { reason }, 'realtime-end')
   sendMessage = (id: string, modelProfileId: string, text: string) => this.http.mutate<{ messageId: string; executionId: string; replayed: boolean }>(`/conversations/${encodeURIComponent(id)}/messages`, 'POST', { text, modelProfileId }, 'message')
   modelProfiles = () => this.http.request<Page<ModelProfile>>('/settings/model-profiles')
   settings = () => this.http.request<Settings>('/settings')

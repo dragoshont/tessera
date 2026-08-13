@@ -51,6 +51,28 @@ public sealed partial class SqliteKernelStore
             : null;
     }
 
+    public async Task<ProductIdempotencyReceipt?> FindIdempotencyReceiptByResourceAsync(
+        string owner, string routeFamily, string resourceId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT idempotency_key,request_hash,response_status,response_body_json,resource_type,created_at
+            FROM idempotency_receipts
+            WHERE owner_principal_id=$owner AND route_family=$route AND resource_id=$resource
+            ORDER BY created_at LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$route", routeFamily);
+        command.Parameters.AddWithValue("$resource", resourceId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? new(owner, routeFamily, reader.GetString(0), reader.GetString(1), reader.GetInt32(2),
+                reader.GetString(3), reader.GetString(4), resourceId, ParseTimestamp(reader.GetString(5)))
+            : null;
+    }
+
     public async Task<PluginInstallCommitResult> CommitPluginInstallWithReceiptAsync(
         PluginInstallation installation,
         ProductIdempotencyReceipt receipt,

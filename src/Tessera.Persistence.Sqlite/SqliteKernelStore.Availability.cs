@@ -14,12 +14,18 @@ public sealed partial class SqliteKernelStore
         var pluginVersion = request.PluginId == "model-provider" && request.PluginVersion == "1"
             ? "1.0.0"
             : request.PluginVersion;
-        var plugin = await GetPluginInstallationAsync(
-            request.OwnerPrincipalId, request.PluginId, pluginVersion, cancellationToken).ConfigureAwait(false);
-        if (plugin is null || !plugin.Enabled)
+        var localContract = request.PluginId == "local" && pluginVersion == "1.0.0" && request.AccountId is null
+            && (request.ConversationId is not null || request.JobId is not null)
+            ? LocalCapabilityContract(request.CapabilityId, request.CapabilityVersion)
+            : null;
+        var plugin = localContract is null
+            ? await GetPluginInstallationAsync(
+                request.OwnerPrincipalId, request.PluginId, pluginVersion, cancellationToken).ConfigureAwait(false)
+            : null;
+        if (localContract is null && (plugin is null || !plugin.Enabled))
             return new(false, "plugin_disabled");
 
-        var contract = CapabilityContract(plugin.ManifestJson, request.CapabilityId, request.CapabilityVersion);
+        var contract = localContract ?? CapabilityContract(plugin!.ManifestJson, request.CapabilityId, request.CapabilityVersion);
         if (contract is null) return new(false, "capability_unavailable");
 
         ConnectedAccount? account = null;
@@ -66,6 +72,18 @@ public sealed partial class SqliteKernelStore
                 if(!grants.Capabilities.Contains((request.CapabilityId,request.CapabilityVersion)))return new(false,"conversation_capability_not_granted");
             }
         return new(true);
+    }
+
+    private static (bool AccountRequired, string[] RequiredPermissions, string SideEffectClass)? LocalCapabilityContract(
+        string capabilityId, string capabilityVersion)
+    {
+        if (capabilityVersion != "1") return null;
+        return capabilityId switch
+        {
+            "local.time" or "local.memory.why" => (false, [], "ReadOnly"),
+            "local.memory.remember" or "local.memory.correct" => (false, [], "LocalReversible"),
+            _ => null,
+        };
     }
 
     private static (bool AccountRequired, string[] RequiredPermissions, string SideEffectClass)? CapabilityContract(

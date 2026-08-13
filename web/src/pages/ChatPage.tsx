@@ -29,6 +29,7 @@ import {
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { recoveryMessage } from "../lib/product-error";
+import { useRealtimeVoice } from "../hooks/useRealtimeVoice";
 
 export function ChatPage() {
   const navigate = useNavigate();
@@ -107,6 +108,23 @@ export function ChatPage() {
   const activeConversation =
     conversations.data?.items.find((item) => item.id === selectedId) ??
     conversations.data?.items.find((item) => item.state === "ACTIVE");
+  const voiceStatus = useQuery({
+    queryKey: ["r2", "realtime-voice-status"],
+    queryFn: r2Api.realtimeVoiceStatus,
+    refetchInterval: (query) => query.state.data?.state === "CHECKING" ? 2000 : 5 * 60 * 1000,
+  });
+  const realtimeVoice = useRealtimeVoice({
+    conversationId: activeConversation?.id,
+    status: voiceStatus.data,
+    onTurnSaved: () => {
+      void queryClient.invalidateQueries({ queryKey: ["r2", "messages"] });
+      void queryClient.invalidateQueries({ queryKey: ["r2", "conversations"] });
+    },
+    onApprovalRequired: () => {
+      void queryClient.invalidateQueries({ queryKey: ["r2", "actions"] });
+      void queryClient.invalidateQueries({ queryKey: ["r2", "messages"] });
+    },
+  });
   const activeExecution = useQuery({
     queryKey: ["r2", "active-execution", activeConversation?.conversationId],
     queryFn: () => r2Api.activeExecution(activeConversation!.conversationId),
@@ -551,10 +569,17 @@ export function ChatPage() {
               ),
             )
           }
+          voice={activeConversation ? realtimeVoice.voice : undefined}
           onSend={(text) => send.mutate(text)}
           onStop={() => stop.mutate()}
           onConfigure={() => navigate("/settings")}
           onRetry={(id) => retry.mutate(id)}
+          onVoiceStart={() => void realtimeVoice.start()}
+          onVoiceRetry={() => void realtimeVoice.retry()}
+          onVoiceToggleMute={realtimeVoice.toggleMute}
+          onVoiceInterrupt={realtimeVoice.interrupt}
+          onVoiceEnd={() => void realtimeVoice.end()}
+          onVoiceEnableAudio={realtimeVoice.enableAudio}
         />
         {activeConversation ? (
           <div className="flex flex-wrap gap-2 border-t border-border py-4">

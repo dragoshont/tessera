@@ -307,6 +307,20 @@ public sealed class ModelGatewayOptions
     public IReadOnlyList<ModelGatewayEndpointOptions> Endpoints { get; init; } = [];
 }
 
+/// <summary>Server-owned Foundry realtime signaling configuration.</summary>
+public sealed class RealtimeVoiceOptions
+{
+    public bool Enabled { get; init; }
+    public string Endpoint { get; init; } = "";
+    public string CredentialRef { get; init; } = "";
+    public string AuthenticationMode { get; init; } = "api-key";
+    public string Voice { get; init; } = "marin";
+    public string TranscriptionModel { get; init; } = "whisper-1";
+    public int MaxSessionSeconds { get; init; } = 900;
+    public int OwnerSessionLimit { get; init; } = 1;
+    public int GlobalSessionLimit { get; init; } = 32;
+}
+
 /// <summary>The full broker configuration, with fail-closed validation.</summary>
 public sealed class TesseraConfig
 {
@@ -345,6 +359,9 @@ public sealed class TesseraConfig
 
     /// <summary>Preconfigured internal model gateways such as homelab LiteLLM.</summary>
     public ModelGatewayOptions ModelGateways { get; init; } = new();
+
+    /// <summary>Fixed server-owned Foundry realtime signaling configuration.</summary>
+    public RealtimeVoiceOptions RealtimeVoice { get; init; } = new();
 
     /// <summary>
     /// Returns a list of problems. Empty list == valid. These checks encode the
@@ -500,6 +517,36 @@ public sealed class TesseraConfig
             }
         }
 
+        if (RealtimeVoice.Enabled)
+        {
+            if (!Uri.TryCreate(RealtimeVoice.Endpoint, UriKind.Absolute, out var endpoint)
+                || endpoint.Scheme != Uri.UriSchemeHttps
+                || !string.IsNullOrEmpty(endpoint.UserInfo)
+                || endpoint.AbsolutePath != "/"
+                || !string.IsNullOrEmpty(endpoint.Query)
+                || !string.IsNullOrEmpty(endpoint.Fragment))
+                problems.Add("realtimeVoice.endpoint must be an HTTPS origin without credentials, path, query, or fragment.");
+            if (string.IsNullOrWhiteSpace(RealtimeVoice.CredentialRef)
+                || RealtimeVoice.CredentialRef.Length > 256
+                || RealtimeVoice.CredentialRef.Any(char.IsControl))
+                problems.Add("realtimeVoice.credentialRef must be a bounded non-secret custody reference.");
+            if (RealtimeVoice.AuthenticationMode is not ("api-key" or "bearer"))
+                problems.Add("realtimeVoice.authenticationMode must be api-key or bearer.");
+            if (!IsBoundedRealtimeName(RealtimeVoice.Voice))
+                problems.Add("realtimeVoice.voice must be a bounded server-owned name.");
+            if (!IsBoundedRealtimeName(RealtimeVoice.TranscriptionModel))
+                problems.Add("realtimeVoice.transcriptionModel must be a bounded server-owned name.");
+            if (RealtimeVoice.OwnerSessionLimit is < 1 or > 8)
+                problems.Add("realtimeVoice.ownerSessionLimit must be between 1 and 8.");
+            if (RealtimeVoice.GlobalSessionLimit is < 1 or > 256
+                || RealtimeVoice.GlobalSessionLimit < RealtimeVoice.OwnerSessionLimit)
+                problems.Add("realtimeVoice.globalSessionLimit must be between ownerSessionLimit and 256.");
+        }
+
         return problems;
     }
+
+    private static bool IsBoundedRealtimeName(string value)
+        => value.Length is >= 1 and <= 128
+           && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
 }

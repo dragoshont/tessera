@@ -57,6 +57,7 @@
       "gatekeeperAssess": false,
       "identity": null,
       "extendInfo": {
+        "NSMicrophoneUsageDescription": "Tessera uses the microphone only while you explicitly run a realtime voice conversation.",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
           "NSAllowsLocalNetworking": false

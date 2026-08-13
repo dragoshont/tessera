@@ -19,7 +19,8 @@ public sealed partial class SqliteKernelStore :
     IKernelObservationRepository,
     IFollowUpRepository,
     ICapabilityAvailability,
-    IDurableExecutionRequestRepository
+    IDurableExecutionRequestRepository,
+    IRealtimeVoiceRepository
 {
     private const string TimestampFormat = "O";
     private readonly string _databasePath;

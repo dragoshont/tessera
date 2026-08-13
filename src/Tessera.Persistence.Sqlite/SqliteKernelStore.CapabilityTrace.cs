@@ -48,10 +48,12 @@ public sealed partial class SqliteKernelStore : ICapabilityTraceRepository
                             AND plugin_id=$plugin AND plugin_version=$pluginVersion
                             AND capability_id=$capability AND capability_version=$capabilityVersion
                             AND account_id IS $account AND input_hash=$hash
-                            AND EXISTS(SELECT 1 FROM plugin_installations installed
+                            AND ((capability_calls.plugin_id='local'
+                                    AND (capability_calls.conversation_id IS NOT NULL OR capability_calls.job_id IS NOT NULL))
+                                OR EXISTS(SELECT 1 FROM plugin_installations installed
                                 WHERE installed.owner_principal_id=capability_calls.owner_principal_id
                                     AND installed.plugin_id=capability_calls.plugin_id AND installed.plugin_version=capability_calls.plugin_version
-                                    AND installed.enabled=1 AND installed.removed=0)
+                                    AND installed.enabled=1 AND installed.removed=0))
                             AND (account_id IS NULL OR (
                                 EXISTS(SELECT 1 FROM connected_accounts connected
                                     WHERE connected.owner_principal_id=capability_calls.owner_principal_id

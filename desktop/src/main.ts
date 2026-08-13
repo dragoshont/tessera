@@ -16,6 +16,7 @@ import path from 'node:path'
 import { registerAppProtocol } from './app-protocol'
 import { AuthStore } from './auth-store'
 import { OidcCoordinator } from './oidc'
+import { isTrustedAudioPermission } from './permission-policy'
 import {
   API_ORIGIN,
   APP_URL,
@@ -165,8 +166,24 @@ function assertSender(event: IpcMainInvokeEvent): void {
 }
 
 function installPermissionPolicy(): void {
-  session.defaultSession.setPermissionCheckHandler(() => false)
-  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+  session.defaultSession.setPermissionCheckHandler((contents, permission, requestingOrigin, details) =>
+    Boolean(mainWindow && contents === mainWindow.webContents && isTrustedAudioPermission({
+      permission,
+      requestingUrl: details.requestingUrl,
+      securityOrigin: details.securityOrigin ?? requestingOrigin,
+      isMainFrame: details.isMainFrame,
+      mediaTypes: details.mediaType ? [details.mediaType] : [],
+    })))
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const mediaTypes = 'mediaTypes' in details && Array.isArray(details.mediaTypes) ? details.mediaTypes : []
+    callback(Boolean(mainWindow && contents === mainWindow.webContents && isTrustedAudioPermission({
+      permission,
+      requestingUrl: details.requestingUrl,
+      securityOrigin: 'securityOrigin' in details ? details.securityOrigin : undefined,
+      isMainFrame: details.isMainFrame,
+      mediaTypes,
+    })))
+  })
 }
 
 async function openExternal(value: unknown): Promise<void> {

@@ -15,7 +15,10 @@ export default {
       bundleIdentifier: 'io.tessera.mobile',
       supportsTablet: true,
       config: { usesNonExemptEncryption: false },
-      infoPlist: { NSFaceIDUsageDescription: 'Use Face ID to unlock your Tessera session.' },
+      infoPlist: {
+        NSFaceIDUsageDescription: 'Use Face ID to unlock your Tessera session.',
+        NSMicrophoneUsageDescription: 'Tessera uses the microphone only while you explicitly run a realtime voice conversation.',
+      },
     },
     android: {
       package: 'io.tessera.mobile',

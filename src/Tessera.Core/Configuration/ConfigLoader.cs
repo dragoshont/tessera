@@ -167,6 +167,7 @@ public static class ConfigLoader
             Freshness = config.Freshness,
             OAuthMcp = config.OAuthMcp,
             ModelGateways = config.ModelGateways,
+            RealtimeVoice = config.RealtimeVoice,
         };
     }
 
