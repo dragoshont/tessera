@@ -36,6 +36,7 @@ Each record is immutable once accepted; we supersede rather than edit.
 | [0027](0027-broker-fronts-oauth-mcp-upstreams.md) | **Broker fronts upstream OAuth-MCP servers** (per-user token bridge: RFC 9728 discovery + auth-code/PKCE acquisition → reuse `BearerToken` injection + the ADR 0015 MCP egress; cookie-harvest stays the fallback; `mobbin-clone-mcp` is the conformance target) | Proposed (2.0-beta) |
 | [0035](0035-server-owned-isolated-development-workspaces.md) | **Server-owned isolated development workspaces** (typed Jobs reuse canonical Conversations, approvals, outputs, and clients; constrained argv executes in hardened ephemeral Kubernetes Jobs) | Accepted; deployment approval pending |
 | [0036](0036-client-direct-foundry-realtime-voice.md) | **Client-direct Foundry realtime voice** (Broker holds the ephemeral secret and proxies SDP only; Web/Electron/iOS media flows directly to Foundry; canonical transcript/tool reuse) | Accepted locally; live deployment pending |
+| [0037](0037-paired-remote-hosts.md) | **Paired Remote Hosts use server-owned Jobs and signed Host requests** (P-256 device identity, separate capability/resource grants, fenced leases, bounded artifacts, and no second Job/Memory system) | Accepted for local implementation; live proof pending |
 
 ## Format
 
