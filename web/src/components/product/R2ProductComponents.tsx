@@ -220,9 +220,9 @@ export function ActionApprovalCard({
       {error ? <Alert variant="destructive" className="mt-3"><AlertDescription>{error}</AlertDescription></Alert> : null}
       {pending ? (
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button onClick={onApprove} disabled={busy}><ShieldCheck aria-hidden />Approve exact action</Button>
-          {onEdit ? <Button variant="outline" onClick={onEdit} disabled={busy}><SquarePen aria-hidden />Edit as new proposal</Button> : null}
-          <Button variant="outline" onClick={onCancel} disabled={busy}><X aria-hidden />Cancel</Button>
+          <Button className="min-h-11" onClick={onApprove} disabled={busy}><ShieldCheck aria-hidden />Approve exact action</Button>
+          {onEdit ? <Button className="min-h-11" variant="outline" onClick={onEdit} disabled={busy}><SquarePen aria-hidden />Edit as new proposal</Button> : null}
+          <Button className="min-h-11" variant="outline" onClick={onCancel} disabled={busy}><X aria-hidden />Cancel</Button>
         </div>
       ) : null}
       {action.state === 'RECONCILIATION_REQUIRED' ? (

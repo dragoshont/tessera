@@ -63,6 +63,18 @@
       "code": "web/src/components/product/R2ProductComponents.tsx",
       "reuses": ["JobRunTimeline"],
       "states": ["Ready", "LoadingConversations", "LoadingWorkspaces", "NoReadyWorkspaces", "Submitting", "WorkspaceUnavailable", "ExecutorUnavailable"]
+    },
+    "RemoteWorkspace": {
+      "story": "Product/RemoteWorkspace",
+      "code": "web/src/components/remote/RemoteWorkspace.tsx",
+      "reuses": ["AppShell", "ActionApprovalCard"],
+      "states": ["Unsupported", "Loading", "ZeroHosts", "PairingCodeEntry", "PairingReview", "PairingReviewDark", "PairingExpired", "Populated", "PartialError"]
+    },
+    "RemoteHostDetail": {
+      "story": "Product/RemoteHostDetail",
+      "code": "web/src/components/remote/RemoteWorkspace.tsx",
+      "reuses": ["ActionApprovalCard"],
+      "states": ["OnlineIdle", "BusyRunning", "OfflineWaitingForHost", "UpdateRequired", "Revoked", "ApprovalRequired", "Canceling", "SucceededWithArtifacts", "TruncatedArtifact", "TruncatedArtifactDark", "ExpiredArtifact"]
     }
   },
   "semanticTokens": {
