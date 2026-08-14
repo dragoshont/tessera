@@ -94,7 +94,7 @@ public sealed class RemoteHostSignedMessageAcceptanceTests
     }
 
     [Fact]
-    public async Task Duplicate_cross_owner_host_id_fails_closed_without_consuming_either_host()
+    public async Task Duplicate_cross_owner_host_id_is_rejected_without_disrupting_the_first_host()
     {
         using var database = new TemporaryDatabase();
         var store = database.CreateStore();
@@ -105,8 +105,23 @@ public sealed class RemoteHostSignedMessageAcceptanceTests
         using var secondKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         await CreateOnlineHostAsync(
             database.Path, store, firstOwner, firstKey, "host-collision", 0, "pairing-collision-a");
-        await CreateOnlineHostAsync(
-            database.Path, store, secondOwner, secondKey, "host-collision", 0, "pairing-collision-b");
+        var secret = RemoteHostValidation.CreateClaimSecret();
+        var now = DateTimeOffset.UtcNow;
+        await store.CreateHostPairingAsync(secondOwner, "pairing-collision-b",
+            RemoteHostValidation.HashClaimSecret(secret), "key-collision-b", new string('d', 64), now, now.AddMinutes(5));
+        var parameters = secondKey.ExportParameters(false);
+        var secondPublicKey = RemoteHostValidation.NormalizeP256PublicJwk(JsonSerializer.Serialize(new
+        {
+            kty = "EC", crv = "P-256", x = Base64Url(parameters.Q.X!), y = Base64Url(parameters.Q.Y!),
+        }));
+        var claim = new HostClaim(secondPublicKey, "KEYCHAIN_THIS_DEVICE_ONLY", "macOS", "arm64", "1.0.0", "1", [], []);
+        var claimed = await store.ClaimHostPairingAsync("pairing-collision-b", secret, claim,
+            "claim-collision-b", new string('e', 64), now.AddSeconds(1));
+        var confirmation = await store.ConfirmHostPairingAsync(secondOwner, "pairing-collision-b",
+            claimed.Pairing!.Version,
+            RemoteHostValidation.DeriveConfirmationCode("pairing-collision-b", secondPublicKey),
+            "host-collision", "Second Host", [], [], "confirm-collision-b", new string('f', 64), now.AddSeconds(2));
+        Assert.Equal("pairing_consumed", confirmation.Error);
 
         var envelope = Envelope(firstKey, "host-collision", HostAcceptedMessageOperations.Poll,
             "-", "message-collision", 1, DateTimeOffset.UtcNow.ToUnixTimeSeconds(), []);
@@ -115,11 +130,10 @@ public sealed class RemoteHostSignedMessageAcceptanceTests
             DateTimeOffset.FromUnixTimeSeconds(envelope.UnixTimestampSeconds),
             (_, _, _, _) => Task.FromResult(new HostMessageBusinessResponse(200, "{}")));
 
-        Assert.Equal(RemoteHostSignedRequestErrors.HostAuthInvalid, result.Error);
-        Assert.Equal(0, await ReadLastAcceptedSequenceAsync(database.Path, firstOwner, "host-collision"));
-        Assert.Equal(0, await ReadLastAcceptedSequenceAsync(database.Path, secondOwner, "host-collision"));
-        Assert.Equal(0, await CountAcceptedMessagesAsync(database.Path, firstOwner, "host-collision"));
-        Assert.Equal(0, await CountAcceptedMessagesAsync(database.Path, secondOwner, "host-collision"));
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, await ReadLastAcceptedSequenceAsync(database.Path, firstOwner, "host-collision"));
+        Assert.Equal(1, await CountAcceptedMessagesAsync(database.Path, firstOwner, "host-collision"));
+        Assert.Empty(await store.ListRemoteHostsAsync(secondOwner));
     }
 
     [Fact]

@@ -28,6 +28,7 @@ internal sealed partial class R2SchedulerService(SqliteKernelStore store, ICrede
                 await store.ExpireProposedActionsAsync(DateTimeOffset.UtcNow,stoppingToken).ConfigureAwait(false);
                 await store.RecoverStrandedStartedActionsAsync(DateTimeOffset.UtcNow,TimeSpan.FromMinutes(10),stoppingToken).ConfigureAwait(false);
                 await store.RecoverVerifiedActionsAsync(DateTimeOffset.UtcNow,stoppingToken).ConfigureAwait(false);
+                await store.RecoverExpiredHostLeasesAsync(DateTimeOffset.UtcNow, stoppingToken).ConfigureAwait(false);
                 await store.RecoverExpiredRunningRunsAsync(DateTimeOffset.UtcNow, stoppingToken).ConfigureAwait(false);
                 await ProcessCleanupAsync(stoppingToken).ConfigureAwait(false);
                 await ProcessWaitingAsync(stoppingToken).ConfigureAwait(false);
@@ -91,11 +92,15 @@ internal sealed partial class R2SchedulerService(SqliteKernelStore store, ICrede
     {
         foreach (var run in await store.ListQueuedRunsAsync(token).ConfigureAwait(false))
         {
-            var now=DateTimeOffset.UtcNow;var fence=await store.AcquireRunLeaseAsync(run.OwnerPrincipalId,run.RunId,Environment.MachineName,now,DispatchLeaseDuration,token).ConfigureAwait(false);if(fence is null||!await store.StartRunAsync(run.OwnerPrincipalId,run.RunId,run.Version,fence.Value,now,token).ConfigureAwait(false))continue;await store.ResetInterruptedCapabilityCallsAsync(run.OwnerPrincipalId,run.RunId,token).ConfigureAwait(false);
+            var now=DateTimeOffset.UtcNow;var fence=await store.AcquireRunLeaseAsync(run.OwnerPrincipalId,run.RunId,Environment.MachineName,now,DispatchLeaseDuration,token).ConfigureAwait(false);if(fence is null)continue;
             ProductJob? job=null;
             try
             {
                 job=(await store.ListJobsAsync(run.OwnerPrincipalId,token).ConfigureAwait(false)).Single(item=>item.JobId==run.JobId);
+                var remoteDispatch = await store.PrepareHostDispatchAsync(job, run, fence.Value, now, DispatchLeaseDuration, token).ConfigureAwait(false);
+                if (remoteDispatch.RoutedToHost)
+                    continue;
+                if(!await store.StartRunAsync(run.OwnerPrincipalId,run.RunId,run.Version,fence.Value,now,token).ConfigureAwait(false))continue;await store.ResetInterruptedCapabilityCallsAsync(run.OwnerPrincipalId,run.RunId,token).ConfigureAwait(false);
                 if(job.Kind=="DEVELOPMENT")
                 {
                     StartDevelopmentDispatch(job,run,fence.Value,token);

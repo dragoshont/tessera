@@ -1,7 +1,8 @@
 # R2 Remote Hosts API And Protocol Contract
 
-**Status:** Accepted phased contract; v18 registry routes are implemented, while
-the explicitly marked v19-v20 routes remain planned and are not shipped capability.
+**Status:** Accepted phased contract; v18 registry and v19 signed Host
+channel/lease/Job routes are implemented. Explicitly marked v20 artifact and
+later client/helper/live surfaces remain planned and are not shipped capability.
 
 All user routes are under `/api/v1`, require the existing verified owner boundary,
 and return `Cache-Control: no-store`. Unknown fields are rejected. Every mutation
@@ -49,16 +50,32 @@ PUT /hosts/{hostId}/grants
 POST /hosts/{hostId}/revoke
 { expectedVersion }
 202 HostDetailDto
+
+GET /jobs/{jobId}/execution-policy
+200 { jobId, location, preferredHostId, requiredCapabilities,
+    requiredResourceIds, fallbackPolicy, version }
+
+PUT /jobs/{jobId}/execution-policy
+{ expectedVersion, location, preferredHostId, requiredCapabilities,
+    requiredResourceIds, fallbackPolicy }
+200 { jobId, location, preferredHostId, requiredCapabilities,
+    requiredResourceIds, fallbackPolicy, version }
+
+DELETE /jobs/{jobId}/execution-policy
+{ expectedVersion }
+200 { jobId, location: SERVER, preferredHostId: null,
+    requiredCapabilities: [], requiredResourceIds: [], fallbackPolicy: NONE,
+    version: 0 }
+
+GET /job-runs/{runId}/remote
+200 { blocker, lease|null, host|null, checkpoints, artifacts: [] }
 ```
 
-Planned for v19-v20; these routes are not implemented by the v18 registry slice:
+Planned for v20 and later client surfaces; these routes are not implemented:
 
 ```text
 GET /hosts/{hostId}/activity
 200 Page<ActivityDto>
-
-GET /job-runs/{runId}/remote
-200 { blocker, lease|null, host|null, checkpoints, artifacts }
 
 GET /job-runs/{runId}/remote-artifacts
 200 Page<HostArtifactDto>
@@ -82,9 +99,8 @@ POST /host-pairings/{pairingId}/claim
 202 { pairingId, state: CLAIMED, expiresAt, version }
 ```
 
-The v19-v20 Host channel below is planned and is not implemented by the v18
-registry slice. These routes use the signed request envelope below and do not
-accept user bearer tokens as Host identity.
+The implemented v19 Host channel routes use the signed request envelope below
+and do not accept user bearer tokens as Host identity.
 
 ```text
 POST /host-channel/poll
@@ -101,8 +117,7 @@ POST /host-channel/leases/{leaseId}/events
 200 ResourceVersion
 
 POST /host-channel/leases/{leaseId}/complete
-{ leaseVersion, outcome, exitCode|null, output, outputSha256,
-  truncated, verification, localAttemptId }
+{ leaseVersion, outcome, output, outputSha256, truncated, localAttemptId }
 200 { lease, run, replayed }
 
 POST /host-channel/leases/{leaseId}/reconcile
@@ -115,6 +130,10 @@ Accepted acknowledgement atomically stores it on the lease and it is immutable.
 Every later event, completion, poll active-attempt report and reconciliation must
 carry the exact same value. A mismatch is `host_attempt_mismatch` and cannot prove
 non-execution.
+
+The v19 proof capability launches no process, so completion has no `exitCode` or
+generic verification object. Future process-backed profiles must add a new
+versioned capability contract rather than extending this body ambiguously.
 
 ## Signed Host request
 

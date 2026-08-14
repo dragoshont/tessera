@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Tessera.Core.Product;
 
@@ -40,6 +41,91 @@ public static class HostAcceptedMessageOperations
 
     public static bool IsValid(string value)
         => value is Poll or LeaseAck or LeaseEvents or LeaseComplete or LeaseReconcile;
+}
+
+public static class JobExecutionLocations
+{
+    public const string Server = "SERVER";
+    public const string Host = "HOST";
+    public const string AnyCompatibleHost = "ANY_COMPATIBLE_HOST";
+
+    public static bool IsValid(string value)
+        => value is Server or Host or AnyCompatibleHost;
+}
+
+public static class JobExecutionFallbackPolicies
+{
+    public const string None = "NONE";
+
+    public static bool IsValid(string value)
+        => value == None;
+}
+
+public static class JobRunBlockerCodes
+{
+    public const string WaitingForHost = "WAITING_FOR_HOST";
+    public const string WaitingForCapability = "WAITING_FOR_CAPABILITY";
+    public const string WaitingForResource = "WAITING_FOR_RESOURCE";
+    public const string HostDisconnected = "HOST_DISCONNECTED";
+    public const string HostUpdateRequired = "HOST_UPDATE_REQUIRED";
+
+    public static bool IsValid(string value)
+        => value is WaitingForHost or WaitingForCapability or WaitingForResource
+            or HostDisconnected or HostUpdateRequired;
+}
+
+public static class HostLeaseStates
+{
+    public const string Offered = "OFFERED";
+    public const string Acknowledged = "ACKNOWLEDGED";
+    public const string Running = "RUNNING";
+    public const string Completed = "COMPLETED";
+    public const string Failed = "FAILED";
+    public const string ReconciliationRequired = "RECONCILIATION_REQUIRED";
+    public const string Declined = "DECLINED";
+    public const string Expired = "EXPIRED";
+    public const string Revoked = "REVOKED";
+    public const string Disconnected = "DISCONNECTED";
+
+    public static bool IsValid(string value)
+        => value is Offered or Acknowledged or Running or Completed or Failed
+            or ReconciliationRequired or Declined or Expired or Revoked or Disconnected;
+}
+
+public static class HostLeaseCompletionOutcomes
+{
+    public const string Succeeded = "SUCCEEDED";
+    public const string Failed = "FAILED";
+    public const string Unknown = "UNKNOWN";
+
+    public static bool IsValid(string value)
+        => value is Succeeded or Failed or Unknown;
+}
+
+public static class HostPollAttemptStates
+{
+    public const string NotStarted = "NOT_STARTED";
+    public const string Started = "STARTED";
+    public const string Completed = "COMPLETED";
+
+    public static bool IsValid(string value)
+        => value is NotStarted or Started or Completed;
+}
+
+public static class HostLeaseEventTypes
+{
+    public const string HostConnected = "HOST_CONNECTED";
+    public const string HostDisconnected = "HOST_DISCONNECTED";
+    public const string JobAccepted = "JOB_ACCEPTED";
+    public const string StepStarted = "STEP_STARTED";
+    public const string StepCompleted = "STEP_COMPLETED";
+    public const string ApprovalRequired = "APPROVAL_REQUIRED";
+    public const string JobFailed = "JOB_FAILED";
+    public const string JobCompleted = "JOB_COMPLETED";
+
+    public static bool IsValid(string value)
+        => value is HostConnected or HostDisconnected or JobAccepted or StepStarted
+            or StepCompleted or ApprovalRequired or JobFailed or JobCompleted;
 }
 
 public sealed record HostSignedRequestEnvelope(
@@ -372,6 +458,120 @@ public static class RemoteHostProtocol
 
 public sealed record P256PublicJwk(string CanonicalJson, string X, string Y, string Thumbprint);
 
+public sealed record JobExecutionPolicy(
+    string OwnerPrincipalId,
+    string JobId,
+    string Location,
+    string? PreferredHostId,
+    IReadOnlyList<(string Id, string Version)> RequiredCapabilities,
+    IReadOnlyList<string> RequiredResourceIds,
+    string FallbackPolicy,
+    long Version);
+
+public sealed record JobRunBlocker(
+    string OwnerPrincipalId,
+    string RunId,
+    string Code,
+    string? HostId,
+    string? CapabilityId,
+    string? ResourceId,
+    string? DetailCode,
+    DateTimeOffset ObservedAt,
+    DateTimeOffset? ClearedAt,
+    long Version);
+
+public sealed record HostLeaseResource(
+    string OwnerPrincipalId,
+    string LeaseId,
+    string ResourceId,
+    long ResourceGrantVersion,
+    string AccessMode,
+    string Fingerprint);
+
+public sealed record HostLeaseEvent(
+    string OwnerPrincipalId,
+    string LeaseId,
+    string EventId,
+    long Sequence,
+    string Type,
+    DateTimeOffset OccurredAt,
+    string? Summary,
+    string? DataJson);
+
+public sealed record HostWorkLease(
+    string OwnerPrincipalId,
+    string LeaseId,
+    string RunId,
+    string JobId,
+    string HostId,
+    long SchedulerFence,
+    long Attempt,
+    string ProfileId,
+    string CapabilityId,
+    string CapabilityVersion,
+    long CapabilityGrantVersion,
+    string InputHash,
+    string State,
+    DateTimeOffset IssuedAt,
+    DateTimeOffset ExecuteUntil,
+    DateTimeOffset? AcknowledgedAt,
+    DateTimeOffset? CompletedAt,
+    string? LocalAttemptId,
+    string? Outcome,
+    string? OutputSha256,
+    string? FailureCode,
+    long Version);
+
+public sealed record HostResourceGrantTuple(
+    string ResourceId,
+    long ResourceGrantVersion,
+    string AccessMode,
+    string Fingerprint);
+
+public sealed record HostPollActiveAttempt(
+    string LeaseId,
+    string LocalAttemptId,
+    string State);
+
+public sealed record NormalizedRemoteHostOutput(
+    string Text,
+    bool Truncated,
+    string Sha256);
+
+public static partial class RemoteHostOutputNormalizer
+{
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+    public static NormalizedRemoteHostOutput Normalize(ReadOnlySpan<byte> input, int limitBytes = 32 * 1024)
+    {
+        if (limitBytes is < 1 or > 32 * 1024)
+            throw new ArgumentOutOfRangeException(nameof(limitBytes));
+        var decoded = StrictUtf8.GetString(input);
+        var normalized = decoded.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+        normalized = new string(normalized.Where(character => character is '\n' or '\t' || !char.IsControl(character)).ToArray());
+        normalized = SecretPattern().Replace(normalized, match => $"{match.Groups[1].Value}[REDACTED]");
+        var bytes = Encoding.UTF8.GetBytes(normalized);
+        var truncated = bytes.Length > limitBytes;
+        var length = Math.Min(bytes.Length, limitBytes);
+        while (length > 0 && length < bytes.Length && (bytes[length] & 0xC0) == 0x80) length--;
+        var persisted = bytes.AsSpan(0, length).ToArray();
+        return new(
+            StrictUtf8.GetString(persisted),
+            truncated,
+            Convert.ToHexStringLower(SHA256.HashData(persisted)));
+    }
+
+    [GeneratedRegex("(?i)(authorization\\s*[:=]\\s*(?:bearer\\s+)?|(?:api[_-]?key|token|password|secret)\\s*[:=]\\s*)[^\\s,;]+", RegexOptions.CultureInvariant)]
+    private static partial Regex SecretPattern();
+}
+
+public sealed record RemoteJobRunProjection(
+    JobRunBlocker? Blocker,
+    HostWorkLease? Lease,
+    RemoteHost? Host,
+    IReadOnlyList<JobRunCheckpoint> Checkpoints);
+
 public sealed record HostCapabilityAdvertisement(
     string OwnerPrincipalId, string HostId, string CapabilityId, string CapabilityVersion,
     string SchemaHash, string SideEffectClass, DateTimeOffset AdvertisedAt);
@@ -659,6 +859,107 @@ public static class RemoteHostValidation
 
     public static void ValidatePrintableText(string value, string parameterName)
         => ValidatePrintable(value, parameterName);
+
+    public static void ValidateActionHostBinding(
+        string? hostId,
+        string? hostLeaseId,
+        string? hostResourceGrantHash)
+    {
+        var any = hostId is not null || hostLeaseId is not null || hostResourceGrantHash is not null;
+        var all = hostId is not null && hostLeaseId is not null && hostResourceGrantHash is not null;
+        if (any != all)
+            throw new ArgumentException("Host-backed bindings require host, lease, and resource hash together.");
+        if (!all)
+            return;
+
+        ValidateIdentifier(hostId!, nameof(hostId));
+        ValidateIdentifier(hostLeaseId!, nameof(hostLeaseId));
+        ValidateLowerHex(hostResourceGrantHash!, 64, nameof(hostResourceGrantHash));
+    }
+
+    public static void ValidateExecutionPolicy(
+        string location,
+        string? preferredHostId,
+        IReadOnlyList<(string Id, string Version)> requiredCapabilities,
+        IReadOnlyList<string> requiredResourceIds,
+        string fallbackPolicy)
+    {
+        if (!JobExecutionLocations.IsValid(location))
+            throw new ArgumentException("Execution location is not supported.", nameof(location));
+        if (!JobExecutionFallbackPolicies.IsValid(fallbackPolicy))
+            throw new ArgumentException("Execution fallback policy is not supported.", nameof(fallbackPolicy));
+        if (preferredHostId is not null)
+            ValidateIdentifier(preferredHostId, nameof(preferredHostId));
+
+        ValidateGrantCount(requiredCapabilities.Count, nameof(requiredCapabilities));
+        ValidateGrantCount(requiredResourceIds.Count, nameof(requiredResourceIds));
+        EnsureUnique(requiredCapabilities.Select(item => $"{item.Id}\n{item.Version}"), nameof(requiredCapabilities));
+        EnsureUnique(requiredResourceIds, nameof(requiredResourceIds));
+
+        foreach (var capability in requiredCapabilities)
+        {
+            if (capability.Id != SupportedCapabilityId
+                || capability.Version != SupportedCapabilityVersion)
+            {
+                throw new ArgumentException("Execution capability is not supported.", nameof(requiredCapabilities));
+            }
+        }
+
+        foreach (var resourceId in requiredResourceIds)
+            ValidateIdentifier(resourceId, nameof(requiredResourceIds));
+
+        if (location == JobExecutionLocations.Server)
+        {
+            if (preferredHostId is not null || requiredCapabilities.Count != 0 || requiredResourceIds.Count != 0)
+                throw new ArgumentException("Server execution cannot carry Host requirements.", nameof(location));
+            return;
+        }
+
+        if (requiredCapabilities.Count != 1)
+            throw new ArgumentException("Host execution requires exactly one proof capability.", nameof(requiredCapabilities));
+        if (requiredResourceIds.Count < 1)
+            throw new ArgumentException("Host execution requires at least one repository resource.", nameof(requiredResourceIds));
+        if (location == JobExecutionLocations.Host && preferredHostId is null)
+            throw new ArgumentException("Explicit Host execution requires a preferred Host ID.", nameof(preferredHostId));
+        if (location == JobExecutionLocations.AnyCompatibleHost && preferredHostId is not null)
+            throw new ArgumentException("Compatible Host execution cannot pin a preferred Host ID.", nameof(preferredHostId));
+    }
+
+    public static string ComputeHostResourceGrantHash(
+        IReadOnlyList<HostResourceGrantTuple> tuples)
+    {
+        ArgumentNullException.ThrowIfNull(tuples);
+        ValidateGrantCount(tuples.Count, nameof(tuples));
+        var builder = new StringBuilder();
+        string? previousResourceId = null;
+        foreach (var tuple in tuples)
+        {
+            ArgumentNullException.ThrowIfNull(tuple);
+            ValidateIdentifier(tuple.ResourceId, nameof(tuples));
+            if (tuple.ResourceGrantVersion < 1)
+                throw new ArgumentOutOfRangeException(nameof(tuples), "Grant version must be a positive Int64.");
+            if (tuple.AccessMode != ReadOnly)
+                throw new ArgumentException("Resource access mode is not supported.", nameof(tuples));
+            ValidateLowerHex(tuple.Fingerprint, 64, nameof(tuples));
+            if (previousResourceId is not null
+                && string.CompareOrdinal(previousResourceId, tuple.ResourceId) >= 0)
+            {
+                throw new ArgumentException("Resource tuples must be unique and ASCII-sorted by resource ID.", nameof(tuples));
+            }
+
+            previousResourceId = tuple.ResourceId;
+            builder.Append(tuple.ResourceId)
+                .Append('\n')
+                .Append(tuple.ResourceGrantVersion.ToString(CultureInfo.InvariantCulture))
+                .Append('\n')
+                .Append(tuple.AccessMode)
+                .Append('\n')
+                .Append(tuple.Fingerprint)
+                .Append('\n');
+        }
+
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
+    }
 
     private static string ReadString(JsonProperty property)
     {

@@ -10,7 +10,7 @@ namespace Tessera.Persistence.Sqlite.Tests;
 public sealed class SqliteMigrationTests
 {
     [Fact]
-    public async Task Empty_store_bootstraps_and_repeatably_applies_v1_through_v18()
+    public async Task Empty_store_bootstraps_and_repeatably_applies_v1_through_v19()
     {
         using var database = new TemporaryDatabase();
         var store = database.CreateStore();
@@ -18,7 +18,7 @@ public sealed class SqliteMigrationTests
         await store.InitializeAsync();
         await store.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await store.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await store.GetAppliedMigrationVersionsAsync());
     }
 
     [Fact]
@@ -32,7 +32,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await restarted.GetAppliedMigrationVersionsAsync());
         Assert.Contains("actions", await ReadTableNamesAsync(database.Path));
         Assert.Contains("follow_ups", await ReadTableNamesAsync(database.Path));
     }
@@ -47,7 +47,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await restarted.GetAppliedMigrationVersionsAsync());
         Assert.Contains("follow_up_operations", await ReadTableNamesAsync(database.Path));
     }
 
@@ -61,7 +61,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await restarted.GetAppliedMigrationVersionsAsync());
         var columns = await ReadColumnNamesAsync(database.Path, ["follow_up_sources"]);
         Assert.Contains("follow_up_sources.source_payload_hash", columns);
     }
@@ -76,7 +76,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await restarted.GetAppliedMigrationVersionsAsync());
         var tables = await ReadTableNamesAsync(database.Path);
         Assert.Contains("connected_accounts", tables);
         Assert.Contains("plugin_installations", tables);
@@ -185,11 +185,11 @@ public sealed class SqliteMigrationTests
     }
 
     [Fact]
-    public async Task Populated_v17_store_upgrades_to_v18_without_rewriting_existing_data()
+    public async Task Populated_v18_store_upgrades_to_v19_without_rewriting_existing_data()
     {
         using var database = new TemporaryDatabase();
         var store = database.CreateStore();
-        await store.InitializeAsync(17);
+        await store.InitializeAsync(18);
         var owner = PrincipalRef.Create(
             "https://issuer.example", "tenant", "v17-owner", "v17-owner", DateTimeOffset.UtcNow);
         await store.AddAsync(owner);
@@ -199,13 +199,15 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal(18, (await restarted.GetAppliedMigrationVersionsAsync())[^1]);
+        Assert.Equal(19, (await restarted.GetAppliedMigrationVersionsAsync())[^1]);
         Assert.NotNull(await ((IEvidenceRepository)restarted).GetAsync(owner.PrincipalId, evidence.EvidenceId));
-        Assert.Contains("remote_hosts", await ReadTableNamesAsync(database.Path));
+        var tables = await ReadTableNamesAsync(database.Path);
+        Assert.Contains("remote_hosts", tables);
+        Assert.Contains("host_work_leases", tables);
     }
 
     [Fact]
-    public async Task V18_closed_domains_and_single_active_grants_are_enforced_by_sql()
+    public async Task V19_closed_domains_and_single_active_rows_are_enforced_by_sql()
     {
         using var database = new TemporaryDatabase();
         var store = database.CreateStore();
@@ -213,6 +215,18 @@ public sealed class SqliteMigrationTests
         var owner = PrincipalRef.Create(
             "https://issuer.example", "tenant", "sql-owner", "sql-owner", DateTimeOffset.UtcNow);
         await store.AddAsync(owner);
+        var now = new DateTimeOffset(2026, 8, 14, 0, 0, 0, TimeSpan.Zero);
+        await store.AddJobAsync(new(
+            owner.PrincipalId, "job-sql", "SQL Job", "Inspect repository", "ACTIVE", "READY", null,
+            new JobSchedule("once", now, null, "UTC", null), null, "{}", [],
+            [(RemoteHostValidation.SupportedCapabilityId, RemoteHostValidation.SupportedCapabilityVersion)],
+            [], now, now, 1));
+        Assert.NotNull(await store.CreateManualRunAsync(owner.PrincipalId, "job-sql", "run-sql", 1, now));
+        Assert.NotNull(await store.CreateManualRunAsync(owner.PrincipalId, "job-sql", "run-sql-invalid", 1, now.AddSeconds(1)));
+        Assert.Equal(1, await store.AcquireRunLeaseAsync(
+            owner.PrincipalId, "run-sql", "sql-worker", now, TimeSpan.FromMinutes(10)));
+        Assert.Equal(1, await store.AcquireRunLeaseAsync(
+            owner.PrincipalId, "run-sql-invalid", "sql-worker", now, TimeSpan.FromMinutes(10)));
 
         await using var connection = new SqliteConnection(
             $"Data Source={database.Path};Foreign Keys=True;Pooling=False");
@@ -224,7 +238,7 @@ public sealed class SqliteMigrationTests
                 lifecycle,connection_status,public_key_jwk,key_version,protection,agent_version,
                 protocol_version,capability_catalog_version,last_accepted_sequence,last_seen_at,
                 paired_at,revoked_at,version)
-            VALUES('{{ownerId}}','host-sql','SQL Mac','macOS','arm64','OFFLINE','OFFLINE','{{canonicalJwk}}',1,
+            VALUES('{{ownerId}}','host-sql','SQL Mac','macOS','arm64','ONLINE','ONLINE','{{canonicalJwk}}',1,
                 'KEYCHAIN_THIS_DEVICE_ONLY','1.0.0','1',1,0,NULL,'2026-08-14T00:00:00Z',NULL,1);
             INSERT INTO host_capability_advertisements(owner_principal_id,host_id,capability_id,
                 capability_version,schema_hash,side_effect_class,advertised_at)
@@ -240,6 +254,14 @@ public sealed class SqliteMigrationTests
             INSERT INTO host_resource_grants(owner_principal_id,host_id,resource_id,access_mode,
                 granted_at,revoked_at,version)
             VALUES('{{ownerId}}','host-sql','repo-sql','READ_ONLY','2026-08-14T00:00:00Z',NULL,1);
+            INSERT INTO host_work_leases(owner_principal_id,lease_id,run_id,job_id,host_id,
+                scheduler_fence,attempt,profile_id,capability_id,capability_version,
+                capability_grant_version,input_hash,state,issued_at,execute_until,
+                acknowledged_at,completed_at,local_attempt_id,outcome,output_sha256,failure_code,version)
+            VALUES('{{ownerId}}','lease-valid','run-sql','job-sql','host-sql',1,1,
+                'host.repo.identity@1','host.repo.identity','1',1,'{{new string('a', 64)}}',
+                'OFFERED','2026-08-14T00:00:00Z','2026-08-14T00:10:00Z',
+                NULL,NULL,NULL,NULL,NULL,NULL,1);
             """);
 
         var invalidStatements = new[]
@@ -262,6 +284,20 @@ public sealed class SqliteMigrationTests
             $"INSERT INTO host_accepted_messages VALUES('{ownerId}','host-sql','message-hash',2,'poll','-','{new string('z', 64)}',200,'{{}}','2026-08-14T00:00:00Z');",
             $"INSERT INTO host_capability_grants VALUES('{ownerId}','host-sql','host.repo.identity','1','2026-08-14T00:00:01Z',NULL,2);",
             $"INSERT INTO host_resource_grants VALUES('{ownerId}','host-sql','repo-sql','READ_ONLY','2026-08-14T00:00:01Z',NULL,2);",
+            $"INSERT INTO job_execution_policies VALUES('{ownerId}','job-sql','EDGE',NULL,'[]','[]','NONE',1);",
+            $"INSERT INTO job_execution_policies VALUES('{ownerId}','job-sql','HOST',NULL,'[{{\"capabilityId\":\"host.repo.identity\",\"capabilityVersion\":\"1\"}}]','[\"repo-sql\"]','NONE',1);",
+            $"INSERT INTO job_execution_policies VALUES('{ownerId}','job-sql','HOST','host-sql','[{{\"capabilityId\":\"host.repo.identity\",\"capabilityVersion\":\"1\"}}]','[]','NONE',1);",
+            $"INSERT INTO job_execution_policies VALUES('{ownerId}','job-sql','ANY_COMPATIBLE_HOST','host-sql','[{{\"capabilityId\":\"host.repo.identity\",\"capabilityVersion\":\"1\"}}]','[\"repo-sql\"]','NONE',1);",
+            $"INSERT INTO job_execution_policies VALUES('{ownerId}','job-sql','ANY_COMPATIBLE_HOST',NULL,'[{{\"capabilityId\":\"host.repo.identity\",\"capabilityVersion\":\"1\"}}]','[]','NONE',1);",
+            $"INSERT INTO job_execution_policies VALUES('{ownerId}','job-sql','ANY_COMPATIBLE_HOST',NULL,'[{{\"capabilityId\":\"host.shell\",\"capabilityVersion\":\"1\"}}]','[\"repo-sql\"]','NONE',1);",
+            $"INSERT INTO job_execution_policies VALUES('{ownerId}','job-sql','SERVER',NULL,'[{{\"capabilityId\":\"host.repo.identity\",\"capabilityVersion\":\"1\"}}]','[]','NONE',1);",
+            $"INSERT INTO job_run_blockers VALUES('{ownerId}','run-missing','WAITING_FOR_SHELL',NULL,NULL,NULL,NULL,'2026-08-14T00:00:00Z',NULL,1);",
+            $"INSERT INTO host_work_leases VALUES('{ownerId}','lease-sql','run-sql-invalid','job-sql','host-sql',1,1,'host.repo.identity@1','host.repo.identity','1',1,'{new string('a', 64)}','PAUSED','2026-08-14T00:00:00Z','2026-08-14T00:10:00Z',NULL,NULL,NULL,NULL,NULL,NULL,1);",
+            $"INSERT INTO host_lease_resources VALUES('{ownerId}','lease-valid','repo-sql',1,'WRITE','{new string('b', 64)}');",
+            $"INSERT INTO host_lease_resources VALUES('{ownerId}','lease-valid','repo-sql',2,'READ_ONLY','{new string('b', 64)}');",
+            $"INSERT INTO host_lease_resources VALUES('{ownerId}','lease-valid','repo-sql',1,'READ_ONLY','{new string('c', 64)}');",
+            $"INSERT INTO actions(action_id,owner_principal_id,capability_id,capability_version,intent,payload_hash,target_scope,risk_class,policy_decision_ref,authorization_ref,state,idempotency_key,attempt_count,created_at,started_at,completed_at,provider_receipt,verification_state,failure,schema_version,version,account_id,plugin_id,plugin_version,target_hash,expires_at,execution_id,conversation_id,message_id,job_id,job_run_id,host_id,host_lease_id,host_resource_grant_hash) VALUES('action-sql','{ownerId}','calendar.update','1','intent','{new string('d', 64)}','calendar/x','external-write','policy',NULL,'PROPOSED','idempotency-sql',0,'2026-08-14T00:00:00Z',NULL,NULL,NULL,NULL,NULL,1,0,NULL,'plugin','1.0.0','{new string('e', 64)}','2026-08-14T00:10:00Z','execution-sql',NULL,NULL,NULL,NULL,'host-sql',NULL,NULL);",
+            $"INSERT INTO actions(action_id,owner_principal_id,capability_id,capability_version,intent,payload_hash,target_scope,risk_class,policy_decision_ref,authorization_ref,state,idempotency_key,attempt_count,created_at,started_at,completed_at,provider_receipt,verification_state,failure,schema_version,version,account_id,plugin_id,plugin_version,target_hash,expires_at,execution_id,conversation_id,message_id,job_id,job_run_id,host_id,host_lease_id,host_resource_grant_hash) VALUES('action-null-hash','{ownerId}','calendar.update','1','intent','{new string('d', 64)}','calendar/x','external-write','policy',NULL,'PROPOSED','idempotency-null-hash',0,'2026-08-14T00:00:00Z',NULL,NULL,NULL,NULL,NULL,1,0,NULL,'plugin','1.0.0','{new string('e', 64)}','2026-08-14T00:10:00Z','execution-null-hash',NULL,NULL,'job-sql','run-sql','host-sql','lease-valid',NULL);",
         };
 
         foreach (var statement in invalidStatements)
@@ -309,13 +345,18 @@ public sealed class SqliteMigrationTests
                 "host_accepted_messages",
                 "host_capability_advertisements",
                 "host_capability_grants",
+                "host_lease_events",
+                "host_lease_resources",
                 "host_pairings",
                 "host_resource_grants",
                 "host_resources",
+                "host_work_leases",
                 "idempotency_receipts",
                 "job_account_grants",
                 "job_capability_grants",
+                "job_execution_policies",
                 "job_outputs",
+                "job_run_blockers",
                 "job_run_checkpoints",
                 "job_runs",
                 "job_side_effect_grants",
@@ -339,7 +380,6 @@ public sealed class SqliteMigrationTests
                 "workflow_checkpoints",
             ],
             tables);
-        Assert.DoesNotContain(tables, table => table.Contains("policy", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(tables, table => table.Contains("audit", StringComparison.OrdinalIgnoreCase));
 
         var columns = await ReadColumnNamesAsync(database.Path, tables);
@@ -347,6 +387,8 @@ public sealed class SqliteMigrationTests
         Assert.Contains("credential_cleanup_receipts.credential_ref", columns);
         Assert.Contains("jobs.kind", columns);
         Assert.Contains("jobs.conversation_id", columns);
+        Assert.Contains("actions.host_resource_grant_hash", columns);
+        Assert.Contains("action_authorizations.host_resource_grant_hash", columns);
         Assert.Contains("host_pairings.claim_secret_hash", columns);
         Assert.Contains("remote_hosts.public_key_jwk", columns);
         var forbidden = new[]

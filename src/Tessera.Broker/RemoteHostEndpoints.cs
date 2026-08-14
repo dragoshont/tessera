@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Tessera.Core.Configuration;
 using Tessera.Core.Kernel;
@@ -17,13 +18,20 @@ namespace Tessera.Broker;
 public static class RemoteHostEndpoints
 {
     private static readonly JsonSerializerOptions PublicJson = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions StrictJson = new(JsonSerializerDefaults.Web)
+    {
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+    };
 
     public static void MapRemoteHostEndpoints(this WebApplication app)
     {
         app.Use(async (context, next) =>
         {
             if (context.Request.Path.StartsWithSegments("/api/v1/host-pairings")
-                || context.Request.Path.StartsWithSegments("/api/v1/hosts"))
+                || context.Request.Path.StartsWithSegments("/api/v1/hosts")
+                || context.Request.Path.StartsWithSegments("/api/v1/jobs")
+                || context.Request.Path.StartsWithSegments("/api/v1/job-runs")
+                || context.Request.Path.StartsWithSegments("/host-channel"))
                 context.Response.Headers.CacheControl = "no-store";
             if (IsRemoteHostMutation(context.Request)
                 && context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodyLimit)
@@ -34,7 +42,10 @@ public static class RemoteHostEndpoints
             }
             catch (Microsoft.Data.Sqlite.SqliteException)
                 when ((context.Request.Path.StartsWithSegments("/api/v1/host-pairings")
-                    || context.Request.Path.StartsWithSegments("/api/v1/hosts"))
+                    || context.Request.Path.StartsWithSegments("/api/v1/hosts")
+                    || context.Request.Path.StartsWithSegments("/api/v1/jobs")
+                    || context.Request.Path.StartsWithSegments("/api/v1/job-runs")
+                    || context.Request.Path.StartsWithSegments("/host-channel"))
                     && !context.Response.HasStarted)
             {
                 context.Response.Clear();
@@ -220,6 +231,210 @@ public static class RemoteHostEndpoints
             return Results.Text(result.Receipt.ResponseBodyJson, "application/json", Encoding.UTF8,
                 result.Receipt.ResponseStatus);
         });
+
+        app.MapGet("/api/v1/jobs/{jobId}/execution-policy", async (
+            HttpContext context, string jobId, ITokenValidator validator, TesseraConfig config,
+            IServiceProvider services, CancellationToken token) =>
+        {
+            var boundary = await BoundaryAsync(context, validator, config, services, token).ConfigureAwait(false);
+            if (boundary.Error is not null) return boundary.Error;
+            if (await boundary.Store!.GetJobAsync(boundary.Owner!, jobId, token).ConfigureAwait(false) is null)
+                return Problem(404, "not_found");
+            var policy = await boundary.Store.GetJobExecutionPolicyAsync(boundary.Owner!, jobId, token).ConfigureAwait(false);
+            NoStore(context);
+            return Results.Json(policy is null ? DefaultExecutionPolicy(jobId) : ExecutionPolicyDto(policy));
+        });
+
+        app.MapPut("/api/v1/jobs/{jobId}/execution-policy", async (
+            HttpContext context, string jobId, [FromBody] HostExecutionPolicyRequest? request,
+            ITokenValidator validator, TesseraConfig config, IServiceProvider services,
+            CancellationToken token) =>
+        {
+            var boundary = await BoundaryAsync(context, validator, config, services, token).ConfigureAwait(false);
+            if (boundary.Error is not null) return boundary.Error;
+            if (!IsJson(context) || !Valid(request) || IdempotencyKey(context) is not { } key)
+                return Problem(400, "host_invalid_request");
+            if (await boundary.Store!.GetJobAsync(boundary.Owner!, jobId, token).ConfigureAwait(false) is null)
+                return Problem(404, "not_found");
+            try
+            {
+                var policy = new JobExecutionPolicy(
+                    boundary.Owner!,
+                    jobId,
+                    request!.Location,
+                    request.PreferredHostId,
+                    request.RequiredCapabilities.Select(item => (item.CapabilityId, item.CapabilityVersion)).ToArray(),
+                    request.RequiredResourceIds,
+                    request.FallbackPolicy,
+                    request.ExpectedVersion + 1);
+                var saved = await boundary.Store.PutJobExecutionPolicyWithReceiptAsync(
+                    policy, request.ExpectedVersion, key, Hash(request), DateTimeOffset.UtcNow, token).ConfigureAwait(false);
+                if (saved.Receipt is null) return Problem(409, saved.Error!);
+                NoStore(context);
+                return Results.Text(saved.Receipt.ResponseBodyJson, "application/json", Encoding.UTF8,
+                    saved.Receipt.ResponseStatus);
+            }
+            catch (ArgumentException) { return Problem(400, "host_invalid_request"); }
+            catch (InvalidOperationException) { return Problem(400, "host_invalid_request"); }
+        });
+
+        app.MapDelete("/api/v1/jobs/{jobId}/execution-policy", async (
+            HttpContext context, string jobId, [FromBody] VersionRequest? request,
+            ITokenValidator validator, TesseraConfig config, IServiceProvider services,
+            CancellationToken token) =>
+        {
+            var boundary = await BoundaryAsync(context, validator, config, services, token).ConfigureAwait(false);
+            if (boundary.Error is not null) return boundary.Error;
+            if (!IsJson(context) || !Valid(request) || IdempotencyKey(context) is not { } key)
+                return Problem(400, "host_invalid_request");
+            if (await boundary.Store!.GetJobAsync(boundary.Owner!, jobId, token).ConfigureAwait(false) is null)
+                return Problem(404, "not_found");
+            var deleted = await boundary.Store.DeleteJobExecutionPolicyWithReceiptAsync(
+                boundary.Owner!, jobId, request!.ExpectedVersion, key, Hash(request), DateTimeOffset.UtcNow, token)
+                .ConfigureAwait(false);
+            if (deleted.Receipt is null) return Problem(409, deleted.Error!);
+            NoStore(context);
+            return Results.Text(deleted.Receipt.ResponseBodyJson, "application/json", Encoding.UTF8,
+                deleted.Receipt.ResponseStatus);
+        });
+
+        app.MapGet("/api/v1/job-runs/{runId}/remote", async (
+            HttpContext context, string runId, ITokenValidator validator, TesseraConfig config,
+            IServiceProvider services, CancellationToken token) =>
+        {
+            var boundary = await BoundaryAsync(context, validator, config, services, token).ConfigureAwait(false);
+            if (boundary.Error is not null) return boundary.Error;
+            var run = await boundary.Store!.GetJobRunAsync(boundary.Owner!, runId, token).ConfigureAwait(false);
+            if (run is null) return Problem(404, "not_found");
+            var projection = await boundary.Store.GetRemoteJobRunProjectionAsync(boundary.Owner!, runId, token).ConfigureAwait(false);
+            NoStore(context);
+            return Results.Json(new
+            {
+                blocker = projection?.Blocker is null ? null : BlockerDto(projection.Blocker),
+                lease = projection?.Lease is null ? null : LeaseDto(projection.Lease),
+                host = projection?.Host is null ? null : HostSummaryDto(projection.Host),
+                checkpoints = projection?.Checkpoints.Select(item => new { item.Sequence, item.Step, item.StateJson, item.Fence, item.CreatedAt }).ToArray() ?? [],
+                artifacts = Array.Empty<object>(),
+            });
+        });
+
+        app.MapPost("/host-channel/poll", async (HttpContext context, SqliteKernelStore store, CancellationToken token) =>
+        {
+            if (!IsJson(context)) return Problem(415, "invalid_media_type");
+            var read = await RemoteHostRequestReader.ReadAsync(context.Request, HostAcceptedMessageOperations.Poll, "-", token).ConfigureAwait(false);
+            if (!read.Succeeded) return HostSignedProblem(read.Error!);
+            HostPollRequest? request;
+            try
+            {
+                request = JsonSerializer.Deserialize<HostPollRequest>(read.Body, StrictJson);
+            }
+            catch (JsonException)
+            {
+                return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false));
+            }
+            if (!Valid(request)) return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false));
+            var result = await store.AcceptSignedHostMessageAsync(
+                read.Envelope!,
+                DateTimeOffset.UtcNow,
+                (connection, transaction, host, ct) => SqliteKernelStore.PollHostAsync(
+                    connection,
+                    transaction,
+                    host,
+                    request!.MaxWaitSeconds,
+                    request.ActiveAttempt is null ? null : new HostPollActiveAttempt(
+                        request.ActiveAttempt.LeaseId,
+                        request.ActiveAttempt.LocalAttemptId,
+                        request.ActiveAttempt.State),
+                    DateTimeOffset.UtcNow,
+                    ct),
+                token).ConfigureAwait(false);
+            return HostSignedResult(result);
+        });
+
+        app.MapPost("/host-channel/leases/{leaseId}/ack", async (HttpContext context, string leaseId, SqliteKernelStore store, CancellationToken token) =>
+        {
+            if (!IsJson(context)) return Problem(415, "invalid_media_type");
+            var read = await RemoteHostRequestReader.ReadAsync(context.Request, HostAcceptedMessageOperations.LeaseAck, leaseId, token).ConfigureAwait(false);
+            if (!read.Succeeded) return HostSignedProblem(read.Error!);
+            HostLeaseAckRequest? request;
+            try { request = JsonSerializer.Deserialize<HostLeaseAckRequest>(read.Body, StrictJson); }
+            catch (JsonException) { return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false)); }
+            if (!Valid(request)) return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false));
+            var result = await store.AcceptSignedHostMessageAsync(
+                read.Envelope!,
+                DateTimeOffset.UtcNow,
+                (connection, transaction, host, ct) => SqliteKernelStore.AcknowledgeHostLeaseAsync(
+                    connection, transaction, host, leaseId, request!.LeaseVersion, request.LocalAttemptId,
+                    request.Accepted, request.RejectionCode, DateTimeOffset.UtcNow, ct),
+                token).ConfigureAwait(false);
+            return HostSignedResult(result);
+        });
+
+        app.MapPost("/host-channel/leases/{leaseId}/events", async (HttpContext context, string leaseId, SqliteKernelStore store, CancellationToken token) =>
+        {
+            if (!IsJson(context)) return Problem(415, "invalid_media_type");
+            var read = await RemoteHostRequestReader.ReadAsync(context.Request, HostAcceptedMessageOperations.LeaseEvents, leaseId, token).ConfigureAwait(false);
+            if (!read.Succeeded) return HostSignedProblem(read.Error!);
+            HostLeaseEventsRequest? request;
+            try { request = JsonSerializer.Deserialize<HostLeaseEventsRequest>(read.Body, StrictJson); }
+            catch (JsonException) { return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false)); }
+            if (!Valid(request)) return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false));
+            var events = request!.Events.Select(item => new HostLeaseEvent(
+                string.Empty,
+                leaseId,
+                item.EventId,
+                item.Sequence,
+                item.Type,
+                item.OccurredAt,
+                item.Summary,
+                item.Data.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ? null : item.Data.GetRawText())).ToArray();
+            var result = await store.AcceptSignedHostMessageAsync(
+                read.Envelope!,
+                DateTimeOffset.UtcNow,
+                (connection, transaction, host, ct) => SqliteKernelStore.AppendHostLeaseEventsAsync(
+                    connection, transaction, host, leaseId, request.LeaseVersion, request.LocalAttemptId,
+                    events, DateTimeOffset.UtcNow, ct),
+                token).ConfigureAwait(false);
+            return HostSignedResult(result);
+        });
+
+        app.MapPost("/host-channel/leases/{leaseId}/complete", async (HttpContext context, string leaseId, SqliteKernelStore store, CancellationToken token) =>
+        {
+            if (!IsJson(context)) return Problem(415, "invalid_media_type");
+            var read = await RemoteHostRequestReader.ReadAsync(context.Request, HostAcceptedMessageOperations.LeaseComplete, leaseId, token).ConfigureAwait(false);
+            if (!read.Succeeded) return HostSignedProblem(read.Error!);
+            HostLeaseCompleteRequest? request;
+            try { request = JsonSerializer.Deserialize<HostLeaseCompleteRequest>(read.Body, StrictJson); }
+            catch (JsonException) { return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false)); }
+            if (!Valid(request)) return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false));
+            var result = await store.AcceptSignedHostMessageAsync(
+                read.Envelope!,
+                DateTimeOffset.UtcNow,
+                (connection, transaction, host, ct) => SqliteKernelStore.CompleteHostLeaseAsync(
+                    connection, transaction, host, leaseId, request!.LeaseVersion, request.LocalAttemptId,
+                    request.Outcome, request.Output, request.OutputSha256, request.Truncated, DateTimeOffset.UtcNow, ct),
+                token).ConfigureAwait(false);
+            return HostSignedResult(result);
+        });
+
+        app.MapPost("/host-channel/leases/{leaseId}/reconcile", async (HttpContext context, string leaseId, SqliteKernelStore store, CancellationToken token) =>
+        {
+            if (!IsJson(context)) return Problem(415, "invalid_media_type");
+            var read = await RemoteHostRequestReader.ReadAsync(context.Request, HostAcceptedMessageOperations.LeaseReconcile, leaseId, token).ConfigureAwait(false);
+            if (!read.Succeeded) return HostSignedProblem(read.Error!);
+            HostLeaseReconcileRequest? request;
+            try { request = JsonSerializer.Deserialize<HostLeaseReconcileRequest>(read.Body, StrictJson); }
+            catch (JsonException) { return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false)); }
+            if (!Valid(request)) return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false));
+            var result = await store.AcceptSignedHostMessageAsync(
+                read.Envelope!,
+                DateTimeOffset.UtcNow,
+                (connection, transaction, host, ct) => SqliteKernelStore.ReconcileHostLeaseAsync(
+                    connection, transaction, host, leaseId, request!.LeaseVersion, request.LocalAttemptId,
+                    request.ObservedState, request.OutputSha256, DateTimeOffset.UtcNow, ct),
+                token).ConfigureAwait(false);
+            return HostSignedResult(result);
+        });
     }
 
     private static async Task<RemoteBoundary> BoundaryAsync(
@@ -292,12 +507,75 @@ public static class RemoteHostEndpoints
         }).ToArray(),
     };
 
+    private static object ExecutionPolicyDto(JobExecutionPolicy policy) => new
+    {
+        jobId = policy.JobId,
+        policy.Location,
+        policy.PreferredHostId,
+        requiredCapabilities = policy.RequiredCapabilities.Select(item => new { capabilityId = item.Id, capabilityVersion = item.Version }).ToArray(),
+        requiredResourceIds = policy.RequiredResourceIds,
+        fallbackPolicy = policy.FallbackPolicy,
+        policy.Version,
+    };
+
+    private static object DefaultExecutionPolicy(string jobId) => new
+    {
+        jobId,
+        Location = JobExecutionLocations.Server,
+        PreferredHostId = (string?)null,
+        requiredCapabilities = Array.Empty<object>(),
+        requiredResourceIds = Array.Empty<string>(),
+        fallbackPolicy = JobExecutionFallbackPolicies.None,
+        Version = 0L,
+    };
+
+    private static object BlockerDto(JobRunBlocker blocker) => new
+    {
+        blocker.Code,
+        blocker.HostId,
+        blocker.CapabilityId,
+        blocker.ResourceId,
+        blocker.DetailCode,
+        blocker.ObservedAt,
+        blocker.ClearedAt,
+        blocker.Version,
+    };
+
+    private static object LeaseDto(HostWorkLease lease) => new
+    {
+        leaseId = lease.LeaseId,
+        leaseVersion = lease.Version,
+        lease.RunId,
+        lease.JobId,
+        lease.HostId,
+        lease.SchedulerFence,
+        lease.Attempt,
+        lease.ProfileId,
+        lease.CapabilityId,
+        lease.CapabilityVersion,
+        lease.CapabilityGrantVersion,
+        lease.InputHash,
+        lease.State,
+        lease.IssuedAt,
+        lease.ExecuteUntil,
+        lease.AcknowledgedAt,
+        lease.CompletedAt,
+        lease.LocalAttemptId,
+        lease.Outcome,
+        lease.OutputSha256,
+        lease.FailureCode,
+    };
+
     private static bool IsRemoteHostMutation(HttpRequest request)
         => HttpMethods.IsPost(request.Method)
             && (request.Path.StartsWithSegments("/api/v1/host-pairings")
-                || request.Path.StartsWithSegments("/api/v1/hosts"))
+                || request.Path.StartsWithSegments("/api/v1/hosts")
+                || request.Path.StartsWithSegments("/host-channel"))
             || HttpMethods.IsPut(request.Method)
-            && request.Path.StartsWithSegments("/api/v1/hosts");
+            && (request.Path.StartsWithSegments("/api/v1/hosts")
+                || request.Path.StartsWithSegments("/api/v1/jobs"))
+            || HttpMethods.IsDelete(request.Method)
+            && request.Path.StartsWithSegments("/api/v1/jobs");
 
     private static IResult PairingProblem(string code) => Problem(code switch
     {
@@ -317,6 +595,28 @@ public static class RemoteHostEndpoints
         "idempotency_conflict" => 409,
         _ => 400,
     }, code);
+
+    private static IResult HostSignedProblem(string code)
+        => Problem(RemoteHostSignedRequestErrors.StatusCode(code), code);
+
+    private static Task<HostMessageAcceptanceResult> AcceptSignedInvalidRequestAsync(
+        SqliteKernelStore store,
+        HostSignedRequestEnvelope envelope,
+        CancellationToken token)
+        => store.AcceptSignedHostMessageAsync(
+            envelope,
+            DateTimeOffset.UtcNow,
+            (_, _, _, _) => Task.FromResult(new HostMessageBusinessResponse(
+                400,
+                RemoteHostSnapshotSerializer.SerializeProblem(400, "host_invalid_request"))),
+            token);
+
+    private static IResult HostSignedResult(HostMessageAcceptanceResult result)
+    {
+        if (!result.Succeeded)
+            return HostSignedProblem(result.Error!);
+        return Results.Text(result.Receipt!.ResponseBodyJson, "application/json", Encoding.UTF8, result.Receipt.ResponseStatus);
+    }
 
     private static string Hash<T>(T request)
         => Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(request, PublicJson)));
@@ -359,6 +659,42 @@ public static class RemoteHostEndpoints
             && request.ResourceGrants.All(ValidRequest);
 
     private static bool Valid(VersionRequest? request) => ValidRequest(request) && request!.ExpectedVersion >= 1;
+
+    private static bool Valid(HostExecutionPolicyRequest? request)
+        => ValidRequest(request)
+            && request!.ExpectedVersion >= 0
+            && !string.IsNullOrWhiteSpace(request.Location)
+            && !string.IsNullOrWhiteSpace(request.FallbackPolicy)
+            && request.RequiredCapabilities is not null
+            && request.RequiredResourceIds is not null
+            && request.RequiredCapabilities.All(ValidRequest);
+
+    private static bool Valid(HostPollRequest? request)
+        => ValidRequest(request)
+            && request!.MaxWaitSeconds is >= 1 and <= 25
+            && (request.ActiveAttempt is null || ValidRequest(request.ActiveAttempt));
+
+    private static bool Valid(HostLeaseAckRequest? request)
+        => ValidRequest(request) && request!.LeaseVersion >= 1 && !string.IsNullOrWhiteSpace(request.LocalAttemptId);
+
+    private static bool Valid(HostLeaseEventsRequest? request)
+        => ValidRequest(request)
+            && request!.LeaseVersion >= 1
+            && !string.IsNullOrWhiteSpace(request.LocalAttemptId)
+            && request.Events is not null
+            && request.Events.All(ValidRequest);
+
+    private static bool Valid(HostLeaseCompleteRequest? request)
+        => ValidRequest(request)
+            && request!.LeaseVersion >= 1
+            && !string.IsNullOrWhiteSpace(request.LocalAttemptId)
+            && !string.IsNullOrWhiteSpace(request.Outcome);
+
+    private static bool Valid(HostLeaseReconcileRequest? request)
+        => ValidRequest(request)
+            && request!.LeaseVersion >= 1
+            && !string.IsNullOrWhiteSpace(request.LocalAttemptId)
+            && !string.IsNullOrWhiteSpace(request.ObservedState);
 
     private static bool ValidRequest(StrictRequest? request)
         => request is not null && request.ExtensionData?.Count is not > 0;
@@ -413,6 +749,72 @@ public static class RemoteHostEndpoints
     public sealed class VersionRequest : StrictRequest
     {
         public long ExpectedVersion { get; init; }
+    }
+
+    public sealed class HostExecutionPolicyRequest : StrictRequest
+    {
+        public long ExpectedVersion { get; init; }
+        public string Location { get; init; } = string.Empty;
+        public string? PreferredHostId { get; init; }
+        public CapabilityGrantDto[] RequiredCapabilities { get; init; } = [];
+        public string[] RequiredResourceIds { get; init; } = [];
+        public string FallbackPolicy { get; init; } = JobExecutionFallbackPolicies.None;
+    }
+
+    public sealed class HostPollRequest : StrictRequest
+    {
+        public int MaxWaitSeconds { get; init; }
+        public HostPollAttemptRequest? ActiveAttempt { get; init; }
+    }
+
+    public sealed class HostPollAttemptRequest : StrictRequest
+    {
+        public string LeaseId { get; init; } = string.Empty;
+        public string LocalAttemptId { get; init; } = string.Empty;
+        public string State { get; init; } = string.Empty;
+    }
+
+    public sealed class HostLeaseAckRequest : StrictRequest
+    {
+        public long LeaseVersion { get; init; }
+        public string LocalAttemptId { get; init; } = string.Empty;
+        public bool Accepted { get; init; }
+        public string? RejectionCode { get; init; }
+    }
+
+    public sealed class HostLeaseEventsRequest : StrictRequest
+    {
+        public long LeaseVersion { get; init; }
+        public string LocalAttemptId { get; init; } = string.Empty;
+        public HostLeaseEventRequest[] Events { get; init; } = [];
+    }
+
+    public sealed class HostLeaseEventRequest : StrictRequest
+    {
+        public string EventId { get; init; } = string.Empty;
+        public long Sequence { get; init; }
+        public string Type { get; init; } = string.Empty;
+        public DateTimeOffset OccurredAt { get; init; }
+        public string? Summary { get; init; }
+        public JsonElement Data { get; init; }
+    }
+
+    public sealed class HostLeaseCompleteRequest : StrictRequest
+    {
+        public long LeaseVersion { get; init; }
+        public string Outcome { get; init; } = string.Empty;
+        public string? Output { get; init; }
+        public string? OutputSha256 { get; init; }
+        public bool Truncated { get; init; }
+        public string LocalAttemptId { get; init; } = string.Empty;
+    }
+
+    public sealed class HostLeaseReconcileRequest : StrictRequest
+    {
+        public long LeaseVersion { get; init; }
+        public string LocalAttemptId { get; init; } = string.Empty;
+        public string ObservedState { get; init; } = string.Empty;
+        public string? OutputSha256 { get; init; }
     }
 
     public sealed class CapabilityAdvertisementRequest : StrictRequest

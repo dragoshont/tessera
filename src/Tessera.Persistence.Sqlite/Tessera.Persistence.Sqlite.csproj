@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Tessera.Broker" />
     <InternalsVisibleTo Include="Tessera.Persistence.Sqlite.Tests" />
   </ItemGroup>
 

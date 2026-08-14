@@ -69,7 +69,7 @@ public sealed partial class SqliteKernelStore
     }
 
     public async Task<bool> SetJobDesiredStateAsync(string owner,string jobId,long expectedVersion,string desiredState,CancellationToken token=default)
-    {var now=DateTimeOffset.UtcNow;await using var connection=await OpenConnectionAsync(token).ConfigureAwait(false);await using var transaction=(SqliteTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false);await using var command=connection.CreateCommand();command.Transaction=transaction;command.CommandText="UPDATE jobs SET desired_state=$state,updated_at=$now,version=version+1 WHERE owner_principal_id=$owner AND job_id=$job AND version=$expected AND desired_state<>'CANCELED';";command.Parameters.AddWithValue("$state",desiredState);command.Parameters.AddWithValue("$now",FormatTimestamp(now));command.Parameters.AddWithValue("$owner",owner);command.Parameters.AddWithValue("$job",jobId);command.Parameters.AddWithValue("$expected",expectedVersion);if(await command.ExecuteNonQueryAsync(token).ConfigureAwait(false)!=1)return false;if(desiredState=="CANCELED"){await using var runs=connection.CreateCommand();runs.Transaction=transaction;runs.CommandText="UPDATE job_runs SET state='CANCELED',ended_at=$now,error_code='job_canceled',version=version+1 WHERE owner_principal_id=$owner AND job_id=$job AND state='QUEUED';";runs.Parameters.AddWithValue("$now",FormatTimestamp(now));runs.Parameters.AddWithValue("$owner",owner);runs.Parameters.AddWithValue("$job",jobId);await runs.ExecuteNonQueryAsync(token).ConfigureAwait(false);}await transaction.CommitAsync(token).ConfigureAwait(false);return true;}
+    {var now=DateTimeOffset.UtcNow;await using var connection=await OpenConnectionAsync(token).ConfigureAwait(false);await using var transaction=(SqliteTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false);await using var command=connection.CreateCommand();command.Transaction=transaction;command.CommandText="UPDATE jobs SET desired_state=$state,updated_at=$now,version=version+1 WHERE owner_principal_id=$owner AND job_id=$job AND version=$expected AND desired_state<>'CANCELED';";command.Parameters.AddWithValue("$state",desiredState);command.Parameters.AddWithValue("$now",FormatTimestamp(now));command.Parameters.AddWithValue("$owner",owner);command.Parameters.AddWithValue("$job",jobId);command.Parameters.AddWithValue("$expected",expectedVersion);if(await command.ExecuteNonQueryAsync(token).ConfigureAwait(false)!=1)return false;if(desiredState=="CANCELED"){await using var runs=connection.CreateCommand();runs.Transaction=transaction;runs.CommandText="UPDATE job_runs SET state='CANCELED',ended_at=$now,error_code='job_canceled',version=version+1 WHERE owner_principal_id=$owner AND job_id=$job AND state='QUEUED';";runs.Parameters.AddWithValue("$now",FormatTimestamp(now));runs.Parameters.AddWithValue("$owner",owner);runs.Parameters.AddWithValue("$job",jobId);await runs.ExecuteNonQueryAsync(token).ConfigureAwait(false);}if(desiredState is "PAUSED" or "CANCELED")await CancelActiveHostLeasesForJobAsync(connection,transaction,owner,jobId,desiredState,now,token).ConfigureAwait(false);await transaction.CommitAsync(token).ConfigureAwait(false);return true;}
 
     public async Task<long?> AcquireRunLeaseAsync(string owner,string runId,string holder,DateTimeOffset now,TimeSpan duration,CancellationToken token=default)
     {
@@ -171,11 +171,13 @@ public sealed partial class SqliteKernelStore
         CancellationToken token = default)
     {
         await using var connection = await OpenConnectionAsync(token).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
         string actionState;
         string? failure;
         string actionId;
         await using (var action = connection.CreateCommand())
         {
+            action.Transaction = transaction;
             action.CommandText = """
                 SELECT a.state,a.failure,j.state,a.action_id FROM actions a
                 JOIN durable_execution_requests r ON r.owner_principal_id=a.owner_principal_id AND r.action_id=a.action_id
@@ -207,7 +209,6 @@ public sealed partial class SqliteKernelStore
         };
         if (targetState is null) return null;
 
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -254,23 +255,43 @@ public sealed partial class SqliteKernelStore
         {
                 await using var connection=await OpenConnectionAsync(token).ConfigureAwait(false);
                 await using var transaction=(SqliteTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false);
+                await using var expireAuthorized=connection.CreateCommand();expireAuthorized.Transaction=transaction;expireAuthorized.CommandText="""
+                        UPDATE actions SET state='EXPIRED',completed_at=$now,failure='authorized_action_recovered_not_started',version=version+1
+                        WHERE state='AUTHORIZED'
+                            AND EXISTS(SELECT 1 FROM job_runs run WHERE run.owner_principal_id=actions.owner_principal_id
+                                AND run.run_id=actions.job_run_id AND run.state='RUNNING'
+                                AND NOT EXISTS(SELECT 1 FROM scheduler_leases lease WHERE lease.owner_principal_id=run.owner_principal_id AND lease.run_id=run.run_id AND lease.expires_at>$now));
+                        """;expireAuthorized.Parameters.AddWithValue("$now",FormatTimestamp(now));await expireAuthorized.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                await using var terminalSuccess=connection.CreateCommand();terminalSuccess.Transaction=transaction;terminalSuccess.CommandText="""
+                        UPDATE job_runs SET state='SUCCEEDED',ended_at=$now,error_code=NULL,version=version+1
+                        WHERE state='RUNNING'
+                            AND NOT EXISTS(SELECT 1 FROM scheduler_leases lease WHERE lease.owner_principal_id=job_runs.owner_principal_id AND lease.run_id=job_runs.run_id AND lease.expires_at>$now)
+                            AND (SELECT action.state FROM actions action WHERE action.owner_principal_id=job_runs.owner_principal_id AND action.job_run_id=job_runs.run_id ORDER BY action.created_at DESC,action.action_id LIMIT 1)
+                                IN ('EXTERNALLY_CONFIRMED','EXECUTION_SUCCEEDED','PROVIDER_VERIFIED');
+                        """;terminalSuccess.Parameters.AddWithValue("$now",FormatTimestamp(now));var changed=await terminalSuccess.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                await using var terminalFailed=connection.CreateCommand();terminalFailed.Transaction=transaction;terminalFailed.CommandText="""
+                        UPDATE job_runs SET state='FAILED',ended_at=$now,error_code='recovered_terminal_action_failed',version=version+1
+                        WHERE state='RUNNING'
+                            AND NOT EXISTS(SELECT 1 FROM scheduler_leases lease WHERE lease.owner_principal_id=job_runs.owner_principal_id AND lease.run_id=job_runs.run_id AND lease.expires_at>$now)
+                            AND (SELECT action.state FROM actions action WHERE action.owner_principal_id=job_runs.owner_principal_id AND action.job_run_id=job_runs.run_id ORDER BY action.created_at DESC,action.action_id LIMIT 1)='FAILED';
+                        """;terminalFailed.Parameters.AddWithValue("$now",FormatTimestamp(now));changed+=await terminalFailed.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 await using var waiting=connection.CreateCommand();waiting.Transaction=transaction;waiting.CommandText="""
                         UPDATE job_runs SET state='WAITING_FOR_APPROVAL',error_code='recovered_pending_approval',version=version+1
                         WHERE state='RUNNING'
                             AND NOT EXISTS(SELECT 1 FROM scheduler_leases lease WHERE lease.owner_principal_id=job_runs.owner_principal_id AND lease.run_id=job_runs.run_id AND lease.expires_at>$now)
-                            AND EXISTS(SELECT 1 FROM actions action WHERE action.owner_principal_id=job_runs.owner_principal_id AND action.job_run_id=job_runs.run_id AND action.state='PROPOSED');
-                        """;waiting.Parameters.AddWithValue("$now",FormatTimestamp(now));var changed=await waiting.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                            AND (SELECT action.state FROM actions action WHERE action.owner_principal_id=job_runs.owner_principal_id AND action.job_run_id=job_runs.run_id ORDER BY action.created_at DESC,action.action_id LIMIT 1)='PROPOSED';
+                        """;waiting.Parameters.AddWithValue("$now",FormatTimestamp(now));changed+=await waiting.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 await using var reconcile=connection.CreateCommand();reconcile.Transaction=transaction;reconcile.CommandText="""
                         UPDATE job_runs SET state='RECONCILIATION_REQUIRED',error_code='expired_lease_external_outcome_unknown',version=version+1
                         WHERE state='RUNNING'
                             AND NOT EXISTS(SELECT 1 FROM scheduler_leases lease WHERE lease.owner_principal_id=job_runs.owner_principal_id AND lease.run_id=job_runs.run_id AND lease.expires_at>$now)
-                            AND EXISTS(SELECT 1 FROM actions action WHERE action.owner_principal_id=job_runs.owner_principal_id AND action.job_run_id=job_runs.run_id AND action.state IN ('STARTED','RECONCILIATION_REQUIRED'));
+                            AND (SELECT action.state FROM actions action WHERE action.owner_principal_id=job_runs.owner_principal_id AND action.job_run_id=job_runs.run_id ORDER BY action.created_at DESC,action.action_id LIMIT 1) IN ('STARTED','RECONCILIATION_REQUIRED');
                         """;reconcile.Parameters.AddWithValue("$now",FormatTimestamp(now));changed+=await reconcile.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 await using var retry=connection.CreateCommand();retry.Transaction=transaction;retry.CommandText="""
                         UPDATE job_runs SET state=CASE WHEN EXISTS(SELECT 1 FROM jobs WHERE jobs.owner_principal_id=job_runs.owner_principal_id AND jobs.job_id=job_runs.job_id AND jobs.desired_state='CANCELED') THEN 'CANCELED' ELSE 'QUEUED' END,started_at=NULL,error_code=CASE WHEN EXISTS(SELECT 1 FROM jobs WHERE jobs.owner_principal_id=job_runs.owner_principal_id AND jobs.job_id=job_runs.job_id AND jobs.desired_state='CANCELED') THEN 'job_canceled' ELSE 'recovered_expired_read_run' END,ended_at=CASE WHEN EXISTS(SELECT 1 FROM jobs WHERE jobs.owner_principal_id=job_runs.owner_principal_id AND jobs.job_id=job_runs.job_id AND jobs.desired_state='CANCELED') THEN $now ELSE NULL END,version=version+1
                         WHERE state='RUNNING'
                             AND NOT EXISTS(SELECT 1 FROM scheduler_leases lease WHERE lease.owner_principal_id=job_runs.owner_principal_id AND lease.run_id=job_runs.run_id AND lease.expires_at>$now)
-                            AND NOT EXISTS(SELECT 1 FROM actions action WHERE action.owner_principal_id=job_runs.owner_principal_id AND action.job_run_id=job_runs.run_id);
+                            AND COALESCE((SELECT action.state FROM actions action WHERE action.owner_principal_id=job_runs.owner_principal_id AND action.job_run_id=job_runs.run_id ORDER BY action.created_at DESC,action.action_id LIMIT 1),'NONE') IN ('NONE','CANCELED','EXPIRED');
                         """;retry.Parameters.AddWithValue("$now",FormatTimestamp(now));changed+=await retry.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 await transaction.CommitAsync(token).ConfigureAwait(false);return changed;
         }

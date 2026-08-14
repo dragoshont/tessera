@@ -1,8 +1,9 @@
 # R2 Remote Hosts Test Contract
 
 **Status:** Required phased gates for the Mac reference journey. Current
-implementation evidence covers the v18 registry subset; v19-v20, client/helper,
-and physical-device gates remain pending and must not be represented as shipped.
+implementation evidence covers the v18 registry and v19 signed channel,
+lease, and canonical Job subset. v20 artifacts, clients/helper, and
+physical-device gates remain pending and must not be represented as shipped.
 
 Mocks prove contract behavior, not Secure Enclave protection, login-item lifecycle,
 Cloudflare transport, notarization, physical Mac execution, APNs or iPhone approval.
@@ -70,7 +71,8 @@ Storybook first:
 
 Closed Host event types for the proof slice are `HOST_CONNECTED`,
 `HOST_DISCONNECTED`, `JOB_ACCEPTED`, `STEP_STARTED`, `STEP_COMPLETED`,
-`ARTIFACT_AVAILABLE`, `APPROVAL_REQUIRED`, `JOB_FAILED`, and `JOB_COMPLETED`.
+`APPROVAL_REQUIRED`, `JOB_FAILED`, and `JOB_COMPLETED`. `ARTIFACT_AVAILABLE` is
+reserved for the planned v20 artifact slice.
 Unknown types fail; additional steering-taxonomy events require later protocol
 versions.
 

@@ -1,7 +1,7 @@
 # R2 Remote Hosts Data And Migration Contract
 
-**Status:** Accepted phased additive contract. Migration v18 is implemented;
-migrations v19-v20 remain planned and are not current product capability.
+**Status:** Accepted phased additive contract. Migrations v18-v19 are
+implemented; migration v20 remains planned and is not current product capability.
 
 Remote adds Host bindings around canonical owner, Job, JobRun, Action, Evidence,
 Activity, output and scheduler records. It does not add Host-owned Jobs, Memory,
@@ -71,7 +71,7 @@ version `1`; protection `SECURE_ENCLAVE|KEYCHAIN_THIS_DEVICE_ONLY`; capability
 resource state `AVAILABLE`; access mode `READ_ONLY`; and closed accepted-message
 operations.
 
-## Planned migration v19: execution policy, blockers and Host leases
+## Migration v19: execution policy, blockers and Host leases
 
 Extend the existing immutable `ActionR2Binding` and matching `actions` /
 `action_authorizations` columns with nullable `hostId`, `hostLeaseId`, and
@@ -117,7 +117,8 @@ host_lease_resources
 ```
 
 Execution policy locations are `SERVER|HOST|ANY_COMPATIBLE_HOST`; the proof slice
-uses explicit `HOST`. Fallback is `NONE` in the proof slice. A Host/resource grant
+supports explicit `HOST` and deterministic `ANY_COMPATIBLE_HOST`. Fallback is
+`NONE` in the proof slice. A Host/resource grant
 can be revoked without rewriting historical policy.
 
 Lease states:

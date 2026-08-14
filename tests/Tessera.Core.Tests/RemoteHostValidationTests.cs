@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using Tessera.Core.Kernel;
 using Tessera.Core.Product;
 using Xunit;
 
@@ -74,6 +75,127 @@ public sealed class RemoteHostValidationTests
         Assert.All(new[] { "poll", "lease-ack", "lease-events", "lease-complete", "lease-reconcile" },
             operation => Assert.True(HostAcceptedMessageOperations.IsValid(operation)));
         Assert.False(HostAcceptedMessageOperations.IsValid("shell"));
+    }
+
+    [Fact]
+    public void Resource_grant_tuple_hash_matches_fixed_vectors_and_rejects_noncanonical_input()
+    {
+        Assert.Equal(
+            "20979ecfc8db5ebf85f38af6751492dce85644f3bfff79e895a0c44bccda0a22",
+            RemoteHostValidation.ComputeHostResourceGrantHash(
+            [
+                new HostResourceGrantTuple(
+                    "repo-a",
+                    1,
+                    "READ_ONLY",
+                    new string('a', 64)),
+            ]));
+
+        Assert.Equal(
+            "9198a3189913316bd3f1e6e05add6ee8f23f959184a30cef79ccae75dccd2e0e",
+            RemoteHostValidation.ComputeHostResourceGrantHash(
+            [
+                new HostResourceGrantTuple(
+                    "repo-a",
+                    2,
+                    "READ_ONLY",
+                    new string('b', 64)),
+                new HostResourceGrantTuple(
+                    "repo-b",
+                    7,
+                    "READ_ONLY",
+                    new string('c', 64)),
+            ]));
+
+        Assert.Throws<ArgumentException>(() => RemoteHostValidation.ComputeHostResourceGrantHash(
+        [
+            new HostResourceGrantTuple("repo-b", 1, "READ_ONLY", new string('a', 64)),
+            new HostResourceGrantTuple("repo-a", 1, "READ_ONLY", new string('b', 64)),
+        ]));
+        Assert.Throws<ArgumentException>(() => RemoteHostValidation.ComputeHostResourceGrantHash(
+        [
+            new HostResourceGrantTuple("repo-a", 1, "READ_ONLY", new string('a', 64)),
+            new HostResourceGrantTuple("repo-a", 2, "READ_ONLY", new string('b', 64)),
+        ]));
+        Assert.Throws<ArgumentOutOfRangeException>(() => RemoteHostValidation.ComputeHostResourceGrantHash(
+        [
+            new HostResourceGrantTuple("repo-a", 0, "READ_ONLY", new string('a', 64)),
+        ]));
+    }
+
+    [Fact]
+    public void Action_r2_host_binding_requires_the_full_host_tuple_or_none()
+    {
+        var noHostBinding = new ActionR2Binding(
+            "account-1",
+            "plugin-id",
+            "1.0.0",
+            new string('d', 64),
+            DateTimeOffset.UtcNow.AddMinutes(5),
+            "execution-1");
+        Assert.Null(noHostBinding.HostId);
+
+        var hostBinding = new ActionR2Binding(
+            "account-1",
+            "plugin-id",
+            "1.0.0",
+            new string('d', 64),
+            DateTimeOffset.UtcNow.AddMinutes(5),
+            "execution-1",
+            hostId: "host-main",
+            hostLeaseId: "lease-main",
+            hostResourceGrantHash: new string('e', 64));
+        Assert.Equal("host-main", hostBinding.HostId);
+        Assert.Equal("lease-main", hostBinding.HostLeaseId);
+        Assert.Equal(new string('e', 64), hostBinding.HostResourceGrantHash);
+
+        Assert.Throws<ArgumentException>(() => new ActionR2Binding(
+            "account-1",
+            "plugin-id",
+            "1.0.0",
+            new string('d', 64),
+            DateTimeOffset.UtcNow.AddMinutes(5),
+            "execution-1",
+            hostId: "host-main"));
+    }
+
+    [Fact]
+    public void Execution_policy_shapes_are_exact_for_server_explicit_and_compatible_host()
+    {
+        RemoteHostValidation.ValidateExecutionPolicy("SERVER", null, [], [], "NONE");
+        RemoteHostValidation.ValidateExecutionPolicy(
+            "HOST", "host-main", [("host.repo.identity", "1")], ["repo-main"], "NONE");
+        RemoteHostValidation.ValidateExecutionPolicy(
+            "ANY_COMPATIBLE_HOST", null, [("host.repo.identity", "1")], ["repo-main"], "NONE");
+
+        Assert.Throws<ArgumentException>(() => RemoteHostValidation.ValidateExecutionPolicy(
+            "SERVER", null, [("host.repo.identity", "1")], [], "NONE"));
+        Assert.Throws<ArgumentException>(() => RemoteHostValidation.ValidateExecutionPolicy(
+            "HOST", null, [("host.repo.identity", "1")], ["repo-main"], "NONE"));
+        Assert.Throws<ArgumentException>(() => RemoteHostValidation.ValidateExecutionPolicy(
+            "HOST", "host-main", [("host.repo.identity", "1")], [], "NONE"));
+        Assert.Throws<ArgumentException>(() => RemoteHostValidation.ValidateExecutionPolicy(
+            "ANY_COMPATIBLE_HOST", "host-main", [("host.repo.identity", "1")], ["repo-main"], "NONE"));
+        Assert.Throws<ArgumentException>(() => RemoteHostValidation.ValidateExecutionPolicy(
+            "ANY_COMPATIBLE_HOST", null, [("host.shell", "1")], ["repo-main"], "NONE"));
+    }
+
+    [Fact]
+    public void Remote_host_output_normalization_redaction_truncation_and_hash_match_fixed_vectors()
+    {
+        var normalized = RemoteHostOutputNormalizer.Normalize(
+            System.Text.Encoding.UTF8.GetBytes("line1\r\nAuthorization: Bearer canary-token\u0000\rline2"));
+        Assert.Equal("line1\nAuthorization: Bearer [REDACTED]\nline2", normalized.Text);
+        Assert.False(normalized.Truncated);
+        Assert.Equal("69a9a706525148f438e43498efcbfa2ed5984a421b0ff91ec434ebd96587340c", normalized.Sha256);
+
+        var truncated = RemoteHostOutputNormalizer.Normalize(
+            System.Text.Encoding.UTF8.GetBytes("ééé"), 5);
+        Assert.Equal("éé", truncated.Text);
+        Assert.True(truncated.Truncated);
+        Assert.Equal("f13c007a1d8e6e1300b5957a143810cdd3555825466cf5d2617b1ac2fd8bd76b", truncated.Sha256);
+        Assert.Throws<System.Text.DecoderFallbackException>(() =>
+            RemoteHostOutputNormalizer.Normalize([0xff]));
     }
 
     public static TheoryData<string> InvalidJwks()

@@ -411,6 +411,17 @@ public sealed partial class SqliteKernelStore
                     .ConfigureAwait(false);
         }
 
+        await using (var existingHostId = connection.CreateCommand())
+        {
+            existingHostId.Transaction = transaction;
+            existingHostId.CommandText = "SELECT 1 FROM remote_hosts WHERE host_id=$host LIMIT 1;";
+            existingHostId.Parameters.AddWithValue("$host", hostId);
+            if (await existingHostId.ExecuteScalarAsync(token).ConfigureAwait(false) is not null)
+                return await RejectPairingAsync(connection, transaction, owner, routeFamily,
+                    idempotencyKey, requestHash, "pairing_consumed", pairingId, now, token)
+                    .ConfigureAwait(false);
+        }
+
         var host = new RemoteHost(owner, hostId, displayName, claim.Platform, claim.Architecture,
             RemoteHostLifecycles.Offline, "OFFLINE", claim.PublicKey, 1, claim.Protection,
             claim.AgentVersion, claim.ProtocolVersion, 1, 0, null, now, null, 1);
@@ -592,11 +603,26 @@ public sealed partial class SqliteKernelStore
                 requestHash, "host_grant_not_advertised", hostId, now, token).ConfigureAwait(false);
         await ReplaceGrantsAsync(connection, transaction, owner, hostId, capabilityGrants, resourceGrants, now, token)
             .ConfigureAwait(false);
+        await InvalidateActiveHostLeasesForGrantChangeAsync(
+            connection, transaction, owner, hostId, now, token).ConfigureAwait(false);
         await using (var update = connection.CreateCommand())
         {
             update.Transaction = transaction;
             update.CommandText = """
-                UPDATE remote_hosts SET version=version+1
+                                UPDATE remote_hosts
+                                SET version=version+1,
+                                        lifecycle=CASE WHEN lifecycle='BUSY' AND NOT EXISTS(
+                                                SELECT 1 FROM host_work_leases lease
+                                                WHERE lease.owner_principal_id=remote_hosts.owner_principal_id
+                                                    AND lease.host_id=remote_hosts.host_id
+                                                    AND lease.state IN ('OFFERED','ACKNOWLEDGED','RUNNING','DISCONNECTED'))
+                                                THEN 'ONLINE' ELSE lifecycle END,
+                                        connection_status=CASE WHEN lifecycle='BUSY' AND NOT EXISTS(
+                                                SELECT 1 FROM host_work_leases lease
+                                                WHERE lease.owner_principal_id=remote_hosts.owner_principal_id
+                                                    AND lease.host_id=remote_hosts.host_id
+                                                    AND lease.state IN ('OFFERED','ACKNOWLEDGED','RUNNING','DISCONNECTED'))
+                                                THEN 'ONLINE' ELSE connection_status END
                 WHERE owner_principal_id=$owner AND host_id=$host AND version=$version AND lifecycle<>'REVOKED';
                 """;
             update.Parameters.AddWithValue("$owner", owner);
@@ -673,6 +699,7 @@ public sealed partial class SqliteKernelStore
             grants.Parameters.AddWithValue("$host", hostId);
             await grants.ExecuteNonQueryAsync(token).ConfigureAwait(false);
         }
+        await RevokeActiveHostLeasesAsync(connection, transaction, owner, hostId, now, token).ConfigureAwait(false);
         var detail = await ReadHostDetailAsync(connection, transaction, owner, hostId, token).ConfigureAwait(false)
             ?? throw new InvalidDataException("Revoked Host snapshot is missing.");
         var receipt = CreateRemoteHostReceipt(owner, routeFamily, idempotencyKey, requestHash, 202,

@@ -4,7 +4,7 @@ internal sealed record KernelMigration(int Version, string Sql);
 
 internal static class KernelMigrations
 {
-    public const int LatestVersion = 18;
+    public const int LatestVersion = 19;
 
     public static IReadOnlyList<KernelMigration> All { get; } =
     [
@@ -26,7 +26,248 @@ internal static class KernelMigrations
         new KernelMigration(16, Migration16),
         new KernelMigration(17, Migration17),
         new KernelMigration(18, Migration18),
+        new KernelMigration(19, Migration19),
     ];
+
+    private const string Migration19 = """
+        CREATE TABLE job_execution_policies (
+            owner_principal_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            location TEXT NOT NULL CHECK (location IN ('SERVER','HOST','ANY_COMPATIBLE_HOST')),
+            preferred_host_id TEXT NULL,
+            required_capabilities_json TEXT NOT NULL CHECK (
+                COALESCE(json_valid(required_capabilities_json)
+                    AND json_type(required_capabilities_json) = 'array', 0)),
+            required_resource_ids_json TEXT NOT NULL CHECK (
+                COALESCE(json_valid(required_resource_ids_json)
+                    AND json_type(required_resource_ids_json) = 'array', 0)),
+            fallback_policy TEXT NOT NULL CHECK (fallback_policy = 'NONE'),
+            version INTEGER NOT NULL CHECK (version >= 1),
+            CHECK (COALESCE(
+                (location='SERVER'
+                    AND preferred_host_id IS NULL
+                    AND json_array_length(required_capabilities_json)=0
+                    AND json_array_length(required_resource_ids_json)=0)
+                OR (location='HOST'
+                    AND preferred_host_id IS NOT NULL
+                    AND json_array_length(required_capabilities_json)=1
+                    AND json_array_length(required_resource_ids_json)>=1)
+                OR (location='ANY_COMPATIBLE_HOST'
+                    AND preferred_host_id IS NULL
+                    AND json_array_length(required_capabilities_json)=1
+                    AND json_array_length(required_resource_ids_json)>=1),
+                0)),
+            PRIMARY KEY (owner_principal_id,job_id),
+            FOREIGN KEY (owner_principal_id,job_id) REFERENCES jobs(owner_principal_id,job_id),
+            FOREIGN KEY (owner_principal_id,preferred_host_id) REFERENCES remote_hosts(owner_principal_id,host_id)
+        );
+
+        CREATE TABLE job_run_blockers (
+            owner_principal_id TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            code TEXT NOT NULL CHECK (code IN (
+                'WAITING_FOR_HOST','WAITING_FOR_CAPABILITY','WAITING_FOR_RESOURCE',
+                'HOST_DISCONNECTED','HOST_UPDATE_REQUIRED')),
+            host_id TEXT NULL,
+            capability_id TEXT NULL,
+            resource_id TEXT NULL,
+            detail_code TEXT NULL,
+            observed_at TEXT NOT NULL,
+            cleared_at TEXT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,run_id,version),
+            FOREIGN KEY (owner_principal_id,run_id) REFERENCES job_runs(owner_principal_id,run_id),
+            FOREIGN KEY (owner_principal_id,host_id) REFERENCES remote_hosts(owner_principal_id,host_id)
+        );
+
+        CREATE TABLE host_work_leases (
+            owner_principal_id TEXT NOT NULL,
+            lease_id TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            scheduler_fence INTEGER NOT NULL CHECK (scheduler_fence >= 1),
+            attempt INTEGER NOT NULL CHECK (attempt >= 1),
+            profile_id TEXT NOT NULL,
+            capability_id TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            capability_grant_version INTEGER NOT NULL CHECK (capability_grant_version >= 1),
+            input_hash TEXT NOT NULL CHECK (length(input_hash) = 64 AND input_hash NOT GLOB '*[^0-9a-f]*'),
+            state TEXT NOT NULL CHECK (state IN (
+                'OFFERED','ACKNOWLEDGED','RUNNING','COMPLETED','FAILED',
+                'RECONCILIATION_REQUIRED','DECLINED','EXPIRED','REVOKED','DISCONNECTED')),
+            issued_at TEXT NOT NULL,
+            execute_until TEXT NOT NULL,
+            acknowledged_at TEXT NULL,
+            completed_at TEXT NULL,
+            local_attempt_id TEXT NULL,
+            outcome TEXT NULL CHECK (outcome IS NULL OR outcome IN ('SUCCEEDED','FAILED','UNKNOWN')),
+            output_sha256 TEXT NULL CHECK (
+                output_sha256 IS NULL OR (length(output_sha256) = 64 AND output_sha256 NOT GLOB '*[^0-9a-f]*')),
+            failure_code TEXT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,lease_id),
+            UNIQUE (owner_principal_id,run_id,attempt),
+            FOREIGN KEY (owner_principal_id,run_id) REFERENCES job_runs(owner_principal_id,run_id),
+            FOREIGN KEY (owner_principal_id,job_id) REFERENCES jobs(owner_principal_id,job_id),
+            FOREIGN KEY (owner_principal_id,host_id) REFERENCES remote_hosts(owner_principal_id,host_id),
+            FOREIGN KEY (owner_principal_id,host_id,capability_id,capability_version,capability_grant_version)
+                REFERENCES host_capability_grants(owner_principal_id,host_id,capability_id,capability_version,version)
+        );
+
+        CREATE TABLE host_lease_events (
+            owner_principal_id TEXT NOT NULL,
+            lease_id TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK (sequence >= 1),
+            type TEXT NOT NULL CHECK (type IN (
+                'HOST_CONNECTED','HOST_DISCONNECTED','JOB_ACCEPTED','STEP_STARTED',
+                'STEP_COMPLETED','APPROVAL_REQUIRED','JOB_FAILED','JOB_COMPLETED')),
+            occurred_at TEXT NOT NULL,
+            summary TEXT NULL,
+            data_json TEXT NULL CHECK (data_json IS NULL OR json_valid(data_json)),
+            PRIMARY KEY (owner_principal_id,lease_id,event_id),
+            UNIQUE (owner_principal_id,lease_id,sequence),
+            FOREIGN KEY (owner_principal_id,lease_id) REFERENCES host_work_leases(owner_principal_id,lease_id)
+        );
+
+        CREATE TABLE host_lease_resources (
+            owner_principal_id TEXT NOT NULL,
+            lease_id TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            resource_grant_version INTEGER NOT NULL CHECK (resource_grant_version >= 1),
+            access_mode TEXT NOT NULL CHECK (access_mode = 'READ_ONLY'),
+            fingerprint TEXT NOT NULL CHECK (
+                length(fingerprint) = 64 AND fingerprint NOT GLOB '*[^0-9a-f]*'),
+            PRIMARY KEY (owner_principal_id,lease_id,resource_id),
+            FOREIGN KEY (owner_principal_id,lease_id) REFERENCES host_work_leases(owner_principal_id,lease_id)
+        );
+
+        ALTER TABLE actions ADD COLUMN host_id TEXT NULL CHECK (
+            host_id IS NULL OR (
+                length(host_id) <= 64
+                AND host_id NOT GLOB '*[^a-z0-9-]*'
+                AND substr(host_id,1,1) GLOB '[a-z0-9]'));
+        ALTER TABLE actions ADD COLUMN host_lease_id TEXT NULL CHECK (
+            host_lease_id IS NULL OR (
+                length(host_lease_id) <= 64
+                AND host_lease_id NOT GLOB '*[^a-z0-9-]*'
+                AND substr(host_lease_id,1,1) GLOB '[a-z0-9]'));
+        ALTER TABLE actions ADD COLUMN host_resource_grant_hash TEXT NULL CHECK (
+            (host_id IS NULL AND host_lease_id IS NULL AND host_resource_grant_hash IS NULL)
+            OR (host_id IS NOT NULL AND host_lease_id IS NOT NULL
+                AND host_resource_grant_hash IS NOT NULL
+                AND length(host_resource_grant_hash) = 64
+                AND host_resource_grant_hash NOT GLOB '*[^0-9a-f]*'));
+
+        ALTER TABLE action_authorizations ADD COLUMN host_id TEXT NULL CHECK (
+            host_id IS NULL OR (
+                length(host_id) <= 64
+                AND host_id NOT GLOB '*[^a-z0-9-]*'
+                AND substr(host_id,1,1) GLOB '[a-z0-9]'));
+        ALTER TABLE action_authorizations ADD COLUMN host_lease_id TEXT NULL CHECK (
+            host_lease_id IS NULL OR (
+                length(host_lease_id) <= 64
+                AND host_lease_id NOT GLOB '*[^a-z0-9-]*'
+                AND substr(host_lease_id,1,1) GLOB '[a-z0-9]'));
+        ALTER TABLE action_authorizations ADD COLUMN host_resource_grant_hash TEXT NULL CHECK (
+            (host_id IS NULL AND host_lease_id IS NULL AND host_resource_grant_hash IS NULL)
+            OR (host_id IS NOT NULL AND host_lease_id IS NOT NULL
+                AND host_resource_grant_hash IS NOT NULL
+                AND length(host_resource_grant_hash) = 64
+                AND host_resource_grant_hash NOT GLOB '*[^0-9a-f]*'));
+
+        CREATE INDEX ix_job_execution_policies_owner_location
+            ON job_execution_policies(owner_principal_id,location,preferred_host_id,job_id);
+        CREATE UNIQUE INDEX ux_remote_hosts_global_host_id ON remote_hosts(host_id);
+        CREATE TRIGGER trg_job_execution_policies_validate_insert
+        BEFORE INSERT ON job_execution_policies
+        WHEN NEW.location<>'SERVER' AND COALESCE((
+            json_extract(NEW.required_capabilities_json,'$[0].capabilityId')<>'host.repo.identity'
+            OR json_extract(NEW.required_capabilities_json,'$[0].capabilityVersion')<>'1'
+            OR json_remove(json_extract(NEW.required_capabilities_json,'$[0]'),'$.capabilityId','$.capabilityVersion')<>'{}'
+            OR EXISTS(
+                SELECT 1 FROM json_each(NEW.required_resource_ids_json)
+                WHERE type<>'text' OR length(value)<1 OR length(value)>64
+                    OR value GLOB '*[^a-z0-9-]*' OR substr(value,1,1) NOT GLOB '[a-z0-9]')
+            OR (SELECT count(*) FROM json_each(NEW.required_resource_ids_json))
+                <> (SELECT count(DISTINCT value) FROM json_each(NEW.required_resource_ids_json))),1)
+        BEGIN
+            SELECT RAISE(ABORT,'invalid Host execution policy');
+        END;
+        CREATE TRIGGER trg_job_execution_policies_validate_update
+        BEFORE UPDATE ON job_execution_policies
+        WHEN NEW.location<>'SERVER' AND COALESCE((
+            json_extract(NEW.required_capabilities_json,'$[0].capabilityId')<>'host.repo.identity'
+            OR json_extract(NEW.required_capabilities_json,'$[0].capabilityVersion')<>'1'
+            OR json_remove(json_extract(NEW.required_capabilities_json,'$[0]'),'$.capabilityId','$.capabilityVersion')<>'{}'
+            OR EXISTS(
+                SELECT 1 FROM json_each(NEW.required_resource_ids_json)
+                WHERE type<>'text' OR length(value)<1 OR length(value)>64
+                    OR value GLOB '*[^a-z0-9-]*' OR substr(value,1,1) NOT GLOB '[a-z0-9]')
+            OR (SELECT count(*) FROM json_each(NEW.required_resource_ids_json))
+                <> (SELECT count(DISTINCT value) FROM json_each(NEW.required_resource_ids_json))),1)
+        BEGIN
+            SELECT RAISE(ABORT,'invalid Host execution policy');
+        END;
+        CREATE UNIQUE INDEX ux_job_run_blockers_active
+            ON job_run_blockers(owner_principal_id,run_id)
+            WHERE cleared_at IS NULL;
+        CREATE INDEX ix_job_run_blockers_owner_observed
+            ON job_run_blockers(owner_principal_id,observed_at DESC,run_id);
+        CREATE UNIQUE INDEX ux_host_work_leases_active_run
+            ON host_work_leases(owner_principal_id,run_id)
+            WHERE state IN ('OFFERED','ACKNOWLEDGED','RUNNING','DISCONNECTED');
+        CREATE UNIQUE INDEX ux_host_work_leases_active_host
+            ON host_work_leases(owner_principal_id,host_id)
+            WHERE state IN ('OFFERED','ACKNOWLEDGED','RUNNING','DISCONNECTED');
+        CREATE INDEX ix_host_work_leases_host_state_expiry
+            ON host_work_leases(owner_principal_id,host_id,state,execute_until,lease_id);
+        CREATE INDEX ix_host_work_leases_run_state_expiry
+            ON host_work_leases(owner_principal_id,run_id,state,execute_until,lease_id);
+        CREATE TRIGGER trg_host_work_leases_validate_insert
+        BEFORE INSERT ON host_work_leases
+        WHEN NOT EXISTS(
+            SELECT 1 FROM job_runs run
+            JOIN jobs job ON job.owner_principal_id=run.owner_principal_id AND job.job_id=run.job_id
+            JOIN scheduler_leases scheduler ON scheduler.owner_principal_id=run.owner_principal_id
+                AND scheduler.run_id=run.run_id AND scheduler.fence=NEW.scheduler_fence
+            JOIN remote_hosts host ON host.owner_principal_id=run.owner_principal_id
+                AND host.host_id=NEW.host_id AND host.lifecycle IN ('ONLINE','DEGRADED')
+            JOIN host_capability_grants capability ON capability.owner_principal_id=host.owner_principal_id
+                AND capability.host_id=host.host_id AND capability.capability_id=NEW.capability_id
+                AND capability.capability_version=NEW.capability_version
+                AND capability.version=NEW.capability_grant_version AND capability.revoked_at IS NULL
+            WHERE run.owner_principal_id=NEW.owner_principal_id AND run.run_id=NEW.run_id
+                AND run.job_id=NEW.job_id AND run.state='QUEUED'
+                AND job.desired_state='ACTIVE' AND scheduler.expires_at>NEW.issued_at)
+        BEGIN
+            SELECT RAISE(ABORT,'invalid Host lease snapshot');
+        END;
+        CREATE TRIGGER trg_host_lease_resources_validate_insert
+        BEFORE INSERT ON host_lease_resources
+        WHEN NOT EXISTS(
+            SELECT 1 FROM host_work_leases lease
+            JOIN host_resource_grants grant_row
+                ON grant_row.owner_principal_id=lease.owner_principal_id
+                AND grant_row.host_id=lease.host_id
+                AND grant_row.resource_id=NEW.resource_id
+                AND grant_row.version=NEW.resource_grant_version
+                AND grant_row.access_mode=NEW.access_mode
+                AND grant_row.revoked_at IS NULL
+            JOIN host_resources resource
+                ON resource.owner_principal_id=grant_row.owner_principal_id
+                AND resource.host_id=grant_row.host_id
+                AND resource.resource_id=grant_row.resource_id
+                AND resource.fingerprint=NEW.fingerprint
+                AND resource.state='AVAILABLE'
+            WHERE lease.owner_principal_id=NEW.owner_principal_id AND lease.lease_id=NEW.lease_id)
+        BEGIN
+            SELECT RAISE(ABORT,'invalid Host lease resource snapshot');
+        END;
+        CREATE INDEX ix_host_lease_events_lease_sequence
+            ON host_lease_events(owner_principal_id,lease_id,sequence);
+        """;
 
     private const string Migration18 = """
         CREATE TABLE host_pairings (

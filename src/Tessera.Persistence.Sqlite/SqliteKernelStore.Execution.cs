@@ -266,11 +266,13 @@ public sealed partial class SqliteKernelStore
             INSERT INTO action_authorizations(
                 authorization_id, owner_principal_id, capability_id, capability_version,
                 action_id, payload_hash, target_scope, issued_at, expires_at, consumed_at,
-                account_id,plugin_id,plugin_version,target_hash,execution_id)
+                account_id,plugin_id,plugin_version,target_hash,execution_id,
+                host_id,host_lease_id,host_resource_grant_hash)
             VALUES (
                 $id, $owner, $capabilityId, $capabilityVersion,
                 $actionId, $payloadHash, $targetScope, $issuedAt, $expiresAt, $consumedAt,
-                $accountId,$pluginId,$pluginVersion,$targetHash,$executionId);
+                $accountId,$pluginId,$pluginVersion,$targetHash,$executionId,
+                $hostId,$hostLeaseId,$hostResourceGrantHash);
             """;
         BindAuthorization(command, authorization);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -288,7 +290,8 @@ public sealed partial class SqliteKernelStore
         command.CommandText = """
             SELECT authorization_id, owner_principal_id, capability_id, capability_version,
                      action_id, payload_hash, target_scope, issued_at, expires_at, consumed_at,
-                     account_id,plugin_id,plugin_version,target_hash,execution_id
+                     account_id,plugin_id,plugin_version,target_hash,execution_id,
+                     host_id,host_lease_id,host_resource_grant_hash
             FROM action_authorizations
             WHERE owner_principal_id = $owner AND authorization_id = $id;
             """;
@@ -324,9 +327,14 @@ public sealed partial class SqliteKernelStore
             authorizedAt,
             authorizationId);
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = (SqliteTransaction)await connection
-            .BeginTransactionAsync(cancellationToken)
-            .ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        if (!await HostBoundActionLeaseIsCurrentAsync(
+            connection, transaction, ownerPrincipalId, proposedAction.R2Binding,
+            proposedAction.CapabilityId, proposedAction.CapabilityVersion, authorizedAt, cancellationToken).ConfigureAwait(false))
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
         await using var consume = connection.CreateCommand();
         consume.Transaction = transaction;
         consume.CommandText = """
@@ -347,6 +355,9 @@ public sealed partial class SqliteKernelStore
               AND plugin_version IS $pluginVersion
               AND target_hash IS $targetHash
               AND execution_id IS $executionId
+              AND host_id IS $hostId
+              AND host_lease_id IS $hostLeaseId
+              AND host_resource_grant_hash IS $hostResourceGrantHash
                             AND EXISTS (
                                     SELECT 1 FROM actions candidate
                                     WHERE candidate.owner_principal_id = $owner
@@ -362,6 +373,9 @@ public sealed partial class SqliteKernelStore
                                         AND candidate.plugin_version IS $pluginVersion
                                         AND candidate.target_hash IS $targetHash
                                         AND candidate.execution_id IS $executionId
+                                        AND candidate.host_id IS $hostId
+                                        AND candidate.host_lease_id IS $hostLeaseId
+                                        AND candidate.host_resource_grant_hash IS $hostResourceGrantHash
                                         AND (candidate.plugin_id IS NULL OR candidate.plugin_id='local' OR EXISTS (
                                                 SELECT 1 FROM plugin_installations plugin
                                                 WHERE plugin.owner_principal_id=candidate.owner_principal_id
@@ -483,7 +497,47 @@ public sealed partial class SqliteKernelStore
             ? []
             : CapabilityContract(installation.ManifestJson,capabilityId,capabilityVersion)?.RequiredPermissions??[];
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        if (!await HostBoundActionLeaseIsCurrentAsync(
+            connection, transaction, ownerPrincipalId, binding,
+            capabilityId, capabilityVersion, startedAt, cancellationToken).ConfigureAwait(false))
+        {
+            if (binding?.HostLeaseId is not null)
+            {
+                await using var expire = connection.CreateCommand();
+                expire.Transaction = transaction;
+                expire.CommandText = """
+                    UPDATE actions
+                    SET state='EXPIRED',completed_at=$now,failure='host_lease_invalidated',version=version+1
+                    WHERE owner_principal_id=$owner AND action_id=$actionId
+                      AND state='AUTHORIZED' AND version=$expectedVersion
+                      AND authorization_ref=$authorizationId
+                      AND capability_id=$capabilityId AND capability_version=$capabilityVersion
+                      AND payload_hash=$payloadHash AND target_scope=$targetScope
+                      AND host_id IS $hostId AND host_lease_id IS $hostLeaseId
+                      AND host_resource_grant_hash IS $hostResourceGrantHash;
+                    """;
+                expire.Parameters.AddWithValue("$now", FormatTimestamp(startedAt));
+                expire.Parameters.AddWithValue("$owner", ownerPrincipalId);
+                expire.Parameters.AddWithValue("$actionId", actionId);
+                expire.Parameters.AddWithValue("$expectedVersion", expectedVersion);
+                expire.Parameters.AddWithValue("$authorizationId", authorizationId!);
+                expire.Parameters.AddWithValue("$capabilityId", capabilityId);
+                expire.Parameters.AddWithValue("$capabilityVersion", capabilityVersion);
+                expire.Parameters.AddWithValue("$payloadHash", payloadHash);
+                expire.Parameters.AddWithValue("$targetScope", targetScope);
+                BindR2Predicate(expire, binding);
+                if (await expire.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1)
+                {
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    return null;
+                }
+            }
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE actions
             SET state = 'STARTED',
@@ -506,6 +560,9 @@ public sealed partial class SqliteKernelStore
               AND plugin_version IS $pluginVersion
               AND target_hash IS $targetHash
               AND execution_id IS $executionId
+              AND host_id IS $hostId
+              AND host_lease_id IS $hostLeaseId
+              AND host_resource_grant_hash IS $hostResourceGrantHash
                             AND (plugin_id IS NULL OR plugin_id='local' OR EXISTS(
                                         SELECT 1 FROM plugin_installations plugin
                                         WHERE plugin.owner_principal_id=actions.owner_principal_id
@@ -564,14 +621,60 @@ public sealed partial class SqliteKernelStore
         BindR2Predicate(command, persisted?.R2Binding);
         if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
         {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             return null;
         }
 
-        return await ReadActionOnConnectionAsync(
+        var started = await ReadActionOnConnectionAsync(
             connection,
             ownerPrincipalId,
             actionId,
             cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return started;
+    }
+
+    private static async Task<bool> HostBoundActionLeaseIsCurrentAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string ownerPrincipalId,
+        ActionR2Binding? binding,
+        string capabilityId,
+        string capabilityVersion,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (binding?.HostId is null || binding.HostLeaseId is null || binding.HostResourceGrantHash is null)
+            return true;
+        if (binding.JobRunId is null)
+            return false;
+
+        var lease = await ReadLeaseAsync(connection, transaction, ownerPrincipalId, binding.HostLeaseId, cancellationToken).ConfigureAwait(false);
+        if (lease is null
+            || lease.HostId != binding.HostId
+            || lease.RunId != binding.JobRunId
+            || lease.CapabilityId != capabilityId
+            || lease.CapabilityVersion != capabilityVersion
+            || lease.State is not (HostLeaseStates.Acknowledged or HostLeaseStates.Running)
+            || lease.ExecuteUntil <= now)
+        {
+            return false;
+        }
+
+        if (!await LeaseGrantsAreCurrentAsync(connection, transaction, lease, cancellationToken).ConfigureAwait(false))
+            return false;
+        if (!await HasActiveSchedulerFenceAsync(connection, transaction, ownerPrincipalId, lease.RunId, lease.SchedulerFence, now, cancellationToken).ConfigureAwait(false))
+            return false;
+
+        var run = await ReadJobRunAsync(connection, transaction, ownerPrincipalId, lease.RunId, cancellationToken).ConfigureAwait(false);
+        if (run is null || run.State != "RUNNING" || run.Fence != lease.SchedulerFence)
+            return false;
+
+        var resources = await ReadLeaseResourcesAsync(connection, transaction, ownerPrincipalId, lease.LeaseId, cancellationToken).ConfigureAwait(false);
+        var hash = RemoteHostValidation.ComputeHostResourceGrantHash(resources
+            .Select(item => new HostResourceGrantTuple(item.ResourceId, item.ResourceGrantVersion, item.AccessMode, item.Fingerprint))
+            .ToArray());
+        return string.Equals(hash, binding.HostResourceGrantHash, StringComparison.Ordinal);
     }
 
     public async Task AddAsync(
@@ -665,7 +768,8 @@ public sealed partial class SqliteKernelStore
         state, idempotency_key, attempt_count, created_at, started_at, completed_at,
         provider_receipt, verification_state, failure, schema_version, version
         , account_id, plugin_id, plugin_version, target_hash, expires_at, execution_id,
-        conversation_id, message_id, job_id, job_run_id
+        conversation_id, message_id, job_id, job_run_id,
+        host_id, host_lease_id, host_resource_grant_hash
         """;
 
     private const string ActionParameters = """
@@ -674,7 +778,8 @@ public sealed partial class SqliteKernelStore
         $state, $idempotencyKey, $attemptCount, $createdAt, $startedAt, $completedAt,
         $providerReceipt, $verificationState, $failure, $schemaVersion, $version
         , $accountId, $pluginId, $pluginVersion, $targetHash, $expiresAt, $executionId,
-        $conversationId, $messageId, $jobId, $jobRunId
+        $conversationId, $messageId, $jobId, $jobRunId,
+        $hostId, $hostLeaseId, $hostResourceGrantHash
         """;
 
     private static void BindAction(SqliteCommand command, ActionRecord action)
@@ -734,7 +839,8 @@ public sealed partial class SqliteKernelStore
             R2Binding = reader.IsDBNull(22) ? null : new ActionR2Binding(
                 ReadNullableString(reader, 21), reader.GetString(22), reader.GetString(23), reader.GetString(24),
                 ParseTimestamp(reader.GetString(25)), reader.GetString(26), ReadNullableString(reader, 27),
-                ReadNullableString(reader, 28), ReadNullableString(reader, 29), ReadNullableString(reader, 30)),
+                ReadNullableString(reader, 28), ReadNullableString(reader, 29), ReadNullableString(reader, 30),
+                ReadNullableString(reader, 31), ReadNullableString(reader, 32), ReadNullableString(reader, 33)),
         };
 
     private static async Task<ActionRecord?> ReadActionOnConnectionAsync(
@@ -799,7 +905,10 @@ public sealed partial class SqliteKernelStore
             ReadNullableTimestamp(reader, 9),
             reader.IsDBNull(11) ? null : new ActionR2Binding(
                 ReadNullableString(reader, 10), reader.GetString(11), reader.GetString(12), reader.GetString(13),
-                ParseTimestamp(reader.GetString(8)), reader.GetString(14)));
+                ParseTimestamp(reader.GetString(8)), reader.GetString(14),
+                hostId: ReadNullableString(reader, 15),
+                hostLeaseId: ReadNullableString(reader, 16),
+                hostResourceGrantHash: ReadNullableString(reader, 17)));
 
     private static void BindR2Values(SqliteCommand command, ActionR2Binding? binding)
     {
@@ -818,6 +927,9 @@ public sealed partial class SqliteKernelStore
         command.Parameters.AddWithValue("$pluginVersion", (object?)binding?.PluginVersion ?? DBNull.Value);
         command.Parameters.AddWithValue("$targetHash", (object?)binding?.TargetHash ?? DBNull.Value);
         command.Parameters.AddWithValue("$executionId", (object?)binding?.ExecutionId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$hostId", (object?)binding?.HostId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$hostLeaseId", (object?)binding?.HostLeaseId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$hostResourceGrantHash", (object?)binding?.HostResourceGrantHash ?? DBNull.Value);
     }
 
     private static void BindWorkflow(SqliteCommand command, WorkflowCheckpoint checkpoint)

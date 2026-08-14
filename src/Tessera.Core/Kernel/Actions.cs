@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Tessera.Core.Product;
 
 namespace Tessera.Core.Kernel;
 
@@ -265,17 +266,53 @@ public sealed record ActionRecord
     }
 }
 
-public sealed record ActionR2Binding(
-    string? AccountId,
-    string PluginId,
-    string PluginVersion,
-    string TargetHash,
-    DateTimeOffset ExpiresAt,
-    string ExecutionId,
-    string? ConversationId = null,
-    string? MessageId = null,
-    string? JobId = null,
-    string? JobRunId = null);
+public sealed record ActionR2Binding
+{
+    public ActionR2Binding(
+        string? accountId,
+        string pluginId,
+        string pluginVersion,
+        string targetHash,
+        DateTimeOffset expiresAt,
+        string executionId,
+        string? conversationId = null,
+        string? messageId = null,
+        string? jobId = null,
+        string? jobRunId = null,
+        string? hostId = null,
+        string? hostLeaseId = null,
+        string? hostResourceGrantHash = null)
+    {
+        AccountId = accountId is null ? null : KernelValidation.Text(accountId, nameof(accountId), 256);
+        PluginId = KernelValidation.Text(pluginId, nameof(pluginId), 256);
+        PluginVersion = KernelValidation.Text(pluginVersion, nameof(pluginVersion), 64);
+        TargetHash = KernelValidation.Text(targetHash, nameof(targetHash), 512);
+        ExpiresAt = KernelValidation.Timestamp(expiresAt, nameof(expiresAt));
+        ExecutionId = KernelValidation.Text(executionId, nameof(executionId), 256);
+        ConversationId = conversationId is null ? null : KernelValidation.Text(conversationId, nameof(conversationId), 256);
+        MessageId = messageId is null ? null : KernelValidation.Text(messageId, nameof(messageId), 256);
+        JobId = jobId is null ? null : KernelValidation.Text(jobId, nameof(jobId), 256);
+        JobRunId = jobRunId is null ? null : KernelValidation.Text(jobRunId, nameof(jobRunId), 256);
+        RemoteHostValidation.ValidateActionHostBinding(hostId, hostLeaseId, hostResourceGrantHash);
+        HostId = hostId;
+        HostLeaseId = hostLeaseId;
+        HostResourceGrantHash = hostResourceGrantHash;
+    }
+
+    public string? AccountId { get; init; }
+    public string PluginId { get; init; }
+    public string PluginVersion { get; init; }
+    public string TargetHash { get; init; }
+    public DateTimeOffset ExpiresAt { get; init; }
+    public string ExecutionId { get; init; }
+    public string? ConversationId { get; init; }
+    public string? MessageId { get; init; }
+    public string? JobId { get; init; }
+    public string? JobRunId { get; init; }
+    public string? HostId { get; init; }
+    public string? HostLeaseId { get; init; }
+    public string? HostResourceGrantHash { get; init; }
+}
 
 public static class ActionPayloadHash
 {

@@ -390,6 +390,33 @@ public sealed class RemoteHostPersistenceTests
             unchanged.Host.Version, [], [], now.AddSeconds(4), "rollback-grants")).Succeeded);
     }
 
+    [Fact]
+    public async Task Grant_update_does_not_claim_an_idle_offline_host_is_online()
+    {
+        using var database = new TemporaryDatabase();
+        var store = database.CreateStore();
+        await store.InitializeAsync();
+        var owner = await AddOwnerAsync(store, "offline-grant-owner");
+        var now = DateTimeOffset.UtcNow;
+        var secret = RemoteHostValidation.CreateClaimSecret();
+        await CreatePairingAsync(store, owner, "pairing-offline-grant",
+            RemoteHostValidation.HashClaimSecret(secret), now, now.AddMinutes(5));
+        var claimed = (await ClaimAsync(store, "pairing-offline-grant", secret, Claim(),
+            now.AddSeconds(1), "claim-offline-grant")).Pairing!;
+        var code = RemoteHostValidation.DeriveConfirmationCode(claimed.PairingId, claimed.RequestedHost!.PublicKey);
+        var confirmed = await ConfirmAsync(store, owner, claimed.PairingId, claimed.Version, code,
+            "host-offline-grant", "Offline Mac", [new("host.repo.identity", "1")],
+            [new("repo-main", "READ_ONLY")], now.AddSeconds(2), "confirm-offline-grant");
+        Assert.Equal(RemoteHostLifecycles.Offline, confirmed.Host!.Host.Lifecycle);
+
+        var changed = await UpdateGrantsAsync(store, owner, "host-offline-grant",
+            confirmed.Host.Host.Version, [], [], now.AddSeconds(3), "update-offline-grant");
+
+        Assert.True(changed.Succeeded);
+        Assert.Equal(RemoteHostLifecycles.Offline, changed.Host!.Host.Lifecycle);
+        Assert.Equal("OFFLINE", changed.Host.Host.ConnectionStatus);
+    }
+
     private static HostClaim Claim()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
