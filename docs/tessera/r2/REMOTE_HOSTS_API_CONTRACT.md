@@ -1,8 +1,8 @@
 # R2 Remote Hosts API And Protocol Contract
 
-**Status:** Accepted phased contract; v18 registry and v19 signed Host
-channel/lease/Job routes are implemented. Explicitly marked v20 artifact and
-later client/helper/live surfaces remain planned and are not shipped capability.
+**Status:** Accepted phased contract; v18 registry, v19 signed Host
+channel/lease/Job routes, and the v20 server artifact slice are implemented.
+Later client/helper/live surfaces remain planned and are not shipped capability.
 
 All user routes are under `/api/v1`, require the existing verified owner boundary,
 and return `Cache-Control: no-store`. Unknown fields are rejected. Every mutation
@@ -14,9 +14,13 @@ uses the body request hash directly. An unknown claim pairing has no resolvable
 owner receipt namespace, so it returns deterministic `404 pairing_not_found`
 without persisting a receipt.
 
-Each request body is limited to 64 KiB before JSON parsing. Storage/transient
-failures return the existing redacted `503 product_storage_unavailable`; they are
-never converted to client-state conflicts.
+Each request body is limited to 64 KiB before JSON parsing except
+`POST /host-channel/leases/{leaseId}/artifacts`, whose JSON envelope is limited to
+1,552 KiB so it can carry the full 256 KiB normalized inline content bound even
+when every content byte expands to a six-byte JSON escape, plus bounded metadata.
+Storage/transient failures return the existing redacted
+`503 product_storage_unavailable`; they are never converted to client-state
+conflicts.
 
 ## User/client routes
 
@@ -68,17 +72,20 @@ DELETE /jobs/{jobId}/execution-policy
     version: 0 }
 
 GET /job-runs/{runId}/remote
-200 { blocker, lease|null, host|null, checkpoints, artifacts: [] }
-```
-
-Planned for v20 and later client surfaces; these routes are not implemented:
-
-```text
-GET /hosts/{hostId}/activity
-200 Page<ActivityDto>
+200 { blocker, lease|null, host|null, checkpoints, artifacts: HostArtifactSummaryDto[] }
 
 GET /job-runs/{runId}/remote-artifacts
-200 Page<HostArtifactDto>
+200 Page<HostArtifactSummaryDto>
+
+GET /host-artifacts/{artifactId}
+200 { artifact: HostArtifactSummaryDto, textContent }
+
+POST /host-artifacts/{artifactId}/verify
+{ expectedVersion }
+200 { artifact: HostArtifactSummaryDto, evidenceId }
+
+GET /hosts/{hostId}/activity
+200 Page<ActivityDto>
 ```
 
 The initiating trusted client/helper generates the 32-byte claim secret, retains
@@ -123,6 +130,11 @@ POST /host-channel/leases/{leaseId}/complete
 POST /host-channel/leases/{leaseId}/reconcile
 { leaseVersion, localAttemptId, observedState, outputSha256|null }
 200 { resolution, lease, run }
+
+POST /host-channel/leases/{leaseId}/artifacts
+{ leaseVersion, localAttemptId, artifactId, kind, mediaType, summary,
+  declaredSize, declaredSha256, retention, textContent }
+201 { artifact: HostArtifactSummaryDto, replayed: false }
 ```
 
 The helper generates one canonical local attempt ID before acknowledgement.
@@ -181,7 +193,7 @@ zero-byte string. The receipt `requestHash` is lowercase SHA-256 of the complete
 canonical signing-input bytes above.
 
 `OPERATION` is a closed server-derived value: `poll`, `lease-ack`, `lease-events`,
-`lease-complete`, or `lease-reconcile`. `TARGET_ID` is `-` for poll and the exact
+`lease-complete`, `lease-reconcile`, or `lease-artifact`. `TARGET_ID` is `-` for poll and the exact
 canonical lowercase lease ID from the matched route for every lease operation.
 Host endpoints reject every query string. The matched route must equal the signed
 operation and target; lease-ID substitution invalidates the signature.
@@ -292,11 +304,12 @@ create or consume authorization.
 
 ## Bounds
 
-- request body: 64 KiB unless artifact endpoint specifies lower;
+- request body: 64 KiB except the artifact upload JSON envelope, which is 1,552 KiB;
 - pairing names/versions/IDs: 1..128 printable characters under closed patterns;
 - capabilities/resources per Host: 64 each;
 - poll wait: 25 seconds;
 - event batch: 50 events / 64 KiB;
 - text output: 32 KiB after UTF-8 normalization/redaction;
 - inline artifact: 256 KiB; larger artifacts are unavailable in the proof slice;
+- artifacts per canonical Job run: 64;
 - one active lease per Host in the proof slice.

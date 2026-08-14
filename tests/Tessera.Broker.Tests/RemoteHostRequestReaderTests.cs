@@ -129,11 +129,49 @@ public sealed class RemoteHostRequestReaderTests
             "11",
             "1723600606",
             new byte[RemoteHostProtocol.MaximumBodyBytes + 1]);
-        Assert.Equal(RemoteHostSignedRequestErrors.HostAuthInvalid, (await RemoteHostRequestReader.ReadAsync(
+        Assert.Equal(RemoteHostSignedRequestErrors.HostRequestTooLarge, (await RemoteHostRequestReader.ReadAsync(
             oversized.Request,
             HostAcceptedMessageOperations.Poll,
             "-",
             CancellationToken.None)).Error);
+    }
+
+    [Fact]
+    public async Task Reader_allows_route_specific_artifact_request_bodies_up_to_the_worst_case_json_bound()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var withinLimit = BuildRequest(
+            key,
+            HostAcceptedMessageOperations.LeaseArtifact,
+            "lease-123",
+            "msg-artifact",
+            "12",
+            "1723600607",
+            new byte[RemoteHostProtocol.MaximumArtifactRequestBodyBytes]);
+
+        var accepted = await RemoteHostRequestReader.ReadAsync(
+            withinLimit.Request,
+            HostAcceptedMessageOperations.LeaseArtifact,
+            "lease-123",
+            RemoteHostProtocol.MaximumArtifactRequestBodyBytes,
+            CancellationToken.None);
+        Assert.True(accepted.Succeeded);
+
+        var oversized = BuildRequest(
+            key,
+            HostAcceptedMessageOperations.LeaseArtifact,
+            "lease-123",
+            "msg-artifact-big",
+            "13",
+            "1723600608",
+            new byte[RemoteHostProtocol.MaximumArtifactRequestBodyBytes + 1]);
+        var rejected = await RemoteHostRequestReader.ReadAsync(
+            oversized.Request,
+            HostAcceptedMessageOperations.LeaseArtifact,
+            "lease-123",
+            RemoteHostProtocol.MaximumArtifactRequestBodyBytes,
+            CancellationToken.None);
+        Assert.Equal(RemoteHostSignedRequestErrors.HostRequestTooLarge, rejected.Error);
     }
 
     private static DefaultHttpContext BuildRequest(

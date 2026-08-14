@@ -151,7 +151,7 @@ public sealed class R2ProductEndpointsTests : IAsyncLifetime
         Assert.True(root.GetProperty("ready").GetBoolean());
         Assert.Equal("ready", root.GetProperty("database").GetProperty("state").GetString());
         Assert.Equal("ready", root.GetProperty("scheduler").GetProperty("state").GetString());
-        Assert.Equal(19, root.GetProperty("product").GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(20, root.GetProperty("product").GetProperty("schemaVersion").GetInt32());
     }
 
     [Fact]

@@ -38,9 +38,10 @@ public static class HostAcceptedMessageOperations
     public const string LeaseEvents = "lease-events";
     public const string LeaseComplete = "lease-complete";
     public const string LeaseReconcile = "lease-reconcile";
+    public const string LeaseArtifact = "lease-artifact";
 
     public static bool IsValid(string value)
-        => value is Poll or LeaseAck or LeaseEvents or LeaseComplete or LeaseReconcile;
+        => value is Poll or LeaseAck or LeaseEvents or LeaseComplete or LeaseReconcile or LeaseArtifact;
 }
 
 public static class JobExecutionLocations
@@ -128,6 +129,34 @@ public static class HostLeaseEventTypes
             or StepCompleted or ApprovalRequired or JobFailed or JobCompleted;
 }
 
+public static class HostArtifactKinds
+{
+    public const string Text = "TEXT";
+
+    public static bool IsValid(string value) => value == Text;
+}
+
+public static class HostArtifactMediaTypes
+{
+    public const string TextPlain = "text/plain";
+
+    public static bool IsValid(string value) => value == TextPlain;
+}
+
+public static class HostArtifactRetentions
+{
+    public const string Run = "RUN";
+
+    public static bool IsValid(string value) => value == Run;
+}
+
+public static class HostArtifactContentStates
+{
+    public const string Available = "AVAILABLE";
+
+    public static bool IsValid(string value) => value == Available;
+}
+
 public sealed record HostSignedRequestEnvelope(
     string Method,
     string Operation,
@@ -150,13 +179,15 @@ public static class RemoteHostSignedRequestErrors
     public const string HostSequenceInvalid = "host_sequence_invalid";
     public const string HostClockSkew = "host_clock_skew";
     public const string HostProtocolUnsupported = "host_protocol_unsupported";
+    public const string HostRequestTooLarge = "host_request_too_large";
 
     public static bool IsValid(string value)
         => value is HostAuthInvalid or HostRevoked or HostReplay or HostSequenceInvalid
-            or HostClockSkew or HostProtocolUnsupported;
+            or HostClockSkew or HostProtocolUnsupported or HostRequestTooLarge;
 
     public static int StatusCode(string value) => value switch
     {
+        HostRequestTooLarge => 413,
         HostAuthInvalid => 401,
         HostProtocolUnsupported => 409,
         HostRevoked or HostReplay or HostSequenceInvalid or HostClockSkew => 409,
@@ -172,6 +203,8 @@ public static class RemoteHostProtocol
     public const long MaximumUnixTimestampSeconds = 253402300799;
     public const long MaximumClockSkewSeconds = 300;
     public const int MaximumBodyBytes = 64 * 1024;
+    public const int MaximumArtifactBodyBytes = 256 * 1024;
+    public const int MaximumArtifactRequestBodyBytes = MaximumArtifactBodyBytes * 6 + 16 * 1024;
 
     private const int CoordinateLength = 32;
     private const int SignatureLength = 64;
@@ -533,10 +566,36 @@ public sealed record HostPollActiveAttempt(
     string LocalAttemptId,
     string State);
 
+public sealed record HostArtifact(
+    string OwnerPrincipalId,
+    string ArtifactId,
+    string RunId,
+    string LeaseId,
+    string? ActionId,
+    string Kind,
+    string MediaType,
+    string Summary,
+    int SizeBytes,
+    string Sha256,
+    string Retention,
+    string ContentState,
+    bool Redacted,
+    bool Truncated,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ExpiresAt,
+    long Version);
+
+public sealed record HostArtifactDetail(
+    HostArtifact Artifact,
+    string TextContent,
+    string? EvidenceId);
+
 public sealed record NormalizedRemoteHostOutput(
     string Text,
+    bool Redacted,
     bool Truncated,
-    string Sha256);
+    string Sha256,
+    int SizeBytes);
 
 public static partial class RemoteHostOutputNormalizer
 {
@@ -544,13 +603,24 @@ public static partial class RemoteHostOutputNormalizer
 
     public static NormalizedRemoteHostOutput Normalize(ReadOnlySpan<byte> input, int limitBytes = 32 * 1024)
     {
-        if (limitBytes is < 1 or > 32 * 1024)
+        if (limitBytes is < 1 or > RemoteHostProtocol.MaximumArtifactBodyBytes)
             throw new ArgumentOutOfRangeException(nameof(limitBytes));
         var decoded = StrictUtf8.GetString(input);
         var normalized = decoded.Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace('\r', '\n');
         normalized = new string(normalized.Where(character => character is '\n' or '\t' || !char.IsControl(character)).ToArray());
-        normalized = SecretPattern().Replace(normalized, match => $"{match.Groups[1].Value}[REDACTED]");
+        var redacted = false;
+        normalized = RedactQuotedSensitiveFields(normalized, ref redacted);
+        normalized = Redact(normalized, SecretPattern(), ref redacted, match =>
+        {
+            return $"{match.Groups[1].Value}[REDACTED]";
+        });
+        normalized = Redact(normalized, SensitiveFieldPattern(), ref redacted, _ => "[REDACTED]");
+        normalized = Redact(normalized, EnvironmentAssignmentPattern(), ref redacted, match =>
+            $"{match.Groups[1].Value}[REDACTED]");
+        normalized = Redact(normalized, AbsolutePathPattern(), ref redacted, match =>
+            $"{match.Groups[1].Value}[REDACTED]");
+        normalized = Redact(normalized, PemBlockPattern(), ref redacted, _ => "[REDACTED]");
         var bytes = Encoding.UTF8.GetBytes(normalized);
         var truncated = bytes.Length > limitBytes;
         var length = Math.Min(bytes.Length, limitBytes);
@@ -558,19 +628,162 @@ public static partial class RemoteHostOutputNormalizer
         var persisted = bytes.AsSpan(0, length).ToArray();
         return new(
             StrictUtf8.GetString(persisted),
+            redacted,
             truncated,
-            Convert.ToHexStringLower(SHA256.HashData(persisted)));
+            Convert.ToHexStringLower(SHA256.HashData(persisted)),
+            persisted.Length);
     }
 
-    [GeneratedRegex("(?i)(authorization\\s*[:=]\\s*(?:bearer\\s+)?|(?:api[_-]?key|token|password|secret)\\s*[:=]\\s*)[^\\s,;]+", RegexOptions.CultureInvariant)]
+    private static string Redact(string value, Regex pattern, ref bool redacted, MatchEvaluator replacement)
+    {
+        var matched = false;
+        var result = pattern.Replace(value, match =>
+        {
+            matched = true;
+            return replacement(match);
+        });
+        redacted |= matched;
+        return result;
+    }
+
+    private static string RedactQuotedSensitiveFields(string value, ref bool redacted)
+    {
+        StringBuilder? result = null;
+        var copyFrom = 0;
+        for (var index = 0; index < value.Length; index++)
+        {
+            string key;
+            int separator;
+            var quote = value[index];
+            if (quote is '"' or '\'')
+            {
+                var keyEnd = FindQuotedValueEnd(value, index + 1, quote, 128);
+                if (keyEnd < 0)
+                    continue;
+                key = value[(index + 1)..keyEnd];
+                separator = keyEnd + 1;
+            }
+            else
+            {
+                if (!IsFieldNameCharacter(value[index])
+                    || index > 0 && IsFieldNameCharacter(value[index - 1]))
+                {
+                    continue;
+                }
+                var keyEnd = index;
+                while (keyEnd < value.Length
+                    && keyEnd - index <= 128
+                    && IsFieldNameCharacter(value[keyEnd]))
+                {
+                    keyEnd++;
+                }
+                if (keyEnd == index || keyEnd - index > 128)
+                    continue;
+                key = value[index..keyEnd];
+                separator = keyEnd;
+            }
+
+            while (separator < value.Length && char.IsWhiteSpace(value[separator])) separator++;
+            if (separator >= value.Length || value[separator] != ':')
+                continue;
+            separator++;
+            while (separator < value.Length && char.IsWhiteSpace(value[separator])) separator++;
+            if (separator >= value.Length || value[separator] is not ('"' or '\''))
+                continue;
+
+            if (!IsSensitiveQuotedField(key))
+                continue;
+            var valueQuote = value[separator];
+            var valueEnd = FindQuotedValueEnd(value, separator + 1, valueQuote, int.MaxValue);
+            if (valueEnd < 0)
+                valueEnd = value.Length;
+
+            result ??= new StringBuilder(value.Length);
+            result.Append(value, copyFrom, separator + 1 - copyFrom);
+            result.Append("[REDACTED]");
+            copyFrom = valueEnd;
+            index = valueEnd;
+            redacted = true;
+        }
+
+        if (result is null)
+            return value;
+        result.Append(value, copyFrom, value.Length - copyFrom);
+        return result.ToString();
+    }
+
+    private static int FindQuotedValueEnd(string value, int start, char quote, int maximumCharacters)
+    {
+        var escaped = false;
+        for (var index = start; index < value.Length; index++)
+        {
+            if (index - start > maximumCharacters)
+                return -1;
+            var character = value[index];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+            if (character == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+            if (character == quote)
+                return index;
+        }
+        return -1;
+    }
+
+    private static bool IsFieldNameCharacter(char value)
+        => value is >= 'A' and <= 'Z'
+            or >= 'a' and <= 'z'
+            or >= '0' and <= '9'
+            or '_' or '-';
+
+    private static bool IsSensitiveQuotedField(string key)
+    {
+        var normalized = key.ToLowerInvariant();
+        var compact = normalized.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal);
+        return compact.Contains("apikey", StringComparison.Ordinal)
+            || compact.Contains("token", StringComparison.Ordinal)
+            || compact.Contains("password", StringComparison.Ordinal)
+            || compact.Contains("secret", StringComparison.Ordinal)
+            || compact.Contains("authorization", StringComparison.Ordinal)
+            || compact.Contains("signature", StringComparison.Ordinal)
+            || compact.Contains("publickey", StringComparison.Ordinal)
+            || compact.Contains("privatekey", StringComparison.Ordinal)
+            || compact.EndsWith("path", StringComparison.Ordinal)
+            || compact.Contains("command", StringComparison.Ordinal)
+            || compact.Contains("argv", StringComparison.Ordinal)
+            || compact.EndsWith("environment", StringComparison.Ordinal)
+            || compact.EndsWith("env", StringComparison.Ordinal);
+    }
+
+    [GeneratedRegex("(?i)(authorization\\s*[:=]\\s*(?:bearer\\s+)?|(?:api[_-]?key|token|password|secret)\\s*[:=]\\s*)[^\\s,;]+", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
     private static partial Regex SecretPattern();
+
+    [GeneratedRegex("(?i)((?:signature|(?:public|private)\\s+key|path|command|argv|environment|env)\\s*[:=]\\s*)[^\\n]+", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
+    private static partial Regex SensitiveFieldPattern();
+
+    [GeneratedRegex("(?m)(^|\\s)([A-Z][A-Z0-9_]{1,63}\\s*=\\s*)[^\\s,;]+", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
+    private static partial Regex EnvironmentAssignmentPattern();
+
+    [GeneratedRegex("(?i)(^|[^A-Za-z0-9_:/])(?:~/[^\\s,;\"']+|/(?:Users|home|Volumes|System|Network|Developer|private|tmp|var|opt|usr|bin|sbin|dev|etc|Applications|Library|workspace|root)/[^\\s,;\"']+|[A-Za-z]:\\\\[^\\s,;\"']+)", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
+    private static partial Regex AbsolutePathPattern();
+
+    [GeneratedRegex("(?is)-----BEGIN [^-]+-----.*?(?:-----END [^-]+-----|\\z)", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
+    private static partial Regex PemBlockPattern();
 }
 
 public sealed record RemoteJobRunProjection(
     JobRunBlocker? Blocker,
     HostWorkLease? Lease,
     RemoteHost? Host,
-    IReadOnlyList<JobRunCheckpoint> Checkpoints);
+    IReadOnlyList<JobRunCheckpoint> Checkpoints,
+    IReadOnlyList<HostArtifact> Artifacts);
 
 public sealed record HostCapabilityAdvertisement(
     string OwnerPrincipalId, string HostId, string CapabilityId, string CapabilityVersion,
@@ -701,6 +914,7 @@ public static class RemoteHostValidation
     public const int MaximumGrants = 64;
     public const int MaximumClaimAttempts = 5;
     public const int MaximumConfirmationAttempts = 5;
+    public const int MaximumArtifactsPerRun = 64;
     public const string SupportedCapabilityId = "host.repo.identity";
     public const string SupportedCapabilityVersion = "1";
     public const string SupportedProtocolVersion = "1";
@@ -708,6 +922,7 @@ public static class RemoteHostValidation
     public const string ReadOnly = "READ_ONLY";
     public const string Repository = "REPOSITORY";
     public const string Available = "AVAILABLE";
+    public const int MaximumArtifactSummaryBytes = 512;
     public static readonly TimeSpan MaximumPairingTtl = TimeSpan.FromMinutes(5);
 
     private static readonly HashSet<string> JwkMembers = new(StringComparer.Ordinal)

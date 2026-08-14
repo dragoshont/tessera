@@ -72,7 +72,7 @@ public sealed class RemoteHostValidationTests
         Assert.All(invalid, claim => Assert.Throws<ArgumentException>(
             () => RemoteHostValidation.ValidateClaim(claim)));
 
-        Assert.All(new[] { "poll", "lease-ack", "lease-events", "lease-complete", "lease-reconcile" },
+        Assert.All(new[] { "poll", "lease-ack", "lease-events", "lease-complete", "lease-reconcile", "lease-artifact" },
             operation => Assert.True(HostAcceptedMessageOperations.IsValid(operation)));
         Assert.False(HostAcceptedMessageOperations.IsValid("shell"));
     }
@@ -186,16 +186,72 @@ public sealed class RemoteHostValidationTests
         var normalized = RemoteHostOutputNormalizer.Normalize(
             System.Text.Encoding.UTF8.GetBytes("line1\r\nAuthorization: Bearer canary-token\u0000\rline2"));
         Assert.Equal("line1\nAuthorization: Bearer [REDACTED]\nline2", normalized.Text);
+        Assert.True(normalized.Redacted);
         Assert.False(normalized.Truncated);
+        Assert.Equal(44, normalized.SizeBytes);
         Assert.Equal("69a9a706525148f438e43498efcbfa2ed5984a421b0ff91ec434ebd96587340c", normalized.Sha256);
+
+        var structured = RemoteHostOutputNormalizer.Normalize(
+            System.Text.Encoding.UTF8.GetBytes("{\"password\":\"json-canary\",\"path\":\"/Volumes/External/repo\",\"note\":\"safe\"}\nmount /Volumes/External/repo"));
+        Assert.Equal("{\"password\":\"[REDACTED]\",\"path\":\"[REDACTED]\",\"note\":\"safe\"}\nmount [REDACTED]", structured.Text);
+        Assert.True(structured.Redacted);
+        Assert.DoesNotContain("json-canary", structured.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("/Volumes/", structured.Text, StringComparison.Ordinal);
+
+        var escapedStructured = RemoteHostOutputNormalizer.Normalize(
+            System.Text.Encoding.UTF8.GetBytes("{\"password\":\"do\\\"not-leak\",\"secret_note\":\"don't-leak\"}"));
+        Assert.Equal("{\"password\":\"[REDACTED]\",\"secret_note\":\"[REDACTED]\"}", escapedStructured.Text);
+        Assert.DoesNotContain("not-leak", escapedStructured.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("don't-leak", escapedStructured.Text, StringComparison.Ordinal);
+
+        var bareStructured = RemoteHostOutputNormalizer.Normalize(
+            System.Text.Encoding.UTF8.GetBytes("password: \"bare secret with spaces\"\nroot /System/Volumes/Data/repo"));
+        Assert.Equal("password: [REDACTED]\nroot [REDACTED]", bareStructured.Text);
+        Assert.DoesNotContain("bare secret", bareStructured.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("/System/Volumes/", bareStructured.Text, StringComparison.Ordinal);
+
+        var keyMaterial = RemoteHostOutputNormalizer.Normalize(
+            System.Text.Encoding.UTF8.GetBytes("{\"privateKey\":\"camel-key-canary\",\"private_key\":\"snake-key-canary\",\"binaryPath\":\"/usr/local/bin/tool\"}"));
+        Assert.DoesNotContain("camel-key-canary", keyMaterial.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("snake-key-canary", keyMaterial.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("/usr/local/", keyMaterial.Text, StringComparison.Ordinal);
 
         var truncated = RemoteHostOutputNormalizer.Normalize(
             System.Text.Encoding.UTF8.GetBytes("ééé"), 5);
         Assert.Equal("éé", truncated.Text);
+        Assert.False(truncated.Redacted);
         Assert.True(truncated.Truncated);
+        Assert.Equal(4, truncated.SizeBytes);
         Assert.Equal("f13c007a1d8e6e1300b5957a143810cdd3555825466cf5d2617b1ac2fd8bd76b", truncated.Sha256);
+
+        var artifactVector = RemoteHostOutputNormalizer.Normalize(
+            System.Text.Encoding.UTF8.GetBytes(new string('a', 262145)),
+            RemoteHostProtocol.MaximumArtifactBodyBytes);
+        Assert.Equal(RemoteHostProtocol.MaximumArtifactBodyBytes, System.Text.Encoding.UTF8.GetByteCount(artifactVector.Text));
+        Assert.Equal(RemoteHostProtocol.MaximumArtifactBodyBytes, artifactVector.SizeBytes);
+        Assert.True(artifactVector.Truncated);
+
+        var pemPrefix = "-----BEGIN " + "PRIVATE" + " KEY-----";
+        var incompletePem = RemoteHostOutputNormalizer.Normalize(
+            System.Text.Encoding.UTF8.GetBytes(pemPrefix + new string('x', RemoteHostProtocol.MaximumArtifactBodyBytes - pemPrefix.Length)),
+            RemoteHostProtocol.MaximumArtifactBodyBytes);
+        Assert.Equal("[REDACTED]", incompletePem.Text);
+        Assert.True(incompletePem.Redacted);
+        Assert.False(incompletePem.Truncated);
+
+        var escapedQuoteStream = string.Concat(Enumerable.Repeat(
+            "\\\"",
+            RemoteHostProtocol.MaximumArtifactBodyBytes / 2));
+        var escapedQuoteVector = RemoteHostOutputNormalizer.Normalize(
+            System.Text.Encoding.UTF8.GetBytes(escapedQuoteStream),
+            RemoteHostProtocol.MaximumArtifactBodyBytes);
+        Assert.Equal(RemoteHostProtocol.MaximumArtifactBodyBytes, escapedQuoteVector.SizeBytes);
+        Assert.False(escapedQuoteVector.Truncated);
+
         Assert.Throws<System.Text.DecoderFallbackException>(() =>
             RemoteHostOutputNormalizer.Normalize([0xff]));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            RemoteHostOutputNormalizer.Normalize(System.Text.Encoding.UTF8.GetBytes("x"), RemoteHostProtocol.MaximumArtifactBodyBytes + 1));
     }
 
     public static TheoryData<string> InvalidJwks()

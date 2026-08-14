@@ -1,6 +1,6 @@
 # R2 Remote Hosts Product Contract
 
-**Status:** Accepted reference-slice contract; implementation and live proof in progress
+**Status:** Accepted reference-slice contract; the server artifact slice is implemented and live proof remains in progress
 
 ## Product invariant
 
@@ -110,10 +110,10 @@ Progress is a sequence of bounded product checkpoints, not chain-of-thought or a
 unbounded terminal stream. Percent is shown only when a truthful total exists.
 
 Artifact rows expose kind, summary, media type, byte size, SHA-256, created/expiry
-time, retention, redaction/truncation, and verification level. Preview supports
-bounded text and reviewed images. Artifact content is untrusted input and never
-becomes Memory, Evidence, approval, or authorization without a separate canonical
-transition.
+time, retention, and redaction/truncation. The v20 detail preview supports bounded,
+normalized plain text only; image artifacts remain future work. Artifact content
+is untrusted input and never becomes Memory, approval, or authorization. It becomes
+Evidence only through the separate owner-scoped verification transition.
 
 ## Accessibility
 

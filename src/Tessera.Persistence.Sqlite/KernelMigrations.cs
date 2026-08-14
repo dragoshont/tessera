@@ -4,7 +4,7 @@ internal sealed record KernelMigration(int Version, string Sql);
 
 internal static class KernelMigrations
 {
-    public const int LatestVersion = 19;
+    public const int LatestVersion = 20;
 
     public static IReadOnlyList<KernelMigration> All { get; } =
     [
@@ -27,7 +27,112 @@ internal static class KernelMigrations
         new KernelMigration(17, Migration17),
         new KernelMigration(18, Migration18),
         new KernelMigration(19, Migration19),
+        new KernelMigration(20, Migration20),
     ];
+
+    private const string Migration20 = """
+        ALTER TABLE host_accepted_messages RENAME TO host_accepted_messages_v19;
+
+        CREATE TABLE host_accepted_messages (
+            owner_principal_id TEXT NOT NULL,
+            host_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK (sequence >= 1),
+            operation TEXT NOT NULL CHECK (operation IN (
+                'poll','lease-ack','lease-events','lease-complete','lease-reconcile','lease-artifact')),
+            target_id TEXT NOT NULL,
+            request_hash TEXT NOT NULL CHECK (
+                length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'),
+            response_status INTEGER NOT NULL CHECK (response_status BETWEEN 100 AND 599),
+            response_body_json TEXT NOT NULL CHECK (json_valid(response_body_json)),
+            accepted_at TEXT NOT NULL,
+            PRIMARY KEY (owner_principal_id,host_id,message_id),
+            UNIQUE (owner_principal_id,host_id,sequence),
+            FOREIGN KEY (owner_principal_id,host_id) REFERENCES remote_hosts(owner_principal_id,host_id)
+        );
+
+        INSERT INTO host_accepted_messages(
+            owner_principal_id,host_id,message_id,sequence,operation,target_id,
+            request_hash,response_status,response_body_json,accepted_at)
+        SELECT owner_principal_id,host_id,message_id,sequence,operation,target_id,
+               request_hash,response_status,response_body_json,accepted_at
+        FROM host_accepted_messages_v19;
+
+        DROP TABLE host_accepted_messages_v19;
+
+        CREATE TABLE host_artifacts (
+            owner_principal_id TEXT NOT NULL,
+            artifact_id TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            lease_id TEXT NOT NULL,
+            action_id TEXT NULL,
+            kind TEXT NOT NULL CHECK (kind = 'TEXT'),
+            media_type TEXT NOT NULL CHECK (media_type = 'text/plain'),
+            summary TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL CHECK (size_bytes BETWEEN 0 AND 262144),
+            sha256 TEXT NOT NULL CHECK (
+                length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+            retention TEXT NOT NULL CHECK (retention = 'RUN'),
+            content_state TEXT NOT NULL CHECK (content_state = 'AVAILABLE'),
+            redacted INTEGER NOT NULL CHECK (redacted IN (0,1)),
+            truncated INTEGER NOT NULL CHECK (truncated IN (0,1)),
+            created_at TEXT NOT NULL,
+            expires_at TEXT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            PRIMARY KEY (owner_principal_id,artifact_id),
+            FOREIGN KEY (owner_principal_id,run_id) REFERENCES job_runs(owner_principal_id,run_id),
+            FOREIGN KEY (owner_principal_id,lease_id) REFERENCES host_work_leases(owner_principal_id,lease_id),
+            FOREIGN KEY (owner_principal_id,action_id) REFERENCES actions(owner_principal_id,action_id)
+        );
+
+        CREATE TABLE host_artifact_contents (
+            owner_principal_id TEXT NOT NULL,
+            artifact_id TEXT NOT NULL,
+            text_content TEXT NOT NULL,
+            PRIMARY KEY (owner_principal_id,artifact_id),
+            FOREIGN KEY (owner_principal_id,artifact_id)
+                REFERENCES host_artifacts(owner_principal_id,artifact_id)
+        );
+
+        CREATE TABLE host_artifact_receipts (
+            owner_principal_id TEXT NOT NULL,
+            receipt_id TEXT NOT NULL,
+            artifact_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            declared_size INTEGER NOT NULL CHECK (declared_size BETWEEN 0 AND 262144),
+            declared_sha256 TEXT NOT NULL CHECK (
+                length(declared_sha256) = 64 AND declared_sha256 NOT GLOB '*[^0-9a-f]*'),
+            accepted_at TEXT NOT NULL,
+            PRIMARY KEY (owner_principal_id,receipt_id),
+            UNIQUE (owner_principal_id,artifact_id),
+            FOREIGN KEY (owner_principal_id,artifact_id)
+                REFERENCES host_artifacts(owner_principal_id,artifact_id)
+        );
+
+        CREATE TRIGGER trg_host_artifacts_validate_insert
+        BEFORE INSERT ON host_artifacts
+        WHEN NOT EXISTS(
+            SELECT 1
+            FROM host_work_leases lease
+            WHERE lease.owner_principal_id = NEW.owner_principal_id
+              AND lease.lease_id = NEW.lease_id
+              AND lease.run_id = NEW.run_id)
+        BEGIN
+            SELECT RAISE(ABORT,'invalid Host artifact lease snapshot');
+        END;
+
+        CREATE INDEX ix_host_accepted_messages_owner_host_sequence
+            ON host_accepted_messages(owner_principal_id,host_id,sequence);
+        CREATE INDEX ix_host_artifacts_run_created
+            ON host_artifacts(owner_principal_id,run_id,created_at DESC,artifact_id);
+        CREATE INDEX ix_host_artifacts_lease_created
+            ON host_artifacts(owner_principal_id,lease_id,created_at DESC,artifact_id);
+        CREATE INDEX ix_host_artifact_receipts_artifact
+            ON host_artifact_receipts(owner_principal_id,artifact_id,accepted_at);
+        CREATE UNIQUE INDEX ux_evidence_host_artifact_source
+            ON evidence(owner_principal_id,source_type,source_native_id)
+            WHERE source_type = 'host.artifact';
+        """;
 
     private const string Migration19 = """
         CREATE TABLE job_execution_policies (

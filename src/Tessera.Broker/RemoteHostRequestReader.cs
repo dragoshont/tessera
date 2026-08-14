@@ -32,9 +32,12 @@ internal static class RemoteHostRequestReader
         HttpRequest request,
         string expectedOperation,
         string expectedTargetId,
+        int maxBodyBytes,
         CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (maxBodyBytes is < 1 or > RemoteHostProtocol.MaximumArtifactRequestBodyBytes)
+            throw new ArgumentOutOfRangeException(nameof(maxBodyBytes));
         try
         {
             if (request.QueryString.HasValue)
@@ -57,7 +60,7 @@ internal static class RemoteHostRequestReader
                 values.Add(header, value);
             }
 
-            var body = await ReadBodyAsync(request, token).ConfigureAwait(false);
+            var body = await ReadBodyAsync(request, maxBodyBytes, token).ConfigureAwait(false);
             var envelope = RemoteHostProtocol.ParseSignedRequest(
                 request.Method,
                 values["X-Tessera-Host-Operation"],
@@ -81,21 +84,32 @@ internal static class RemoteHostRequestReader
 
             return new(envelope, body, null);
         }
+        catch (ArgumentOutOfRangeException)
+        {
+            return Reject(error: RemoteHostSignedRequestErrors.HostRequestTooLarge);
+        }
         catch (ArgumentException)
         {
             return Reject();
         }
     }
 
-    private static async Task<byte[]> ReadBodyAsync(HttpRequest request, CancellationToken token)
+    public static Task<RemoteHostRequestReadResult> ReadAsync(
+        HttpRequest request,
+        string expectedOperation,
+        string expectedTargetId,
+        CancellationToken token)
+        => ReadAsync(request, expectedOperation, expectedTargetId, RemoteHostProtocol.MaximumBodyBytes, token);
+
+    private static async Task<byte[]> ReadBodyAsync(HttpRequest request, int maxBodyBytes, CancellationToken token)
     {
-        if (request.ContentLength is > RemoteHostProtocol.MaximumBodyBytes)
+        if (request.ContentLength is long contentLength && contentLength > maxBodyBytes)
             throw new ArgumentOutOfRangeException(nameof(request));
         if (!request.Body.CanSeek)
             request.EnableBuffering();
         request.Body.Position = 0;
-        using var buffer = new MemoryStream(request.ContentLength is > 0 and <= RemoteHostProtocol.MaximumBodyBytes
-            ? (int)request.ContentLength.Value
+        using var buffer = new MemoryStream(request.ContentLength is long initialLength && initialLength > 0 && initialLength <= maxBodyBytes
+            ? (int)initialLength
             : 0);
         var chunk = new byte[4096];
         while (true)
@@ -103,7 +117,7 @@ internal static class RemoteHostRequestReader
             var read = await request.Body.ReadAsync(chunk.AsMemory(0, chunk.Length), token).ConfigureAwait(false);
             if (read == 0)
                 break;
-            if (buffer.Length + read > RemoteHostProtocol.MaximumBodyBytes)
+            if (buffer.Length + read > maxBodyBytes)
                 throw new ArgumentOutOfRangeException(nameof(request));
             await buffer.WriteAsync(chunk.AsMemory(0, read), token).ConfigureAwait(false);
         }
@@ -113,6 +127,6 @@ internal static class RemoteHostRequestReader
         return buffer.ToArray();
     }
 
-    private static RemoteHostRequestReadResult Reject(byte[]? body = null)
-        => new(null, body ?? [], RemoteHostSignedRequestErrors.HostAuthInvalid);
+    private static RemoteHostRequestReadResult Reject(byte[]? body = null, string error = RemoteHostSignedRequestErrors.HostAuthInvalid)
+        => new(null, body ?? [], error);
 }

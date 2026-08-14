@@ -1,7 +1,8 @@
 # R2 Remote Hosts Data And Migration Contract
 
-**Status:** Accepted phased additive contract. Migrations v18-v19 are
-implemented; migration v20 remains planned and is not current product capability.
+**Status:** Accepted phased additive contract. Migrations v18-v20 for the
+server artifact slice are implemented; later client/helper/live surfaces remain
+planned and are not current product capability.
 
 Remote adds Host bindings around canonical owner, Job, JobRun, Action, Evidence,
 Activity, output and scheduler records. It does not add Host-owned Jobs, Memory,
@@ -170,7 +171,7 @@ HOST_DISCONNECTED | HOST_UPDATE_REQUIRED
 A blocker is owner/run scoped, has one active row per run, and is cleared rather
 than deleted so history can be projected to Activity.
 
-## Planned migration v20: artifact metadata and receipts
+## Migration v20: artifact metadata and receipts
 
 ```text
 host_artifacts
@@ -193,7 +194,9 @@ pre-redaction content is never persisted. The Host declares this post-normalizat
 size/hash; the server recomputes and requires an exact match. Binary upload, download
 locators and chunking are future work. Content is never inserted into Memory or
 Evidence automatically. Evidence may reference the artifact hash/locator only via
-a separate canonical verification transition.
+a separate canonical verification transition. An accepted artifact is durable proof
+that execution began for its exact lease, so a later `NOT_STARTED` reconciliation
+cannot requeue that run and instead requires reconciliation.
 
 ## Ownership and deletion
 

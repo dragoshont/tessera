@@ -10,7 +10,7 @@ namespace Tessera.Persistence.Sqlite.Tests;
 public sealed class SqliteMigrationTests
 {
     [Fact]
-    public async Task Empty_store_bootstraps_and_repeatably_applies_v1_through_v19()
+    public async Task Empty_store_bootstraps_and_repeatably_applies_v1_through_v20()
     {
         using var database = new TemporaryDatabase();
         var store = database.CreateStore();
@@ -18,7 +18,7 @@ public sealed class SqliteMigrationTests
         await store.InitializeAsync();
         await store.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await store.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], await store.GetAppliedMigrationVersionsAsync());
     }
 
     [Fact]
@@ -32,7 +32,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], await restarted.GetAppliedMigrationVersionsAsync());
         Assert.Contains("actions", await ReadTableNamesAsync(database.Path));
         Assert.Contains("follow_ups", await ReadTableNamesAsync(database.Path));
     }
@@ -47,7 +47,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], await restarted.GetAppliedMigrationVersionsAsync());
         Assert.Contains("follow_up_operations", await ReadTableNamesAsync(database.Path));
     }
 
@@ -61,7 +61,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], await restarted.GetAppliedMigrationVersionsAsync());
         var columns = await ReadColumnNamesAsync(database.Path, ["follow_up_sources"]);
         Assert.Contains("follow_up_sources.source_payload_hash", columns);
     }
@@ -76,7 +76,7 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], await restarted.GetAppliedMigrationVersionsAsync());
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], await restarted.GetAppliedMigrationVersionsAsync());
         var tables = await ReadTableNamesAsync(database.Path);
         Assert.Contains("connected_accounts", tables);
         Assert.Contains("plugin_installations", tables);
@@ -185,7 +185,7 @@ public sealed class SqliteMigrationTests
     }
 
     [Fact]
-    public async Task Populated_v18_store_upgrades_to_v19_without_rewriting_existing_data()
+    public async Task Populated_v18_store_upgrades_to_v20_without_rewriting_existing_data()
     {
         using var database = new TemporaryDatabase();
         var store = database.CreateStore();
@@ -199,15 +199,106 @@ public sealed class SqliteMigrationTests
         var restarted = database.CreateStore();
         await restarted.InitializeAsync();
 
-        Assert.Equal(19, (await restarted.GetAppliedMigrationVersionsAsync())[^1]);
+        Assert.Equal(20, (await restarted.GetAppliedMigrationVersionsAsync())[^1]);
         Assert.NotNull(await ((IEvidenceRepository)restarted).GetAsync(owner.PrincipalId, evidence.EvidenceId));
         var tables = await ReadTableNamesAsync(database.Path);
         Assert.Contains("remote_hosts", tables);
         Assert.Contains("host_work_leases", tables);
+        Assert.Contains("host_artifacts", tables);
+        Assert.Contains("host_artifact_contents", tables);
+        Assert.Contains("host_artifact_receipts", tables);
     }
 
     [Fact]
-    public async Task V19_closed_domains_and_single_active_rows_are_enforced_by_sql()
+    public async Task Populated_v19_store_upgrades_to_v20_and_preserves_accepted_host_messages()
+    {
+        using var database = new TemporaryDatabase();
+        var store = database.CreateStore();
+        await store.InitializeAsync(19);
+        var owner = PrincipalRef.Create(
+            "https://issuer.example", "tenant", "v19-owner", "v19-owner", DateTimeOffset.UtcNow);
+        await store.AddAsync(owner);
+
+        await using (var connection = new SqliteConnection($"Data Source={database.Path};Foreign Keys=True;Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await ExecuteAsync(connection, $$"""
+                INSERT INTO remote_hosts(owner_principal_id,host_id,display_name,platform,architecture,
+                    lifecycle,connection_status,public_key_jwk,key_version,protection,agent_version,
+                    protocol_version,capability_catalog_version,last_accepted_sequence,last_seen_at,
+                    paired_at,revoked_at,version)
+                VALUES('{{owner.PrincipalId}}','host-upgrade','Upgrade Mac','macOS','arm64','ONLINE','ONLINE','{{CanonicalJwk()}}',1,
+                    'KEYCHAIN_THIS_DEVICE_ONLY','1.0.0','1',1,1,NULL,'2026-08-14T00:00:00Z',NULL,1);
+                INSERT INTO host_accepted_messages(owner_principal_id,host_id,message_id,sequence,operation,target_id,
+                    request_hash,response_status,response_body_json,accepted_at)
+                VALUES('{{owner.PrincipalId}}','host-upgrade','message-upgrade',1,'poll','-','{{new string('a', 64)}}',200,'{}','2026-08-14T00:00:00Z');
+                """);
+        }
+
+        var restarted = database.CreateStore();
+        await restarted.InitializeAsync();
+
+        Assert.Equal(20, (await restarted.GetAppliedMigrationVersionsAsync())[^1]);
+        await using var verify = new SqliteConnection($"Data Source={database.Path};Mode=ReadOnly");
+        await verify.OpenAsync();
+        await using var count = verify.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM host_accepted_messages WHERE owner_principal_id=$owner AND operation='poll';";
+        count.Parameters.AddWithValue("$owner", owner.PrincipalId);
+        Assert.Equal(1L, (long)(await count.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task Failed_v20_upgrade_rolls_back_completely_and_retries_after_legacy_evidence_conflict_is_resolved()
+    {
+        using var database = new TemporaryDatabase();
+        var store = database.CreateStore();
+        await store.InitializeAsync(19);
+        var owner = PrincipalRef.Create(
+            "https://issuer.example", "tenant", "v20-rollback-owner", "v20-rollback-owner", DateTimeOffset.UtcNow);
+        await store.AddAsync(owner);
+
+        EvidenceRecord LegacyEvidence(string evidenceId) => EvidenceRecord.Create(
+            evidenceId,
+            owner.PrincipalId,
+            "host.artifact",
+            "legacy-artifact",
+            $"legacy:{evidenceId}",
+            DateTimeOffset.UtcNow,
+            null,
+            "SHA-256",
+            1,
+            new string('a', 64),
+            RetentionState.Active,
+            SensitivityClass.Confidential,
+            ProducerRef.Create("legacy-test", "1"),
+            1);
+        await store.AddAsync(owner.PrincipalId, LegacyEvidence("legacy-evidence-first"));
+        await store.AddAsync(owner.PrincipalId, LegacyEvidence("legacy-evidence-second"));
+
+        var restarted = database.CreateStore();
+        await Assert.ThrowsAsync<SqliteException>(() => restarted.InitializeAsync());
+        Assert.Equal(19, (await restarted.GetAppliedMigrationVersionsAsync())[^1]);
+        var rolledBackTables = await ReadTableNamesAsync(database.Path);
+        Assert.Contains("host_accepted_messages", rolledBackTables);
+        Assert.DoesNotContain("host_accepted_messages_v19", rolledBackTables);
+        Assert.DoesNotContain("host_artifacts", rolledBackTables);
+
+        await using (var connection = new SqliteConnection($"Data Source={database.Path};Foreign Keys=True;Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var delete = connection.CreateCommand();
+            delete.CommandText = "DELETE FROM evidence WHERE owner_principal_id=$owner AND evidence_id='legacy-evidence-second';";
+            delete.Parameters.AddWithValue("$owner", owner.PrincipalId);
+            Assert.Equal(1, await delete.ExecuteNonQueryAsync());
+        }
+
+        await restarted.InitializeAsync();
+        Assert.Equal(20, (await restarted.GetAppliedMigrationVersionsAsync())[^1]);
+        Assert.Contains("host_artifacts", await ReadTableNamesAsync(database.Path));
+    }
+
+    [Fact]
+    public async Task V20_closed_domains_and_single_active_rows_are_enforced_by_sql()
     {
         using var database = new TemporaryDatabase();
         var store = database.CreateStore();
@@ -262,6 +353,15 @@ public sealed class SqliteMigrationTests
                 'host.repo.identity@1','host.repo.identity','1',1,'{{new string('a', 64)}}',
                 'OFFERED','2026-08-14T00:00:00Z','2026-08-14T00:10:00Z',
                 NULL,NULL,NULL,NULL,NULL,NULL,1);
+            INSERT INTO host_artifacts(owner_principal_id,artifact_id,run_id,lease_id,action_id,kind,
+                media_type,summary,size_bytes,sha256,retention,content_state,redacted,truncated,
+                created_at,expires_at,version)
+            VALUES('{{ownerId}}','artifact-valid','run-sql','lease-valid',NULL,'TEXT','text/plain',
+                'summary',0,'{{new string('c', 64)}}','RUN','AVAILABLE',0,0,'2026-08-14T00:00:00Z',NULL,1);
+            INSERT INTO host_artifact_contents(owner_principal_id,artifact_id,text_content)
+            VALUES('{{ownerId}}','artifact-valid','');
+            INSERT INTO host_artifact_receipts(owner_principal_id,receipt_id,artifact_id,message_id,declared_size,declared_sha256,accepted_at)
+            VALUES('{{ownerId}}','artifact-valid','artifact-valid','message-artifact-valid',0,'{{new string('c', 64)}}','2026-08-14T00:00:00Z');
             """);
 
         var invalidStatements = new[]
@@ -282,6 +382,17 @@ public sealed class SqliteMigrationTests
             $"INSERT INTO host_resource_grants VALUES('{ownerId}','host-sql','repo-sql','WRITE','2026-08-14T00:00:00Z',NULL,2);",
             $"INSERT INTO host_accepted_messages VALUES('{ownerId}','host-sql','message-operation',1,'shell','-','{new string('c', 64)}',200,'{{}}','2026-08-14T00:00:00Z');",
             $"INSERT INTO host_accepted_messages VALUES('{ownerId}','host-sql','message-hash',2,'poll','-','{new string('z', 64)}',200,'{{}}','2026-08-14T00:00:00Z');",
+            $"INSERT INTO host_artifacts VALUES('{ownerId}','artifact-kind','run-sql','lease-valid',NULL,'JSON','text/plain','summary',0,'{new string('c', 64)}','RUN','AVAILABLE',0,0,'2026-08-14T00:00:00Z',NULL,1);",
+            $"INSERT INTO host_artifacts VALUES('{ownerId}','artifact-media','run-sql','lease-valid',NULL,'TEXT','application/json','summary',0,'{new string('c', 64)}','RUN','AVAILABLE',0,0,'2026-08-14T00:00:00Z',NULL,1);",
+            $"INSERT INTO host_artifacts VALUES('{ownerId}','artifact-summary','run-sql','lease-valid',NULL,'TEXT','text/plain','summary',262145,'{new string('c', 64)}','RUN','AVAILABLE',0,0,'2026-08-14T00:00:00Z',NULL,1);",
+            $"INSERT INTO host_artifacts VALUES('{ownerId}','artifact-sha','run-sql','lease-valid',NULL,'TEXT','text/plain','summary',0,'{new string('g', 64)}','RUN','AVAILABLE',0,0,'2026-08-14T00:00:00Z',NULL,1);",
+            $"INSERT INTO host_artifacts VALUES('{ownerId}','artifact-retention','run-sql','lease-valid',NULL,'TEXT','text/plain','summary',0,'{new string('c', 64)}','SESSION','AVAILABLE',0,0,'2026-08-14T00:00:00Z',NULL,1);",
+            $"INSERT INTO host_artifacts VALUES('{ownerId}','artifact-state','run-sql','lease-valid',NULL,'TEXT','text/plain','summary',0,'{new string('c', 64)}','RUN','PENDING',0,0,'2026-08-14T00:00:00Z',NULL,1);",
+            $"INSERT INTO host_artifacts VALUES('{ownerId}','artifact-bool','run-sql','lease-valid',NULL,'TEXT','text/plain','summary',0,'{new string('c', 64)}','RUN','AVAILABLE',2,0,'2026-08-14T00:00:00Z',NULL,1);",
+            $"INSERT INTO host_artifacts VALUES('{ownerId}','artifact-lease-mismatch','run-sql-invalid','lease-valid',NULL,'TEXT','text/plain','summary',0,'{new string('c', 64)}','RUN','AVAILABLE',0,0,'2026-08-14T00:00:00Z',NULL,1);",
+            $"INSERT INTO host_artifact_contents VALUES('{ownerId}','artifact-missing','text');",
+            $"INSERT INTO host_artifact_receipts VALUES('{ownerId}','artifact-receipt-size','artifact-valid','message-artifact-size',262145,'{new string('c', 64)}','2026-08-14T00:00:00Z');",
+            $"INSERT INTO host_artifact_receipts VALUES('{ownerId}','artifact-receipt-sha','artifact-valid','message-artifact-sha',0,'{new string('g', 64)}','2026-08-14T00:00:00Z');",
             $"INSERT INTO host_capability_grants VALUES('{ownerId}','host-sql','host.repo.identity','1','2026-08-14T00:00:01Z',NULL,2);",
             $"INSERT INTO host_resource_grants VALUES('{ownerId}','host-sql','repo-sql','READ_ONLY','2026-08-14T00:00:01Z',NULL,2);",
             $"INSERT INTO job_execution_policies VALUES('{ownerId}','job-sql','EDGE',NULL,'[]','[]','NONE',1);",
@@ -343,6 +454,9 @@ public sealed class SqliteMigrationTests
                 "follow_up_timeline",
                 "follow_ups",
                 "host_accepted_messages",
+                "host_artifact_contents",
+                "host_artifact_receipts",
+                "host_artifacts",
                 "host_capability_advertisements",
                 "host_capability_grants",
                 "host_lease_events",

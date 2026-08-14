@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Numerics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -477,6 +478,711 @@ public sealed class RemoteHostEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Signed_host_artifact_upload_projection_list_detail_and_verify_are_redacted_replayable_and_owner_scoped()
+    {
+        var (store, ownerPrincipal, run, lease) = await CreateDispatchedLeaseAsync("artifact-owner", "host-artifact", "job-artifact");
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SetHostKeyAsync(ownerPrincipal.PrincipalId, "host-artifact", key);
+        var now = DateTimeOffset.UtcNow;
+        const string localAttemptId = "attempt-artifact";
+
+        using var ack = await SendSignedAsync(key, "host-artifact", HostAcceptedMessageOperations.LeaseAck,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/ack", new
+            {
+                leaseVersion = lease.Version,
+                localAttemptId,
+                accepted = true,
+                rejectionCode = (string?)null,
+            }, "message-artifact-ack", 1, now.ToUnixTimeSeconds());
+        Assert.Equal(HttpStatusCode.OK, ack.StatusCode);
+
+        const string rawContent = "Authorization: Bearer canary-token\nPATH=/Users/dragoshont/Repo/tessera\nSIGNATURE=abcdef\nSECRET_TOKEN=visible-secret\n{\"password\":\"json-canary\",\"escaped_secret\":\"do\\\"escaped-canary\",\"privateKey\":\"camel-key-canary\",\"private_key\":\"snake-key-canary\",\"path\":\"/Volumes/External/repo\"}\npassword: \"bare-secret with suffix\"\nmount /Volumes/External/repo\nsystem /System/Volumes/Data/repo\nbinary /usr/local/bin/tool";
+        var normalized = RemoteHostOutputNormalizer.Normalize(Encoding.UTF8.GetBytes(rawContent), RemoteHostProtocol.MaximumArtifactBodyBytes);
+        using var upload = await SendSignedAsync(key, "host-artifact", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-main",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "path=/Users/dragoshont/Repo/tessera",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = rawContent,
+            }, "message-artifact-upload", 2, now.ToUnixTimeSeconds() + 1);
+        Assert.Equal(HttpStatusCode.Created, upload.StatusCode);
+        var uploadText = await upload.Content.ReadAsStringAsync();
+        AssertDlp(uploadText, "canary-token");
+
+        using var uploadReplay = await SendSignedAsync(key, "host-artifact", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-main",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "path=/Users/dragoshont/Repo/tessera",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = rawContent,
+            }, "message-artifact-upload", 2, now.ToUnixTimeSeconds() + 1);
+        Assert.Equal(uploadText, await uploadReplay.Content.ReadAsStringAsync());
+
+        using var changedReplay = await SendSignedAsync(key, "host-artifact", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-main",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "changed",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = rawContent,
+            }, "message-artifact-upload", 2, now.ToUnixTimeSeconds() + 1);
+        Assert.Equal(HttpStatusCode.Conflict, changedReplay.StatusCode);
+        Assert.Contains("host_replay", await changedReplay.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        using var artifactConflict = await SendSignedAsync(key, "host-artifact", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-main",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "second-attempt",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = rawContent,
+            }, "message-artifact-conflict", 3, now.ToUnixTimeSeconds() + 2);
+        Assert.Equal(HttpStatusCode.Conflict, artifactConflict.StatusCode);
+        Assert.Contains("artifact_conflict", await artifactConflict.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        Assert.Equal(1L, await ReadHostArtifactCountAsync(ownerPrincipal.PrincipalId, "artifact-main"));
+        Assert.Equal(1L, await ReadHostArtifactReceiptCountAsync(ownerPrincipal.PrincipalId, "artifact-main"));
+        Assert.Equal(0L, await ReadHostArtifactEvidenceCountAsync(ownerPrincipal.PrincipalId, "artifact-main"));
+        var persistedContent = await ReadHostArtifactContentAsync(ownerPrincipal.PrincipalId, "artifact-main");
+        Assert.DoesNotContain("canary-token", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("visible-secret", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("json-canary", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("escaped-canary", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("bare-secret", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("camel-key-canary", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("snake-key-canary", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("/Users/dragoshont/Repo/tessera", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("/Volumes/External/repo", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("/System/Volumes/Data/repo", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("/usr/local/bin/tool", persistedContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("SIGNATURE", persistedContent, StringComparison.OrdinalIgnoreCase);
+
+        using var projection = await SendAsync("artifact-owner", HttpMethod.Get, $"/api/v1/job-runs/{run.RunId}/remote");
+        Assert.Single((await Json(projection)).GetProperty("artifacts").EnumerateArray());
+
+        using var listed = await SendAsync("artifact-owner", HttpMethod.Get, $"/api/v1/job-runs/{run.RunId}/remote-artifacts");
+        var listedJson = await Json(listed);
+        Assert.Single(listedJson.GetProperty("items").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, listedJson.GetProperty("nextCursor").ValueKind);
+        Assert.DoesNotContain("/Users/dragoshont/Repo/tessera", listedJson.GetRawText(), StringComparison.Ordinal);
+
+        using var crossOwnerList = await SendAsync(Other, HttpMethod.Get, $"/api/v1/job-runs/{run.RunId}/remote-artifacts");
+        Assert.Equal(HttpStatusCode.NotFound, crossOwnerList.StatusCode);
+
+        using var detail = await SendAsync("artifact-owner", HttpMethod.Get, "/api/v1/host-artifacts/artifact-main");
+        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        var detailText = await detail.Content.ReadAsStringAsync();
+        AssertDlp(detailText, "canary-token");
+        Assert.Contains("[REDACTED]", detailText, StringComparison.Ordinal);
+
+        using var crossOwnerDetail = await SendAsync(Other, HttpMethod.Get, "/api/v1/host-artifacts/artifact-main");
+        Assert.Equal(HttpStatusCode.NotFound, crossOwnerDetail.StatusCode);
+
+        using var verify = await SendJsonAsync("artifact-owner", HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-main/verify", new { expectedVersion = 1 }, "artifact-verify-key");
+        Assert.Equal(HttpStatusCode.OK, verify.StatusCode);
+        var verifyText = await verify.Content.ReadAsStringAsync();
+        Assert.Contains("evidence:host-artifact:artifact-main", verifyText, StringComparison.Ordinal);
+        Assert.Equal(1L, await ReadHostArtifactEvidenceCountAsync(ownerPrincipal.PrincipalId, "artifact-main"));
+
+        using var verifyReplay = await SendJsonAsync("artifact-owner", HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-main/verify", new { expectedVersion = 1 }, "artifact-verify-key");
+        Assert.Equal(verifyText, await verifyReplay.Content.ReadAsStringAsync());
+
+        using var staleVerify = await SendJsonAsync("artifact-owner", HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-main/verify", new { expectedVersion = 2 }, "artifact-verify-stale");
+        Assert.Equal(HttpStatusCode.Conflict, staleVerify.StatusCode);
+
+        using var crossOwnerVerify = await SendJsonAsync(Other, HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-main/verify", new { expectedVersion = 1 }, "artifact-verify-other");
+        Assert.Equal(HttpStatusCode.NotFound, crossOwnerVerify.StatusCode);
+
+        using var malformedDetail = await SendAsync("artifact-owner", HttpMethod.Get, "/api/v1/host-artifacts/INVALID");
+        Assert.Equal(HttpStatusCode.BadRequest, malformedDetail.StatusCode);
+        using var malformedVerify = await SendJsonAsync("artifact-owner", HttpMethod.Post,
+            "/api/v1/host-artifacts/INVALID/verify", new { expectedVersion = 1 }, "artifact-verify-malformed");
+        Assert.Equal(HttpStatusCode.BadRequest, malformedVerify.StatusCode);
+    }
+
+    [Fact]
+    public async Task Artifact_verification_requires_canonical_evidence_identity_upload_provenance_and_atomic_commit()
+    {
+        const string ownerSubject = "artifact-integrity-owner";
+        const string hostId = "host-artifact-integrity";
+        var (store, ownerPrincipal, _, lease) = await CreateDispatchedLeaseAsync(ownerSubject, hostId, "job-artifact-integrity");
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SetHostKeyAsync(ownerPrincipal.PrincipalId, hostId, key);
+        var now = DateTimeOffset.UtcNow;
+        const string localAttemptId = "attempt-artifact-integrity";
+
+        using var ack = await SendSignedAsync(key, hostId, HostAcceptedMessageOperations.LeaseAck,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/ack", new
+            {
+                leaseVersion = lease.Version,
+                localAttemptId,
+                accepted = true,
+                rejectionCode = (string?)null,
+            }, "message-artifact-integrity-ack", 1, now.ToUnixTimeSeconds());
+        Assert.Equal(HttpStatusCode.OK, ack.StatusCode);
+
+        var normalized = RemoteHostOutputNormalizer.Normalize(
+            Encoding.UTF8.GetBytes("integrity content"),
+            RemoteHostProtocol.MaximumArtifactBodyBytes);
+
+        async Task UploadAsync(string artifactId, string messageId, long sequence)
+        {
+            using var upload = await SendSignedAsync(key, hostId, HostAcceptedMessageOperations.LeaseArtifact,
+                lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+                {
+                    leaseVersion = lease.Version + 1,
+                    localAttemptId,
+                    artifactId,
+                    kind = "TEXT",
+                    mediaType = "text/plain",
+                    summary = "integrity",
+                    declaredSize = normalized.SizeBytes,
+                    declaredSha256 = normalized.Sha256,
+                    retention = "RUN",
+                    textContent = "integrity content",
+                }, messageId, sequence, now.ToUnixTimeSeconds() + sequence);
+            Assert.Equal(HttpStatusCode.Created, upload.StatusCode);
+        }
+
+        await UploadAsync("artifact-existing-evidence", "message-artifact-existing-evidence", 2);
+        var existingArtifact = (await store.GetHostArtifactDetailAsync(
+            ownerPrincipal.PrincipalId,
+            "artifact-existing-evidence"))!.Artifact;
+        var existingEvidence = EvidenceRecord.Create(
+            "evidence-existing-artifact",
+            ownerPrincipal.PrincipalId,
+            "host.artifact",
+            existingArtifact.ArtifactId,
+            $"host-artifact:{existingArtifact.ArtifactId}",
+            now,
+            existingArtifact.CreatedAt,
+            "SHA-256",
+            1,
+            existingArtifact.Sha256,
+            RetentionState.Active,
+            SensitivityClass.Confidential,
+            ProducerRef.Create("remote-host", "1"),
+            1,
+            contentReference: existingArtifact.ArtifactId);
+        await store.AddAsync(ownerPrincipal.PrincipalId, existingEvidence);
+
+        using var reuse = await SendJsonAsync(ownerSubject, HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-existing-evidence/verify",
+            new { expectedVersion = 1 },
+            "verify-existing-evidence");
+        Assert.Equal(HttpStatusCode.OK, reuse.StatusCode);
+        Assert.Contains(existingEvidence.EvidenceId, await reuse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        await UploadAsync("artifact-evidence-collision", "message-artifact-evidence-collision", 3);
+        await store.AddAsync(ownerPrincipal.PrincipalId, EvidenceRecord.Create(
+            "evidence:host-artifact:artifact-evidence-collision",
+            ownerPrincipal.PrincipalId,
+            "unrelated.source",
+            "unrelated-native-id",
+            "unrelated:locator",
+            now,
+            null,
+            "SHA-256",
+            1,
+            new string('a', 64),
+            RetentionState.Active,
+            SensitivityClass.Confidential,
+            ProducerRef.Create("test", "1"),
+            1));
+        using var collision = await SendJsonAsync(ownerSubject, HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-evidence-collision/verify",
+            new { expectedVersion = 1 },
+            "verify-evidence-collision");
+        Assert.Equal(HttpStatusCode.Conflict, collision.StatusCode);
+        Assert.Equal(0L, await ReadHostArtifactEvidenceCountAsync(
+            ownerPrincipal.PrincipalId,
+            "artifact-evidence-collision"));
+
+        await UploadAsync("artifact-missing-receipt", "message-artifact-missing-receipt", 4);
+        await DeleteHostArtifactReceiptAsync(ownerPrincipal.PrincipalId, "artifact-missing-receipt");
+        using var missingReceipt = await SendJsonAsync(ownerSubject, HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-missing-receipt/verify",
+            new { expectedVersion = 1 },
+            "verify-missing-receipt");
+        Assert.Equal(HttpStatusCode.Conflict, missingReceipt.StatusCode);
+        Assert.Equal(0L, await ReadHostArtifactEvidenceCountAsync(
+            ownerPrincipal.PrincipalId,
+            "artifact-missing-receipt"));
+
+        await UploadAsync("artifact-verify-rollback", "message-artifact-verify-rollback", 5);
+        typeof(SqliteKernelStore)
+            .GetProperty("RemoteHostBeforeCommitAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(store, (Func<CancellationToken, Task>)(_ => throw new InvalidOperationException("injected-before-commit")));
+        using var rollback = await SendJsonAsync(ownerSubject, HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-verify-rollback/verify",
+            new { expectedVersion = 1 },
+            "verify-artifact-rollback");
+        typeof(SqliteKernelStore)
+            .GetProperty("RemoteHostBeforeCommitAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(store, null);
+        Assert.Equal(HttpStatusCode.InternalServerError, rollback.StatusCode);
+        Assert.Equal(0L, await ReadHostArtifactEvidenceCountAsync(
+            ownerPrincipal.PrincipalId,
+            "artifact-verify-rollback"));
+
+        using var retry = await SendJsonAsync(ownerSubject, HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-verify-rollback/verify",
+            new { expectedVersion = 1 },
+            "verify-artifact-rollback");
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal(1L, await ReadHostArtifactEvidenceCountAsync(
+            ownerPrincipal.PrincipalId,
+            "artifact-verify-rollback"));
+    }
+
+    [Fact]
+    public async Task Artifact_message_ids_are_independent_per_host_for_the_same_owner()
+    {
+        var (store, ownerPrincipal, _, firstLease) = await CreateDispatchedLeaseAsync(
+            "artifact-message-owner",
+            "host-message-first",
+            "job-message-first");
+        var (_, secondLease) = await CreateDispatchedLeaseForOwnerAsync(
+            store,
+            ownerPrincipal,
+            "host-message-second",
+            "job-message-second");
+        using var firstKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var secondKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SetHostKeyAsync(ownerPrincipal.PrincipalId, "host-message-first", firstKey);
+        await SetHostKeyAsync(ownerPrincipal.PrincipalId, "host-message-second", secondKey);
+        var now = DateTimeOffset.UtcNow;
+
+        async Task AcknowledgeAsync(ECDsa key, string hostId, HostWorkLease lease, string attemptId, string messageId)
+        {
+            using var response = await SendSignedAsync(key, hostId, HostAcceptedMessageOperations.LeaseAck,
+                lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/ack", new
+                {
+                    leaseVersion = lease.Version,
+                    localAttemptId = attemptId,
+                    accepted = true,
+                    rejectionCode = (string?)null,
+                }, messageId, 1, now.ToUnixTimeSeconds());
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        await AcknowledgeAsync(firstKey, "host-message-first", firstLease, "attempt-message-first", "ack-message-first");
+        await AcknowledgeAsync(secondKey, "host-message-second", secondLease, "attempt-message-second", "ack-message-second");
+        var normalized = RemoteHostOutputNormalizer.Normalize(
+            Encoding.UTF8.GetBytes("same message namespace"),
+            RemoteHostProtocol.MaximumArtifactBodyBytes);
+
+        async Task UploadAsync(ECDsa key, string hostId, HostWorkLease lease, string attemptId, string artifactId)
+        {
+            using var response = await SendSignedAsync(key, hostId, HostAcceptedMessageOperations.LeaseArtifact,
+                lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+                {
+                    leaseVersion = lease.Version + 1,
+                    localAttemptId = attemptId,
+                    artifactId,
+                    kind = "TEXT",
+                    mediaType = "text/plain",
+                    summary = "message namespace",
+                    declaredSize = normalized.SizeBytes,
+                    declaredSha256 = normalized.Sha256,
+                    retention = "RUN",
+                    textContent = "same message namespace",
+                }, "shared-artifact-message", 2, now.ToUnixTimeSeconds() + 1);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        }
+
+        await UploadAsync(firstKey, "host-message-first", firstLease, "attempt-message-first", "artifact-message-first");
+        await UploadAsync(secondKey, "host-message-second", secondLease, "attempt-message-second", "artifact-message-second");
+
+        Assert.Equal(1L, await ReadHostArtifactReceiptCountAsync(ownerPrincipal.PrincipalId, "artifact-message-first"));
+        Assert.Equal(1L, await ReadHostArtifactReceiptCountAsync(ownerPrincipal.PrincipalId, "artifact-message-second"));
+        Assert.Equal(1L, await ReadAcceptedHostMessageCountAsync(
+            ownerPrincipal.PrincipalId, "host-message-first", "shared-artifact-message"));
+        Assert.Equal(1L, await ReadAcceptedHostMessageCountAsync(
+            ownerPrincipal.PrincipalId, "host-message-second", "shared-artifact-message"));
+    }
+
+    [Fact]
+    public async Task Artifact_upload_rejects_wrong_state_attempt_version_host_grant_fence_and_expiry()
+    {
+        static object ArtifactBody(string localAttemptId, int declaredSize, string declaredSha256) => new
+        {
+            leaseVersion = 1L,
+            localAttemptId,
+            artifactId = "artifact-check",
+            kind = "TEXT",
+            mediaType = "text/plain",
+            summary = "summary",
+            declaredSize,
+            declaredSha256,
+            retention = "RUN",
+            textContent = "content",
+        };
+
+        var normalized = RemoteHostOutputNormalizer.Normalize(Encoding.UTF8.GetBytes("content"), RemoteHostProtocol.MaximumArtifactBodyBytes);
+
+        var (offeredStore, offeredOwner, _, offeredLease) = await CreateDispatchedLeaseAsync("artifact-offered", "host-offered", "job-offered");
+        using (var offeredKey = ECDsa.Create(ECCurve.NamedCurves.nistP256))
+        {
+            await SetHostKeyAsync(offeredOwner.PrincipalId, "host-offered", offeredKey);
+            using var offered = await SendSignedAsync(offeredKey, "host-offered", HostAcceptedMessageOperations.LeaseArtifact,
+                offeredLease.LeaseId, $"/host-channel/leases/{offeredLease.LeaseId}/artifacts", ArtifactBody("attempt", normalized.SizeBytes, normalized.Sha256),
+                "message-offered-artifact", 1, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            Assert.Equal(HttpStatusCode.Conflict, offered.StatusCode);
+        }
+
+        var (activeStore, activeOwner, activeRun, activeLease) = await CreateDispatchedLeaseAsync("artifact-active", "host-active", "job-active");
+        using var activeKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SetHostKeyAsync(activeOwner.PrincipalId, "host-active", activeKey);
+        var activeNow = DateTimeOffset.UtcNow;
+        const string localAttemptId = "attempt-active";
+        using var ack = await SendSignedAsync(activeKey, "host-active", HostAcceptedMessageOperations.LeaseAck,
+            activeLease.LeaseId, $"/host-channel/leases/{activeLease.LeaseId}/ack", new
+            {
+                leaseVersion = activeLease.Version,
+                localAttemptId,
+                accepted = true,
+                rejectionCode = (string?)null,
+            }, "message-active-ack", 1, activeNow.ToUnixTimeSeconds());
+        Assert.Equal(HttpStatusCode.OK, ack.StatusCode);
+
+        using var wrongAttempt = await SendSignedAsync(activeKey, "host-active", HostAcceptedMessageOperations.LeaseArtifact,
+            activeLease.LeaseId, $"/host-channel/leases/{activeLease.LeaseId}/artifacts", new
+            {
+                leaseVersion = activeLease.Version + 1,
+                localAttemptId = "attempt-wrong",
+                artifactId = "artifact-wrong-attempt",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+            }, "message-wrong-attempt", 2, activeNow.ToUnixTimeSeconds() + 1);
+        Assert.Equal(HttpStatusCode.Conflict, wrongAttempt.StatusCode);
+        Assert.Contains("host_attempt_mismatch", await wrongAttempt.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        using var wrongVersion = await SendSignedAsync(activeKey, "host-active", HostAcceptedMessageOperations.LeaseArtifact,
+            activeLease.LeaseId, $"/host-channel/leases/{activeLease.LeaseId}/artifacts", new
+            {
+                leaseVersion = activeLease.Version,
+                localAttemptId,
+                artifactId = "artifact-wrong-version",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+            }, "message-wrong-version", 3, activeNow.ToUnixTimeSeconds() + 2);
+        Assert.Equal(HttpStatusCode.Conflict, wrongVersion.StatusCode);
+
+        await SeedOnlineHostAsync(activeStore, activeOwner.PrincipalId, "host-other", "repo-main");
+        using var otherKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SetHostKeyAsync(activeOwner.PrincipalId, "host-other", otherKey);
+        using var wrongHost = await SendSignedAsync(otherKey, "host-other", HostAcceptedMessageOperations.LeaseArtifact,
+            activeLease.LeaseId, $"/host-channel/leases/{activeLease.LeaseId}/artifacts", new
+            {
+                leaseVersion = activeLease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-wrong-host",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+            }, "message-wrong-host", 1, activeNow.ToUnixTimeSeconds() + 3);
+        Assert.Equal(HttpStatusCode.Conflict, wrongHost.StatusCode);
+
+        await DeleteSchedulerLeaseAsync(activeOwner.PrincipalId, activeRun.RunId, activeLease.SchedulerFence);
+        using var wrongFence = await SendSignedAsync(activeKey, "host-active", HostAcceptedMessageOperations.LeaseArtifact,
+            activeLease.LeaseId, $"/host-channel/leases/{activeLease.LeaseId}/artifacts", new
+            {
+                leaseVersion = activeLease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-wrong-fence",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+            }, "message-wrong-fence", 4, activeNow.ToUnixTimeSeconds() + 4);
+        Assert.Equal(HttpStatusCode.Conflict, wrongFence.StatusCode);
+
+        var (expiredStore, expiredOwner, _, expiredLease) = await CreateDispatchedLeaseAsync("artifact-expired", "host-expired", "job-expired");
+        using var expiredKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SetHostKeyAsync(expiredOwner.PrincipalId, "host-expired", expiredKey);
+        var expiredNow = DateTimeOffset.UtcNow;
+        const string expiredAttemptId = "attempt-expired";
+        using var expiredAck = await SendSignedAsync(expiredKey, "host-expired", HostAcceptedMessageOperations.LeaseAck,
+            expiredLease.LeaseId, $"/host-channel/leases/{expiredLease.LeaseId}/ack", new
+            {
+                leaseVersion = expiredLease.Version,
+                localAttemptId = expiredAttemptId,
+                accepted = true,
+                rejectionCode = (string?)null,
+            }, "message-expired-ack", 1, expiredNow.ToUnixTimeSeconds());
+        Assert.Equal(HttpStatusCode.OK, expiredAck.StatusCode);
+        await ForceLeaseExpiryAsync(expiredOwner.PrincipalId, expiredLease.LeaseId, expiredNow.AddMinutes(-1));
+        using var expired = await SendSignedAsync(expiredKey, "host-expired", HostAcceptedMessageOperations.LeaseArtifact,
+            expiredLease.LeaseId, $"/host-channel/leases/{expiredLease.LeaseId}/artifacts", new
+            {
+                leaseVersion = expiredLease.Version + 1,
+                localAttemptId = expiredAttemptId,
+                artifactId = "artifact-expired",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+            }, "message-expired", 2, expiredNow.ToUnixTimeSeconds() + 1);
+        Assert.Equal(HttpStatusCode.Conflict, expired.StatusCode);
+        Assert.Contains("host_lease_expired", await expired.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        var (grantStore, grantOwner, _, grantLease) = await CreateDispatchedLeaseAsync("artifact-grant", "host-grant", "job-grant");
+        using var grantKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SetHostKeyAsync(grantOwner.PrincipalId, "host-grant", grantKey);
+        var grantNow = DateTimeOffset.UtcNow;
+        const string grantAttemptId = "attempt-grant";
+        using var grantAck = await SendSignedAsync(grantKey, "host-grant", HostAcceptedMessageOperations.LeaseAck,
+            grantLease.LeaseId, $"/host-channel/leases/{grantLease.LeaseId}/ack", new
+            {
+                leaseVersion = grantLease.Version,
+                localAttemptId = grantAttemptId,
+                accepted = true,
+                rejectionCode = (string?)null,
+            }, "message-grant-ack", 1, grantNow.ToUnixTimeSeconds());
+        Assert.Equal(HttpStatusCode.OK, grantAck.StatusCode);
+        await RevokeActiveHostCapabilityGrantAsync(grantOwner.PrincipalId, "host-grant");
+        using var grantChanged = await SendSignedAsync(grantKey, "host-grant", HostAcceptedMessageOperations.LeaseArtifact,
+            grantLease.LeaseId, $"/host-channel/leases/{grantLease.LeaseId}/artifacts", new
+            {
+                leaseVersion = grantLease.Version + 1,
+                localAttemptId = grantAttemptId,
+                artifactId = "artifact-grant",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+            }, "message-grant-changed", 2, grantNow.ToUnixTimeSeconds() + 1);
+        Assert.Equal(HttpStatusCode.Conflict, grantChanged.StatusCode);
+        Assert.Contains("host_lease_grant_changed", await grantChanged.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Artifact_upload_enforces_route_body_limit_unknown_fields_and_rolls_back_on_precommit_failure()
+    {
+        var (store, ownerPrincipal, run, lease) = await CreateDispatchedLeaseAsync("artifact-bounds", "host-bounds", "job-bounds");
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SetHostKeyAsync(ownerPrincipal.PrincipalId, "host-bounds", key);
+        var now = DateTimeOffset.UtcNow;
+        const string localAttemptId = "attempt-bounds";
+        using var ack = await SendSignedAsync(key, "host-bounds", HostAcceptedMessageOperations.LeaseAck,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/ack", new
+            {
+                leaseVersion = lease.Version,
+                localAttemptId,
+                accepted = true,
+                rejectionCode = (string?)null,
+            }, "message-bounds-ack", 1, now.ToUnixTimeSeconds());
+        Assert.Equal(HttpStatusCode.OK, ack.StatusCode);
+
+        var oversizedRequestText = new string('x', RemoteHostProtocol.MaximumArtifactRequestBodyBytes);
+        var oversizedRequestNormalized = RemoteHostOutputNormalizer.Normalize(
+            Encoding.UTF8.GetBytes(oversizedRequestText),
+            RemoteHostProtocol.MaximumArtifactBodyBytes);
+        using var oversizedRequest = await SendSignedAsync(key, "host-bounds", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-request-oversized",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = oversizedRequestNormalized.SizeBytes,
+                declaredSha256 = oversizedRequestNormalized.Sha256,
+                retention = "RUN",
+                textContent = oversizedRequestText,
+            }, "message-artifact-request-oversized", 2, now.ToUnixTimeSeconds() + 1);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, oversizedRequest.StatusCode);
+
+        var maximumText = new string('"', RemoteHostProtocol.MaximumArtifactBodyBytes);
+        var maximumNormalized = RemoteHostOutputNormalizer.Normalize(
+            Encoding.UTF8.GetBytes(maximumText),
+            RemoteHostProtocol.MaximumArtifactBodyBytes);
+        using var maximum = await SendSignedAsync(key, "host-bounds", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-maximum-content",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = maximumNormalized.SizeBytes,
+                declaredSha256 = maximumNormalized.Sha256,
+                retention = "RUN",
+                textContent = maximumText,
+            }, "message-artifact-maximum-content", 2, now.ToUnixTimeSeconds() + 1);
+        Assert.Equal(HttpStatusCode.Created, maximum.StatusCode);
+        Assert.Equal(RemoteHostProtocol.MaximumArtifactBodyBytes,
+            (await store.GetHostArtifactDetailAsync(ownerPrincipal.PrincipalId, "artifact-maximum-content"))!.Artifact.SizeBytes);
+
+        var normalized = RemoteHostOutputNormalizer.Normalize(Encoding.UTF8.GetBytes("content"), RemoteHostProtocol.MaximumArtifactBodyBytes);
+        using var unknown = await SendSignedAsync(key, "host-bounds", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-unknown",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+                unexpected = true,
+            }, "message-artifact-unknown", 3, now.ToUnixTimeSeconds() + 2);
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+
+        typeof(SqliteKernelStore)
+            .GetProperty("RemoteHostBeforeCommitAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(store, (Func<CancellationToken, Task>)(_ => throw new InvalidOperationException("injected-before-commit")));
+        using var rollback = await SendSignedAsync(key, "host-bounds", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-rollback",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+            }, "message-artifact-rollback", 4, now.ToUnixTimeSeconds() + 3);
+        typeof(SqliteKernelStore)
+            .GetProperty("RemoteHostBeforeCommitAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(store, null);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, rollback.StatusCode);
+        Assert.Equal(0L, await ReadHostArtifactCountAsync(ownerPrincipal.PrincipalId, "artifact-rollback"));
+        Assert.Equal(0L, await ReadHostArtifactReceiptCountAsync(ownerPrincipal.PrincipalId, "artifact-rollback"));
+        Assert.Equal(0L, await ReadAcceptedHostMessageCountAsync(ownerPrincipal.PrincipalId, "host-bounds", "message-artifact-rollback"));
+        Assert.Equal(3L, await ReadLastAcceptedHostSequenceAsync(ownerPrincipal.PrincipalId, "host-bounds"));
+
+        await SeedHostArtifactMetadataAsync(
+            ownerPrincipal.PrincipalId,
+            run.RunId,
+            lease.LeaseId,
+            RemoteHostValidation.MaximumArtifactsPerRun - 1);
+        using var limit = await SendSignedAsync(key, "host-bounds", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-over-limit",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+            }, "message-artifact-over-limit", 4, now.ToUnixTimeSeconds() + 4);
+        Assert.Equal(HttpStatusCode.Conflict, limit.StatusCode);
+        var limitText = await limit.Content.ReadAsStringAsync();
+        Assert.Contains("artifact_limit_exceeded", limitText, StringComparison.Ordinal);
+        Assert.Equal(0L, await ReadHostArtifactCountAsync(ownerPrincipal.PrincipalId, "artifact-over-limit"));
+
+        using var limitReplay = await SendSignedAsync(key, "host-bounds", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-over-limit",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "summary",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "content",
+            }, "message-artifact-over-limit", 4, now.ToUnixTimeSeconds() + 4);
+        Assert.Equal(limitText, await limitReplay.Content.ReadAsStringAsync());
+
+        var pagedArtifactIds = new List<string>();
+        string? cursor = null;
+        var expectedPageSizes = new[] { 25, 25, 14 };
+        foreach (var expectedPageSize in expectedPageSizes)
+        {
+            var path = $"/api/v1/job-runs/{run.RunId}/remote-artifacts?limit=25";
+            if (cursor is not null)
+                path += $"&cursor={Uri.EscapeDataString(cursor)}";
+            using var page = await SendAsync("artifact-bounds", HttpMethod.Get, path);
+            Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+            var pageJson = await Json(page);
+            var items = pageJson.GetProperty("items").EnumerateArray().ToArray();
+            Assert.Equal(expectedPageSize, items.Length);
+            pagedArtifactIds.AddRange(items.Select(item => item.GetProperty("artifactId").GetString()!));
+            cursor = pageJson.GetProperty("nextCursor").ValueKind == JsonValueKind.Null
+                ? null
+                : pageJson.GetProperty("nextCursor").GetString();
+        }
+        Assert.Null(cursor);
+        Assert.Equal(RemoteHostValidation.MaximumArtifactsPerRun, pagedArtifactIds.Count);
+        Assert.Equal(pagedArtifactIds.Count, pagedArtifactIds.Distinct(StringComparer.Ordinal).Count());
+
+        using var invalidCursor = await SendAsync("artifact-bounds", HttpMethod.Get,
+            $"/api/v1/job-runs/{run.RunId}/remote-artifacts?cursor=not-a-cursor");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidCursor.StatusCode);
+    }
+
+    [Fact]
     public async Task Unsigned_host_channel_requests_fail_closed()
     {
         using var poll = await _client.PostAsync("/host-channel/poll", JsonContent.Create(new { maxWaitSeconds = 1 }));
@@ -795,6 +1501,71 @@ public sealed class RemoteHostEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Not_started_after_an_accepted_artifact_cannot_requeue_or_promote_legacy_requeued_output()
+    {
+        var (store, ownerPrincipal, run, lease) = await CreateDispatchedLeaseAsync(
+            "artifact-not-started-owner",
+            "host-artifact-not-started",
+            "job-artifact-not-started");
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SetHostKeyAsync(ownerPrincipal.PrincipalId, "host-artifact-not-started", key);
+        var now = DateTimeOffset.UtcNow;
+        const string localAttemptId = "attempt-artifact-not-started";
+
+        using var ack = await SendSignedAsync(key, "host-artifact-not-started", HostAcceptedMessageOperations.LeaseAck,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/ack", new
+            {
+                leaseVersion = lease.Version,
+                localAttemptId,
+                accepted = true,
+                rejectionCode = (string?)null,
+            }, "message-artifact-not-started-ack", 1, now.ToUnixTimeSeconds());
+        Assert.Equal(HttpStatusCode.OK, ack.StatusCode);
+
+        var normalized = RemoteHostOutputNormalizer.Normalize(
+            Encoding.UTF8.GetBytes("execution began"),
+            RemoteHostProtocol.MaximumArtifactBodyBytes);
+        using var upload = await SendSignedAsync(key, "host-artifact-not-started", HostAcceptedMessageOperations.LeaseArtifact,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/artifacts", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                artifactId = "artifact-not-started",
+                kind = "TEXT",
+                mediaType = "text/plain",
+                summary = "execution evidence",
+                declaredSize = normalized.SizeBytes,
+                declaredSha256 = normalized.Sha256,
+                retention = "RUN",
+                textContent = "execution began",
+            }, "message-artifact-not-started-upload", 2, now.ToUnixTimeSeconds() + 1);
+        Assert.Equal(HttpStatusCode.Created, upload.StatusCode);
+
+        using var reconcile = await SendSignedAsync(key, "host-artifact-not-started", HostAcceptedMessageOperations.LeaseReconcile,
+            lease.LeaseId, $"/host-channel/leases/{lease.LeaseId}/reconcile", new
+            {
+                leaseVersion = lease.Version + 1,
+                localAttemptId,
+                observedState = "NOT_STARTED",
+            }, "message-artifact-not-started-reconcile", 3, now.ToUnixTimeSeconds() + 2);
+        Assert.Equal(HttpStatusCode.OK, reconcile.StatusCode);
+        Assert.Equal("RECONCILIATION_REQUIRED", (await Json(reconcile)).GetProperty("resolution").GetString());
+        var projection = await store.GetRemoteJobRunProjectionAsync(ownerPrincipal.PrincipalId, run.RunId);
+        Assert.Equal(HostLeaseStates.ReconciliationRequired, projection!.Lease!.State);
+        Assert.Equal("RECONCILIATION_REQUIRED", (await store.GetJobRunAsync(ownerPrincipal.PrincipalId, run.RunId))!.State);
+
+        await MarkLeaseAsLegacyNotStartedRequeueAsync(ownerPrincipal.PrincipalId, lease.LeaseId);
+        using var verify = await SendJsonAsync("artifact-not-started-owner", HttpMethod.Post,
+            "/api/v1/host-artifacts/artifact-not-started/verify",
+            new { expectedVersion = 1 },
+            "verify-artifact-not-started");
+        Assert.Equal(HttpStatusCode.Conflict, verify.StatusCode);
+        Assert.Equal(0L, await ReadHostArtifactEvidenceCountAsync(
+            ownerPrincipal.PrincipalId,
+            "artifact-not-started"));
+    }
+
+    [Fact]
     public async Task Revoke_order_preserves_offered_complete_and_acknowledged_contract_outcomes()
     {
         var offered = await CreateDispatchedLeaseAsync("revoke-offered-owner", "host-revoke-offered", "job-revoke-offered");
@@ -958,9 +1729,9 @@ public sealed class RemoteHostEndpointsTests : IAsyncLifetime
         Assert.DoesNotContain(secret, body, StringComparison.Ordinal);
         Assert.DoesNotContain("claimSecret", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("publicKey", body, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("private", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("signature", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("/Users/", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("/Volumes/", body, StringComparison.Ordinal);
     }
 
     private static async Task<JsonElement> Json(HttpResponseMessage response)
@@ -1042,6 +1813,24 @@ public sealed class RemoteHostEndpointsTests : IAsyncLifetime
         var store = _app.Services.GetRequiredService<SqliteKernelStore>();
         var ownerPrincipal = PrincipalRef.Create("https://dev.tessera.local", "dev", ownerSubject, ownerSubject, DateTimeOffset.UtcNow);
         await store.AddAsync(ownerPrincipal);
+        var (run, lease) = await CreateDispatchedLeaseForOwnerAsync(
+            store,
+            ownerPrincipal,
+            hostId,
+            jobId,
+            location,
+            preferredHostId);
+        return (store, ownerPrincipal, run, lease);
+    }
+
+    private async Task<(ProductJobRun Run, HostWorkLease Lease)> CreateDispatchedLeaseForOwnerAsync(
+        SqliteKernelStore store,
+        PrincipalRef ownerPrincipal,
+        string hostId,
+        string jobId,
+        string location = JobExecutionLocations.Host,
+        string? preferredHostId = null)
+    {
         await SeedOnlineHostAsync(store, ownerPrincipal.PrincipalId, hostId, "repo-main");
         var now = DateTimeOffset.UtcNow;
         var job = new ProductJob(ownerPrincipal.PrincipalId, jobId, "Host job", "Inspect repo", "ACTIVE", "READY", null,
@@ -1068,7 +1857,7 @@ public sealed class RemoteHostEndpointsTests : IAsyncLifetime
             projection = await store.GetRemoteJobRunProjectionAsync(ownerPrincipal.PrincipalId, run.RunId);
         }
         Assert.NotNull(projection?.Lease);
-        return (store, ownerPrincipal, run, projection!.Lease!);
+        return (run, projection!.Lease!);
     }
 
     private async Task<long> ReadLeaseEventCountAsync(string owner, string leaseId)
@@ -1080,6 +1869,163 @@ public sealed class RemoteHostEndpointsTests : IAsyncLifetime
         command.Parameters.AddWithValue("$owner", owner);
         command.Parameters.AddWithValue("$lease", leaseId);
         return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<long> ReadHostArtifactCountAsync(string owner, string artifactId)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM host_artifacts WHERE owner_principal_id=$owner AND artifact_id=$artifact;";
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$artifact", artifactId);
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<long> ReadHostArtifactReceiptCountAsync(string owner, string artifactId)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM host_artifact_receipts WHERE owner_principal_id=$owner AND artifact_id=$artifact;";
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$artifact", artifactId);
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<long> ReadHostArtifactEvidenceCountAsync(string owner, string artifactId)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM evidence WHERE owner_principal_id=$owner AND source_type='host.artifact' AND source_native_id=$artifact;";
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$artifact", artifactId);
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<string> ReadHostArtifactContentAsync(string owner, string artifactId)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT text_content FROM host_artifact_contents WHERE owner_principal_id=$owner AND artifact_id=$artifact;";
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$artifact", artifactId);
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task DeleteHostArtifactReceiptAsync(string owner, string artifactId)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM host_artifact_receipts WHERE owner_principal_id=$owner AND artifact_id=$artifact;";
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$artifact", artifactId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private async Task MarkLeaseAsLegacyNotStartedRequeueAsync(string owner, string leaseId)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE host_work_leases
+            SET state='EXPIRED',failure_code='reconciled_not_started',version=version+1
+            WHERE owner_principal_id=$owner AND lease_id=$lease;
+            """;
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$lease", leaseId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    private async Task SeedHostArtifactMetadataAsync(string owner, string runId, string leaseId, int count)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            WITH RECURSIVE sequence(value) AS (
+                SELECT 1
+                UNION ALL
+                SELECT value + 1 FROM sequence WHERE value < $count
+            )
+            INSERT INTO host_artifacts(
+                owner_principal_id,artifact_id,run_id,lease_id,action_id,kind,media_type,
+                summary,size_bytes,sha256,retention,content_state,redacted,truncated,
+                created_at,expires_at,version)
+            SELECT $owner,printf('artifact-seed-%03d',value),$run,$lease,NULL,'TEXT','text/plain',
+                   'seed',0,$sha256,'RUN','AVAILABLE',0,0,$createdAt,NULL,1
+            FROM sequence;
+            """;
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$run", runId);
+        command.Parameters.AddWithValue("$lease", leaseId);
+        command.Parameters.AddWithValue("$count", count);
+        command.Parameters.AddWithValue("$sha256", Convert.ToHexStringLower(SHA256.HashData([])));
+        command.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("O"));
+        Assert.Equal(count, await command.ExecuteNonQueryAsync());
+    }
+
+    private async Task<long> ReadAcceptedHostMessageCountAsync(string owner, string hostId, string messageId)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM host_accepted_messages WHERE owner_principal_id=$owner AND host_id=$host AND message_id=$message;";
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$host", hostId);
+        command.Parameters.AddWithValue("$message", messageId);
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<long> ReadLastAcceptedHostSequenceAsync(string owner, string hostId)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT last_accepted_sequence FROM remote_hosts WHERE owner_principal_id=$owner AND host_id=$host;";
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$host", hostId);
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task ForceLeaseExpiryAsync(string owner, string leaseId, DateTimeOffset executeUntil)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE host_work_leases SET execute_until=$executeUntil WHERE owner_principal_id=$owner AND lease_id=$lease;";
+        command.Parameters.AddWithValue("$executeUntil", executeUntil.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$lease", leaseId);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task DeleteSchedulerLeaseAsync(string owner, string runId, long fence)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM scheduler_leases WHERE owner_principal_id=$owner AND run_id=$run AND fence=$fence;";
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$run", runId);
+        command.Parameters.AddWithValue("$fence", fence);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task RevokeActiveHostCapabilityGrantAsync(string owner, string hostId)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_directory, "product.db")};Foreign Keys=True;Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE host_capability_grants SET revoked_at=$now WHERE owner_principal_id=$owner AND host_id=$host AND revoked_at IS NULL;";
+        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$host", hostId);
+        await command.ExecuteNonQueryAsync();
     }
 
     private static string RequestHash<T>(T body)

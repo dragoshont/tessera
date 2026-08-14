@@ -1,9 +1,9 @@
 # R2 Remote Hosts Test Contract
 
 **Status:** Required phased gates for the Mac reference journey. Current
-implementation evidence covers the v18 registry and v19 signed channel,
-lease, and canonical Job subset. v20 artifacts, clients/helper, and
-physical-device gates remain pending and must not be represented as shipped.
+implementation evidence covers the v18 registry, v19 signed channel/lease,
+the canonical Job subset, and the v20 server artifact slice. Client/helper/live
+and physical-device gates remain pending and must not be represented as shipped.
 
 Mocks prove contract behavior, not Secure Enclave protection, login-item lifecycle,
 Cloudflare transport, notarization, physical Mac execution, APNs or iPhone approval.
@@ -24,7 +24,7 @@ Cloudflare transport, notarization, physical Mac execution, APNs or iPhone appro
 | RH-B10 | Offline/missing Host creates one durable blocker without changing canonical intent; zero Hosts does not affect server Jobs |
 | RH-B11 | OFFERED work may expire; unexpired acknowledged work resumes only with same-attempt reconciliation; signed same-attempt NOT_STARTED proof permits QUEUED plus new lease/fresh fence; unknown start enters reconciliation and never duplicates execution |
 | RH-B12 | Event sequence/batch/type/size bounds persist product checkpoints; output is not approval, Evidence or Memory |
-| RH-B13 | Strict decode -> newline normalize -> control removal -> redact -> byte truncate -> SHA order is deterministic; no pre-redaction write occurs; declared/actual SHA and size match and replay is exact |
+| RH-B13 | Strict decode -> newline normalize -> control removal -> redact -> byte truncate -> SHA order is deterministic; no pre-redaction write occurs; declared/actual SHA and size match, replay is exact, and an accepted artifact blocks later `NOT_STARTED` requeue |
 | RH-B14 | Cross-owner Host, resource, lease, event, artifact and Job access returns non-disclosing not-found |
 | RH-B15 | Cross-language vectors prove exact sorted resource tuple encoding/hash; Action and one-use authorization persist exact Host ID, lease ID and that hash; substitution/version drift/replay deny, and Host/model/client text cannot approve |
 | RH-B16 | Recovery after Broker restart fences stale polls/leases and recomputes blockers without claiming execution success |
@@ -71,8 +71,9 @@ Storybook first:
 
 Closed Host event types for the proof slice are `HOST_CONNECTED`,
 `HOST_DISCONNECTED`, `JOB_ACCEPTED`, `STEP_STARTED`, `STEP_COMPLETED`,
-`APPROVAL_REQUIRED`, `JOB_FAILED`, and `JOB_COMPLETED`. `ARTIFACT_AVAILABLE` is
-reserved for the planned v20 artifact slice.
+`APPROVAL_REQUIRED`, `JOB_FAILED`, and `JOB_COMPLETED`. `ARTIFACT_AVAILABLE` remains
+reserved for a future event contract; the v20 proof slice uses the signed artifact
+upload route directly.
 Unknown types fail; additional steering-taxonomy events require later protocol
 versions.
 

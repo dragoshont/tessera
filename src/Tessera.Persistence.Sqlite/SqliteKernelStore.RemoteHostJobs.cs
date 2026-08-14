@@ -291,7 +291,8 @@ public sealed partial class SqliteKernelStore
         var lease = await ReadLatestLeaseByRunAsync(connection, null, owner, runId, token).ConfigureAwait(false);
         var host = lease is null ? null : await ReadHostByIdAsync(connection, null, owner, lease.HostId, token).ConfigureAwait(false);
         var checkpoints = await ListJobRunCheckpointsAsync(owner, runId, token).ConfigureAwait(false);
-        return new(blocker, lease, host, checkpoints);
+        var artifacts = await ListArtifactsByRunAsync(connection, null, owner, runId, token).ConfigureAwait(false);
+        return new(blocker, lease, host, checkpoints, artifacts);
     }
 
     internal async Task<HostDispatchPreparationResult> PrepareHostDispatchAsync(
@@ -942,7 +943,8 @@ public sealed partial class SqliteKernelStore
             {
                 if (lease.ExecuteUntil > now
                     && lease.State == HostLeaseStates.Acknowledged
-                    && !await HasAcceptedLeaseEventAsync(connection, transaction, lease.OwnerPrincipalId, lease.LeaseId, HostLeaseEventTypes.StepStarted, token).ConfigureAwait(false))
+                    && !await HasAcceptedLeaseEventAsync(connection, transaction, lease.OwnerPrincipalId, lease.LeaseId, HostLeaseEventTypes.StepStarted, token).ConfigureAwait(false)
+                    && !await HasHostArtifactForLeaseAsync(connection, transaction, lease.OwnerPrincipalId, lease.LeaseId, token).ConfigureAwait(false))
                 {
                     await SetLeaseStateAsync(connection, transaction, lease, HostLeaseStates.Expired, null, null, "reconciled_not_started", now, token)
                         .ConfigureAwait(false);

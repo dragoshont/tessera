@@ -21,6 +21,7 @@ public static class RemoteHostEndpoints
     private static readonly JsonSerializerOptions StrictJson = new(JsonSerializerDefaults.Web)
     {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        MaxDepth = 16,
     };
 
     public static void MapRemoteHostEndpoints(this WebApplication app)
@@ -29,13 +30,18 @@ public static class RemoteHostEndpoints
         {
             if (context.Request.Path.StartsWithSegments("/api/v1/host-pairings")
                 || context.Request.Path.StartsWithSegments("/api/v1/hosts")
+                || context.Request.Path.StartsWithSegments("/api/v1/host-artifacts")
                 || context.Request.Path.StartsWithSegments("/api/v1/jobs")
                 || context.Request.Path.StartsWithSegments("/api/v1/job-runs")
                 || context.Request.Path.StartsWithSegments("/host-channel"))
                 context.Response.Headers.CacheControl = "no-store";
-            if (IsRemoteHostMutation(context.Request)
-                && context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodyLimit)
-                bodyLimit.MaxRequestBodySize = 64 * 1024;
+            if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodyLimit)
+            {
+                if (IsRemoteHostArtifactUpload(context.Request))
+                    bodyLimit.MaxRequestBodySize = RemoteHostProtocol.MaximumArtifactRequestBodyBytes;
+                else if (IsRemoteHostMutation(context.Request))
+                    bodyLimit.MaxRequestBodySize = RemoteHostProtocol.MaximumBodyBytes;
+            }
             try
             {
                 await next(context).ConfigureAwait(false);
@@ -43,6 +49,7 @@ public static class RemoteHostEndpoints
             catch (Microsoft.Data.Sqlite.SqliteException)
                 when ((context.Request.Path.StartsWithSegments("/api/v1/host-pairings")
                     || context.Request.Path.StartsWithSegments("/api/v1/hosts")
+                    || context.Request.Path.StartsWithSegments("/api/v1/host-artifacts")
                     || context.Request.Path.StartsWithSegments("/api/v1/jobs")
                     || context.Request.Path.StartsWithSegments("/api/v1/job-runs")
                     || context.Request.Path.StartsWithSegments("/host-channel"))
@@ -314,8 +321,79 @@ public static class RemoteHostEndpoints
                 lease = projection?.Lease is null ? null : LeaseDto(projection.Lease),
                 host = projection?.Host is null ? null : HostSummaryDto(projection.Host),
                 checkpoints = projection?.Checkpoints.Select(item => new { item.Sequence, item.Step, item.StateJson, item.Fence, item.CreatedAt }).ToArray() ?? [],
-                artifacts = Array.Empty<object>(),
+                artifacts = projection?.Artifacts.Select(ArtifactSummaryDto).ToArray() ?? [],
             });
+        });
+
+        app.MapGet("/api/v1/job-runs/{runId}/remote-artifacts", async (
+            HttpContext context, string runId, int? limit, string? cursor,
+            ITokenValidator validator, TesseraConfig config,
+            IServiceProvider services, CancellationToken token) =>
+        {
+            var boundary = await BoundaryAsync(context, validator, config, services, token).ConfigureAwait(false);
+            if (boundary.Error is not null) return boundary.Error;
+            if (await boundary.Store!.GetJobRunAsync(boundary.Owner!, runId, token).ConfigureAwait(false) is null)
+                return Problem(404, "not_found");
+            try
+            {
+                var page = await boundary.Store.ListRunHostArtifactsAsync(boundary.Owner!, runId, limit, cursor, token).ConfigureAwait(false);
+                NoStore(context);
+                return Results.Json(new
+                {
+                    items = page.Items.Select(ArtifactSummaryDto).ToArray(),
+                    page.NextCursor,
+                });
+            }
+            catch (ArgumentException)
+            {
+                return Problem(400, "invalid_cursor");
+            }
+        });
+
+        app.MapGet("/api/v1/host-artifacts/{artifactId}", async (
+            HttpContext context, string artifactId, ITokenValidator validator, TesseraConfig config,
+            IServiceProvider services, CancellationToken token) =>
+        {
+            var boundary = await BoundaryAsync(context, validator, config, services, token).ConfigureAwait(false);
+            if (boundary.Error is not null) return boundary.Error;
+            HostArtifactDetail? artifact;
+            try
+            {
+                artifact = await boundary.Store!.GetHostArtifactDetailAsync(boundary.Owner!, artifactId, token).ConfigureAwait(false);
+            }
+            catch (ArgumentException)
+            {
+                return Problem(400, "artifact_invalid_request");
+            }
+            if (artifact is null) return Problem(404, "artifact_not_found");
+            NoStore(context);
+            return Results.Json(ArtifactDetailDto(artifact));
+        });
+
+        app.MapPost("/api/v1/host-artifacts/{artifactId}/verify", async (
+            HttpContext context, string artifactId, VersionRequest? request,
+            ITokenValidator validator, TesseraConfig config, IServiceProvider services,
+            CancellationToken token) =>
+        {
+            var boundary = await BoundaryAsync(context, validator, config, services, token).ConfigureAwait(false);
+            if (boundary.Error is not null) return boundary.Error;
+            if (!IsJson(context) || !Valid(request) || IdempotencyKey(context) is not { } key)
+                return Problem(400, "artifact_invalid_request");
+            HostArtifactVerifyReceiptMutation result;
+            try
+            {
+                result = await boundary.Store!.VerifyHostArtifactAsync(
+                    boundary.Owner!, artifactId, request!.ExpectedVersion, key, Hash(request), DateTimeOffset.UtcNow, token)
+                    .ConfigureAwait(false);
+            }
+            catch (ArgumentException)
+            {
+                return Problem(400, "artifact_invalid_request");
+            }
+            if (result.Receipt is null) return ArtifactProblem(result.Error!);
+            NoStore(context);
+            return Results.Text(result.Receipt.ResponseBodyJson, "application/json", Encoding.UTF8,
+                result.Receipt.ResponseStatus);
         });
 
         app.MapPost("/host-channel/poll", async (HttpContext context, SqliteKernelStore store, CancellationToken token) =>
@@ -432,6 +510,45 @@ public static class RemoteHostEndpoints
                 (connection, transaction, host, ct) => SqliteKernelStore.ReconcileHostLeaseAsync(
                     connection, transaction, host, leaseId, request!.LeaseVersion, request.LocalAttemptId,
                     request.ObservedState, request.OutputSha256, DateTimeOffset.UtcNow, ct),
+                token).ConfigureAwait(false);
+            return HostSignedResult(result);
+        });
+
+        app.MapPost("/host-channel/leases/{leaseId}/artifacts", async (HttpContext context, string leaseId, SqliteKernelStore store, CancellationToken token) =>
+        {
+            if (!IsJson(context)) return Problem(415, "invalid_media_type");
+            var read = await RemoteHostRequestReader.ReadAsync(
+                context.Request,
+                HostAcceptedMessageOperations.LeaseArtifact,
+                leaseId,
+                RemoteHostProtocol.MaximumArtifactRequestBodyBytes,
+                token).ConfigureAwait(false);
+            if (!read.Succeeded) return HostSignedProblem(read.Error!);
+            HostLeaseArtifactRequest? request;
+            try { request = JsonSerializer.Deserialize<HostLeaseArtifactRequest>(read.Body, StrictJson); }
+            catch (JsonException) { return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false)); }
+            if (!Valid(request)) return HostSignedResult(await AcceptSignedInvalidRequestAsync(store, read.Envelope!, token).ConfigureAwait(false));
+            var result = await store.AcceptSignedHostMessageAsync(
+                read.Envelope!,
+                DateTimeOffset.UtcNow,
+                (connection, transaction, host, ct) => SqliteKernelStore.UploadHostArtifactAsync(
+                    connection,
+                    transaction,
+                    host,
+                    leaseId,
+                    request!.LeaseVersion,
+                    request.LocalAttemptId!,
+                    request.ArtifactId!,
+                    request.Kind!,
+                    request.MediaType!,
+                    request.Summary!,
+                    request.DeclaredSize,
+                    request.DeclaredSha256!,
+                    request.Retention!,
+                    request.TextContent!,
+                    read.Envelope!.MessageId,
+                    DateTimeOffset.UtcNow,
+                    ct),
                 token).ConfigureAwait(false);
             return HostSignedResult(result);
         });
@@ -566,16 +683,48 @@ public static class RemoteHostEndpoints
         lease.FailureCode,
     };
 
+    private static object ArtifactSummaryDto(HostArtifact artifact) => new
+    {
+        artifactId = artifact.ArtifactId,
+        runId = artifact.RunId,
+        leaseId = artifact.LeaseId,
+        actionId = artifact.ActionId,
+        kind = artifact.Kind,
+        mediaType = artifact.MediaType,
+        summary = artifact.Summary,
+        sizeBytes = artifact.SizeBytes,
+        sha256 = artifact.Sha256,
+        retention = artifact.Retention,
+        contentState = artifact.ContentState,
+        redacted = artifact.Redacted,
+        truncated = artifact.Truncated,
+        createdAt = artifact.CreatedAt,
+        expiresAt = artifact.ExpiresAt,
+        version = artifact.Version,
+    };
+
+    private static object ArtifactDetailDto(HostArtifactDetail artifact) => new
+    {
+        artifact = ArtifactSummaryDto(artifact.Artifact),
+        textContent = artifact.TextContent,
+    };
+
     private static bool IsRemoteHostMutation(HttpRequest request)
         => HttpMethods.IsPost(request.Method)
             && (request.Path.StartsWithSegments("/api/v1/host-pairings")
                 || request.Path.StartsWithSegments("/api/v1/hosts")
+                || request.Path.StartsWithSegments("/api/v1/host-artifacts")
                 || request.Path.StartsWithSegments("/host-channel"))
             || HttpMethods.IsPut(request.Method)
             && (request.Path.StartsWithSegments("/api/v1/hosts")
                 || request.Path.StartsWithSegments("/api/v1/jobs"))
             || HttpMethods.IsDelete(request.Method)
             && request.Path.StartsWithSegments("/api/v1/jobs");
+
+    private static bool IsRemoteHostArtifactUpload(HttpRequest request)
+        => HttpMethods.IsPost(request.Method)
+            && request.Path.StartsWithSegments("/host-channel/leases")
+            && request.Path.Value?.EndsWith("/artifacts", StringComparison.Ordinal) == true;
 
     private static IResult PairingProblem(string code) => Problem(code switch
     {
@@ -592,6 +741,14 @@ public static class RemoteHostEndpoints
     {
         "host_not_found" => 404,
         "host_version_conflict" or "host_revoked" or "host_grant_not_advertised" or
+        "idempotency_conflict" => 409,
+        _ => 400,
+    }, code);
+
+    private static IResult ArtifactProblem(string code) => Problem(code switch
+    {
+        "artifact_not_found" => 404,
+        "artifact_version_conflict" or "artifact_conflict" or "artifact_hash_mismatch" or
         "idempotency_conflict" => 409,
         _ => 400,
     }, code);
@@ -695,6 +852,19 @@ public static class RemoteHostEndpoints
             && request!.LeaseVersion >= 1
             && !string.IsNullOrWhiteSpace(request.LocalAttemptId)
             && !string.IsNullOrWhiteSpace(request.ObservedState);
+
+    private static bool Valid(HostLeaseArtifactRequest? request)
+        => ValidRequest(request)
+            && request!.LeaseVersion >= 1
+            && !string.IsNullOrWhiteSpace(request.LocalAttemptId)
+            && !string.IsNullOrWhiteSpace(request.ArtifactId)
+            && !string.IsNullOrWhiteSpace(request.Kind)
+            && !string.IsNullOrWhiteSpace(request.MediaType)
+            && request.Summary is not null
+            && request.DeclaredSize >= 0
+            && !string.IsNullOrWhiteSpace(request.DeclaredSha256)
+            && !string.IsNullOrWhiteSpace(request.Retention)
+            && request.TextContent is not null;
 
     private static bool ValidRequest(StrictRequest? request)
         => request is not null && request.ExtensionData?.Count is not > 0;
@@ -815,6 +985,20 @@ public static class RemoteHostEndpoints
         public string LocalAttemptId { get; init; } = string.Empty;
         public string ObservedState { get; init; } = string.Empty;
         public string? OutputSha256 { get; init; }
+    }
+
+    public sealed class HostLeaseArtifactRequest : StrictRequest
+    {
+        public long LeaseVersion { get; init; }
+        public string? LocalAttemptId { get; init; }
+        public string? ArtifactId { get; init; }
+        public string? Kind { get; init; }
+        public string? MediaType { get; init; }
+        public string? Summary { get; init; }
+        public long DeclaredSize { get; init; }
+        public string? DeclaredSha256 { get; init; }
+        public string? Retention { get; init; }
+        public string? TextContent { get; init; }
     }
 
     public sealed class CapabilityAdvertisementRequest : StrictRequest
