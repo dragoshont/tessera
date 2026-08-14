@@ -52,6 +52,8 @@ at phase exit.
 | RH-M07 | Lease expiry/revocation terminates process and prevents result acceptance; unknown outcome is reported honestly |
 | RH-M08 | Nested helper packaging has minimal entitlements and renderer cannot invoke execution/private-key operations |
 
+The local native helper/package can satisfy RH-M01 through RH-M08 under mocks and
+unsigned package inspection without proving installed product behavior.
 Physical/signed external gates: Secure Enclave/fallback protection, `SMAppService`
 approval/login/reboot/update/unregister, sleep/wake/App Nap/network transitions,
 Developer ID nested signing/notarization/Gatekeeper, real repository/Xcode profile,

@@ -56,4 +56,11 @@ describe('desktop trust boundary', () => {
     expect(validateNotification({ title: 'Action pending', body: 'Review it', route: '/activity' }).route).toBe('/activity')
     expect(() => validateNotification({ title: 'x', body: 'y', route: '/not-real' })).toThrow()
   })
+
+  it('exposes no renderer operation for signing, paths, envelopes, or execution', async () => {
+    const preload = await import('node:fs/promises').then(({ readFile }) => readFile(new URL('../src/preload.ts', import.meta.url), 'utf8'))
+    expect(preload).toContain('getMacHostStatus')
+    expect(preload).toContain('setMacHostEnabled')
+    expect(preload).not.toMatch(/private.?key|sign\(|readPath|sendEnvelope|executeHost|pairHost/i)
+  })
 })

@@ -58,8 +58,10 @@ profile accepts no client arguments. At grant time the helper opens the root wit
 `O_DIRECTORY|O_NOFOLLOW`, walks every component using descriptor-relative
 `openat`/`fstatat(AT_SYMLINK_NOFOLLOW)`, records volume UUID, device/inode and
 repository fingerprint, and stores the display path only in helper-owned Keychain
-data. The granted root and every traversed directory/file must have `st_uid` equal
-to the helper process effective UID; a different owner is denied. `.git` must be a real directory below the root, not a gitfile or symlink;
+data. System ancestors may be owned only by root or the helper process effective
+UID. The selected repository root and every traversed directory/file beneath it
+must have `st_uid` equal to the helper process effective UID; any other owner is
+denied. `.git` must be a real directory below the root, not a gitfile or symlink;
 `.git/commondir` and `.git/objects/info/alternates` must not exist. Immediately
 before execution it repeats these descriptor-relative checks and retains the
 verified root and `.git` directory FDs.

@@ -15,6 +15,10 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# SwiftPM
+.build/
+.swiftpm/
+
 # Local runtime artifacts (NEVER commit real secrets or live audit logs)
 *.log
 grants.toml

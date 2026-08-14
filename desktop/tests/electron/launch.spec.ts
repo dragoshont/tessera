@@ -31,12 +31,14 @@ test('real Electron shell launches with hardened renderer and narrow bridge', as
     expect(renderer.origin).toBe('app://tessera/')
     expect(renderer.bridge).toEqual([
       'getApiOrigin',
+      'getMacHostStatus',
       'loadAuth',
       'notify',
       'onNavigate',
       'openExternal',
       'platform',
       'saveAuth',
+      'setMacHostEnabled',
       'signInOidc',
       'version',
     ].sort())

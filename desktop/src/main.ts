@@ -16,6 +16,7 @@ import path from 'node:path'
 import { registerAppProtocol } from './app-protocol'
 import { AuthStore } from './auth-store'
 import { OidcCoordinator } from './oidc'
+import { MacHostHelperManager } from './host-helper'
 import { isTrustedAudioPermission } from './permission-policy'
 import {
   API_ORIGIN,
@@ -51,6 +52,7 @@ let mainWindow: BrowserWindow | null = null
 let queuedDeepLinks: string[] = []
 let oidc: OidcCoordinator
 let authStore: AuthStore
+let hostHelper: MacHostHelperManager
 
 app.on('open-url', (event, url) => {
   event.preventDefault()
@@ -66,6 +68,11 @@ void app.whenReady().then(async () => {
   if (!testUserData) app.setAsDefaultProtocolClient('tessera')
   authStore = new AuthStore()
   oidc = new OidcCoordinator(authStore)
+  hostHelper = new MacHostHelperManager(
+    app.isPackaged
+      ? path.join(process.resourcesPath, 'TesseraHostControl')
+      : path.resolve(__dirname, '../../../mac-host/dist/TesseraHostControl'),
+  )
   registerAppProtocol(path.join(__dirname, '..', 'renderer'))
   registerIpc()
   installPermissionPolicy()
@@ -156,6 +163,15 @@ function registerIpc(): void {
     const notification = new Notification({ title: input.title, body: input.body })
     if (input.route) notification.on('click', () => navigate(input.route!))
     notification.show()
+  })
+  ipcMain.handle('host:get-status', async (event) => {
+    assertSender(event)
+    return hostHelper.status()
+  })
+  ipcMain.handle('host:set-enabled', async (event, value: unknown) => {
+    assertSender(event)
+    if (typeof value !== 'boolean') throw new Error('Mac Host enabled state is invalid.')
+    return hostHelper.setEnabled(value)
   })
 }
 

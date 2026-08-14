@@ -9,6 +9,7 @@
     "clean": "node scripts/clean.mjs",
     "build:main": "tsc -p tsconfig.json",
     "build:renderer": "node scripts/build-renderer.mjs",
+    "build:host": "sh ../mac-host/scripts/build-for-electron.sh",
     "build": "npm run clean && npm run build:main && npm run build:renderer",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
@@ -16,7 +17,7 @@
     "test:packaged": "node scripts/smoke-packaged.mjs",
     "test:packaged:inspect": "node scripts/prepare-test-app.mjs && TESSERA_PACKAGED_APP=$PWD/test-artifacts/Tessera.app/Contents/MacOS/Tessera playwright test",
     "start": "npm run build && electron .",
-    "package:mac": "npm run build && electron-builder --mac dmg zip --publish never",
+    "package:mac": "npm run build:host && npm run build && electron-builder --mac dmg zip --publish never",
     "verify:package": "node scripts/verify-package.mjs"
   },
   "devDependencies": {
@@ -41,6 +42,10 @@
       "dist/main/**/*",
       "dist/renderer/**/*",
       "package.json"
+    ],
+    "extraFiles": [
+      { "from": "../mac-host/dist/TesseraMacHost.app", "to": "Library/LoginItems/TesseraMacHost.app" },
+      { "from": "../mac-host/dist/TesseraHostControl", "to": "Resources/TesseraHostControl" }
     ],
     "afterPack": "scripts/apply-fuses.cjs",
     "afterSign": "scripts/sign-app.cjs",
