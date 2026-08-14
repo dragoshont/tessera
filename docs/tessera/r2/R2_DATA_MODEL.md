@@ -10,6 +10,8 @@ Phase 1 adds three ordered, additive migrations and repositories before behavior
 - **v8 Custody recovery:** `orphan_credential_cleanup_receipts` records secret-free failed-compensation cleanup intent.
 - **v9 Exact execution recovery:** `durable_execution_requests` atomically binds an Action to its exact non-secret execution request; `execution_controls` records generation stop state; plugin installations gain an additive removal marker while retaining their historical descriptor.
 - **v17 Isolated development:** Jobs gain additive kind/conversation identity; `development_workspaces` records owner/conversation-scoped immutable server snapshots; `development_job_specs` binds a Job to one server-resolved command profile and closed effect class.
+- **v18 Remote Host registry:** `host_pairings`, `remote_hosts`, capability/resource advertisements and append-only grants, plus accepted-message replay receipts establish owner-scoped paired Host identity.
+- **v19 Remote Host execution:** `job_execution_policies`, versioned blockers, Host work leases/events/resource snapshots, and exact Host fields on Actions/authorizations extend canonical Jobs without a second execution engine.
 
 All tables use owner plus ID primary keys and foreign keys to `principals`. Aggregate tables have `version >= 1`; timestamps are UTC text. Child foreign keys include owner. Indexes cover owner/state/time lists. No secret, raw model reasoning, hidden prompt, provider body, or arbitrary diagnostics column exists.
 
@@ -53,3 +55,8 @@ Before rolling an R2 binary back to an R1 binary, stop new dispatch, pause the s
 Before rolling a v17 binary back, stop development dispatch and allow or cancel
 active development runs. Retain the additive columns and tables; no down migration
 runs. Existing automation Jobs remain `AUTOMATION` through the column default.
+
+Before rolling a v19 binary back, disable Host dispatch and signed Host routes,
+reconcile acknowledged/running leases, and retain all v18-v19 identity, grant,
+blocker, lease, and Action-binding history. Prior binaries ignore the additive
+tables and nullable columns; no down migration runs.
