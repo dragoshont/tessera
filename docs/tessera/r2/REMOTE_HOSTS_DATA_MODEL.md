@@ -1,8 +1,9 @@
 # R2 Remote Hosts Data And Migration Contract
 
-**Status:** Accepted phased additive contract. Migrations v18-v20 for the
-server artifact slice are implemented; later client/helper/live surfaces remain
-planned and are not current product capability.
+**Status:** Accepted phased additive contract. Migrations v18-v20, the local
+native helper, and owner-scoped Web/Electron/iOS client projections are
+implemented; signed physical and live surfaces remain external gates and are not
+current product capability.
 
 Remote adds Host bindings around canonical owner, Job, JobRun, Action, Evidence,
 Activity, output and scheduler records. It does not add Host-owned Jobs, Memory,

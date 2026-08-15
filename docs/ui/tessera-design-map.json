@@ -75,6 +75,11 @@
       "code": "web/src/components/remote/RemoteWorkspace.tsx",
       "reuses": ["ActionApprovalCard"],
       "states": ["OnlineIdle", "BusyRunning", "OfflineWaitingForHost", "UpdateRequired", "Revoked", "ApprovalRequired", "Canceling", "SucceededWithArtifacts", "TruncatedArtifact", "TruncatedArtifactDark", "ExpiredArtifact"]
+    },
+    "MacHostRolePanel": {
+      "story": "Product/MacHostRolePanel",
+      "code": "web/src/components/remote/MacHostRolePanel.tsx",
+      "states": ["ClientOnly", "AvailableNotEnabled", "Enabled", "ApprovalRequired", "Unavailable"]
     }
   },
   "semanticTokens": {

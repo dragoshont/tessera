@@ -1,6 +1,6 @@
 # R2 Remote Hosts Product Contract
 
-**Status:** Accepted reference-slice contract; the server artifact slice is implemented and live proof remains in progress
+**Status:** Accepted reference-slice contract; server, local Mac helper, and Web/Electron/iOS client slices are implemented. Signed physical and live proof remains pending.
 
 ## Product invariant
 

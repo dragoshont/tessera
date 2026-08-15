@@ -1,8 +1,9 @@
 # R2 Remote Hosts API And Protocol Contract
 
 **Status:** Accepted phased contract; v18 registry, v19 signed Host
-channel/lease/Job routes, and the v20 server artifact slice are implemented.
-Later client/helper/live surfaces remain planned and are not shipped capability.
+channel/lease/Job routes, v20 artifacts, the local native helper, and owner-scoped
+Web/Electron/iOS client bindings are implemented. Signed physical and live
+surfaces remain external gates and are not shipped capability.
 
 All user routes are under `/api/v1`, require the existing verified owner boundary,
 and return `Cache-Control: no-store`. Unknown fields are rejected. Every mutation

@@ -1,6 +1,6 @@
 # ADR 0037: Paired Remote Hosts use server-owned Jobs and signed Host requests
 
-**Status:** Accepted for local implementation; live enrollment and deployment require external verification
+**Status:** Local reference implementation complete; live enrollment and deployment require external verification
 
 ## Context
 

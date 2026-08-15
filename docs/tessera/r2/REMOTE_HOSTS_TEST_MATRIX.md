@@ -1,12 +1,17 @@
 # R2 Remote Hosts Test Contract
 
-**Status:** Required phased gates for the Mac reference journey. Current
-implementation evidence covers the v18 registry, v19 signed channel/lease,
-the canonical Job subset, and the v20 server artifact slice. Client/helper/live
-and physical-device gates remain pending and must not be represented as shipped.
+**Status:** Required phased gates for the Mac reference journey. Current local
+implementation evidence covers v18-v20 server behavior, the native helper, the
+approved Web surface, the real Electron shell, and the iOS production bundle.
+Signed helper lifecycle, physical-device, deployed-Broker, and live journey gates
+remain pending and must not be represented as shipped.
 
 Mocks prove contract behavior, not Secure Enclave protection, login-item lifecycle,
 Cloudflare transport, notarization, physical Mac execution, APNs or iPhone approval.
+
+The client phase also repaired React 19 lint-invalid realtime voice ref updates
+without changing the voice contract; eight focused voice tests and the full Web
+suite cover that incidental change.
 
 ## Backend and protocol
 
@@ -68,8 +73,8 @@ Storybook first:
 - `Product/RemoteHostDetail`: OnlineIdle, BusyRunning, OfflineWaitingForHost,
   UpdateRequired, Revoked, ApprovalRequired, Canceling, SucceededWithArtifacts,
   TruncatedArtifact, ExpiredArtifact.
-- `Product/MacHostRolePanel`: ClientOnly, AvailableNotEnabled, Enrolled, Disabled,
-  UpdateRequired.
+- `Product/MacHostRolePanel`: ClientOnly, AvailableNotEnabled, Enabled,
+  ApprovalRequired, Unavailable.
 
 Closed Host event types for the proof slice are `HOST_CONNECTED`,
 `HOST_DISCONNECTED`, `JOB_ACCEPTED`, `STEP_STARTED`, `STEP_COMPLETED`,
