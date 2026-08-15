@@ -12,7 +12,7 @@ import {
 } from './RemoteWorkspace'
 
 const host: RemoteHostSummary = {
-  hostId: 'host-main', href: '/remote/hosts/host-main', displayName: 'Main Mac',
+  hostId: 'host-main', version: 3, href: '/remote/hosts/host-main', displayName: 'Main Mac',
   platform: 'macOS 15.6', architecture: 'arm64', lifecycle: 'BUSY', agentVersion: '1.0.0',
   protocolVersion: '1', statusObservedAt: '2026-08-14T12:52:00Z', lastSeenAt: '2026-08-14T12:52:00Z',
   capabilityCount: 1, resourceCount: 1,
@@ -39,6 +39,14 @@ describe('RemoteWorkspace', () => {
     rerender(<RemoteWorkspace mode="zero-hosts" />)
     expect(screen.getByRole('heading', { name: 'No Macs are paired' })).toBeInTheDocument()
     expect(screen.getAllByText(/Server Jobs continue normally/)).toHaveLength(2)
+  })
+
+  it('disables every zero-Host pairing control with the preview reason', () => {
+    render(<RemoteWorkspace mode="zero-hosts" pairingUnavailableReason="Pairing awaits signed helper proof." />)
+    for (const button of screen.getAllByRole('button', { name: 'Pair a Mac' })) {
+      expect(button).toBeDisabled()
+      expect(document.getElementById(button.getAttribute('aria-describedby')!)).toHaveTextContent('signed helper proof')
+    }
   })
 
   it('requires all six pairing digits before continuing', async () => {
@@ -120,8 +128,20 @@ describe('RemoteHostDetail', () => {
     await user.type(screen.getByLabelText('Type Main Mac to confirm'), 'Main Mac')
     expect(destructive).toBeEnabled()
     await user.click(destructive)
-    expect(onRevoke).toHaveBeenCalledWith('host-main')
+    expect(onRevoke).toHaveBeenCalledWith(host)
     await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it('keeps revoke bound to the displayed revision while polling updates the Host', async () => {
+    const onRevoke = vi.fn()
+    const user = userEvent.setup()
+    const { rerender } = render(<RemoteHostDetail state="busy-running" host={host} onRevoke={onRevoke} />)
+    await user.click(screen.getByRole('button', { name: 'Revoke Host…' }))
+    expect(screen.getByText(/Host revision 3/)).toBeInTheDocument()
+    rerender(<RemoteHostDetail state="busy-running" host={{ ...host, version: 4 }} onRevoke={onRevoke} />)
+    await user.type(screen.getByLabelText('Type Main Mac to confirm'), 'Main Mac')
+    await user.click(screen.getByRole('button', { name: 'Revoke Host' }))
+    expect(onRevoke).toHaveBeenCalledWith(expect.objectContaining({ hostId: 'host-main', version: 3 }))
   })
 
   it('confirms Job cancellation and restores focus to its trigger', async () => {
@@ -145,6 +165,18 @@ describe('RemoteHostDetail', () => {
     expect(within(dialog).getByText('Repository identity')).toBeInTheDocument()
     expect(dialog.querySelector('pre')).toHaveTextContent('<img src=x onerror=alert(1)> branch=main')
     expect(dialog.querySelector('img')).toBeNull()
+  })
+
+  it('loads artifact text only after explicit preview intent', async () => {
+    const user = userEvent.setup()
+    const onLoadArtifact = vi.fn(async () => ({ ...artifact, textContent: 'loaded plain text' }))
+    render(<RemoteHostDetail state="succeeded-with-artifacts" host={{ ...host, lifecycle: 'ONLINE' }} artifacts={[{ ...artifact, textContent: undefined }]} onLoadArtifact={onLoadArtifact} />)
+
+    expect(onLoadArtifact).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Preview' }))
+
+    expect(onLoadArtifact).toHaveBeenCalledWith(artifact.artifactId)
+    expect(await screen.findByText('loaded plain text')).toBeInTheDocument()
   })
 
   it('keeps expired metadata and associates the disabled preview reason', () => {

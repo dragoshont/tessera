@@ -57,9 +57,10 @@ export function useRealtimeVoice({
   const onTurnSavedRef = useRef(onTurnSaved)
   const onApprovalRequiredRef = useRef(onApprovalRequired)
   const statusRef = useRef(status)
-  onTurnSavedRef.current = onTurnSaved
-  onApprovalRequiredRef.current = onApprovalRequired
-  statusRef.current = status
+
+  useEffect(() => { onTurnSavedRef.current = onTurnSaved }, [onTurnSaved])
+  useEffect(() => { onApprovalRequiredRef.current = onApprovalRequired }, [onApprovalRequired])
+  useEffect(() => { statusRef.current = status }, [status])
 
   const takeTurn = useCallback((assistantTranscript: string, outputItemId: string | null, disposition: RealtimeTurnInput['assistantDisposition']) => {
     const user = pendingUser.current
@@ -83,7 +84,7 @@ export function useRealtimeVoice({
     if (!turn) return true
     try { await dependencies.api.saveRealtimeTurn(turn.conversationId, turn.sessionId, turn.input); onTurnSavedRef.current?.(); return true }
     catch { return false }
-  }, [dependencies.api, takeTurn])
+  }, [dependencies.api])
 
   const closeLocal = useCallback(() => {
     generation.current += 1
@@ -166,7 +167,7 @@ export function useRealtimeVoice({
       }
       setVoice((current) => ({ ...current, state: 'LISTENING', toolName: undefined }))
     } catch { void fail('realtime_tool_failed') }
-  }, [dependencies.api, fail])
+  }, [dependencies, fail])
 
   const handleData = useCallback((raw: string) => {
     const event = parseRealtimeProtocolEvent(raw)

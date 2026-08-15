@@ -41,3 +41,98 @@ export type Memory = { assertionId: string; subjectKey: string; predicate: strin
 export type MemoryWhy = { assertionId: string; current: Memory; previous: Memory | null; evidence: Array<{ evidenceId: string; sourceType: string; sourceLocator: string; observedAt: string; sourceTimestamp: string | null; boundedExcerpt: string | null }>; lineageRefs: string[] }
 export type Activity = { id: string; kind: string; occurredAt: string; summary: string; state: string | null; resourceType: string; resourceId: string; evidenceRefs: string[] }
 export type Settings = { defaultChatModelProfileId: string | null; defaultLightweightModelProfileId: string | null; timezone: string; approvalDefaults: unknown; memoryControls: unknown; version: number }
+
+export type RemoteHostLifecycle = 'PAIRING' | 'ONLINE' | 'BUSY' | 'DEGRADED' | 'OFFLINE' | 'REVOKED' | 'UPDATE_REQUIRED'
+export type RemoteHostSummaryDto = {
+  hostId: string
+  displayName: string
+  platform: string
+  architecture: string
+  lifecycle: RemoteHostLifecycle
+  connectionStatus: string
+  agentVersion: string
+  protocolVersion: string
+  lastSeenAt: string | null
+  pairedAt: string
+  revokedAt: string | null
+  version: number
+}
+export type RemoteHostCapabilityDto = { capabilityId: string; capabilityVersion: string; schemaHash: string; sideEffectClass: string; advertisedAt: string }
+export type RemoteHostCapabilityGrantDto = { capabilityId: string; capabilityVersion: string; grantedAt: string; revokedAt: string | null; version: number }
+export type RemoteHostResourceDto = { resourceId: string; type: string; displayName: string; fingerprint: string; state: string; advertisedAt: string; version: number }
+export type RemoteHostResourceGrantDto = { resourceId: string; accessMode: string; grantedAt: string; revokedAt: string | null; version: number }
+export type RemoteHostDetailDto = {
+  host: RemoteHostSummaryDto
+  capabilities: RemoteHostCapabilityDto[]
+  capabilityGrants: RemoteHostCapabilityGrantDto[]
+  resources: RemoteHostResourceDto[]
+  resourceGrants: RemoteHostResourceGrantDto[]
+}
+export type RemoteHostRequestedCapabilityDto = { capabilityId: string; capabilityVersion: string; schemaHash: string; sideEffectClass: string }
+export type RemoteHostRequestedResourceDto = { resourceId: string; type: string; displayName: string; fingerprint: string; state: string }
+export type RemoteHostPairingDto = {
+  pairingId: string
+  state: 'ISSUED' | 'CLAIMED' | 'CONFIRMED' | 'CANCELED' | 'EXPIRED'
+  requestedHost: null | {
+    protection: 'SECURE_ENCLAVE' | 'KEYCHAIN_THIS_DEVICE_ONLY'
+    platform: string
+    architecture: string
+    agentVersion: string
+    protocolVersion: string
+    requestedCapabilities: RemoteHostRequestedCapabilityDto[]
+    requestedResources: RemoteHostRequestedResourceDto[]
+  }
+  expiresAt: string
+  version: number
+}
+export type RemoteHostBlockerDto = { code: string; hostId: string | null; capabilityId: string | null; resourceId: string | null; detailCode: string | null; observedAt: string; clearedAt: string | null; version: number }
+export type RemoteHostLeaseDto = {
+  leaseId: string
+  leaseVersion: number
+  runId: string
+  jobId: string
+  hostId: string
+  schedulerFence: number
+  attempt: number
+  profileId: string
+  capabilityId: string
+  capabilityVersion: string
+  capabilityGrantVersion: number
+  inputHash: string
+  state: string
+  issuedAt: string
+  executeUntil: string
+  acknowledgedAt: string | null
+  completedAt: string | null
+  localAttemptId: string | null
+  outcome: string | null
+  outputSha256: string | null
+  failureCode: string | null
+}
+export type RemoteHostCheckpointDto = { sequence: number; step: string; stateJson: string; fence: number; createdAt: string }
+export type RemoteHostArtifactSummaryDto = {
+  artifactId: string
+  runId: string
+  leaseId: string
+  actionId: string | null
+  kind: 'TEXT'
+  mediaType: 'text/plain'
+  summary: string
+  sizeBytes: number
+  sha256: string
+  retention: 'RUN'
+  contentState: 'AVAILABLE' | 'EXPIRED'
+  redacted: boolean
+  truncated: boolean
+  createdAt: string
+  expiresAt: string | null
+  version: number
+}
+export type RemoteHostRunProjectionDto = {
+  blocker: RemoteHostBlockerDto | null
+  lease: RemoteHostLeaseDto | null
+  host: RemoteHostSummaryDto | null
+  checkpoints: RemoteHostCheckpointDto[]
+  artifacts: RemoteHostArtifactSummaryDto[]
+}
+export type RemoteHostArtifactDetailDto = { artifact: RemoteHostArtifactSummaryDto; textContent: string | null }

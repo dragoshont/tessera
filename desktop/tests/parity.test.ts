@@ -3,7 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { PRODUCT_ROUTES } from '../src/security'
 
-const required = ['/chat', '/jobs', '/accounts', '/plugins', '/memory', '/activity', '/settings']
+const required = ['/chat', '/jobs', '/accounts', '/plugins', '/memory', '/activity', '/settings', '/remote']
 
 describe('shared product route parity', () => {
   it('keeps every required Web route available to Desktop navigation', async () => {

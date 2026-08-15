@@ -9,7 +9,14 @@ export const PRODUCT_ROUTES = [
   '/memory',
   '/activity',
   '/settings',
+  '/remote',
 ] as const
+
+export type MacHostStatus = {
+  available: boolean
+  state: 'CLIENT_ONLY' | 'ENABLED' | 'DISABLED' | 'REQUIRES_APPROVAL' | 'NOT_FOUND' | 'UNAVAILABLE'
+  bundleIdentifier: 'ro.hont.tessera.host'
+}
 
 export interface TesseraDesktopBridge {
   readonly platform: 'desktop'
@@ -20,6 +27,8 @@ export interface TesseraDesktopBridge {
   signInOidc(config: OidcConfig): Promise<Extract<AuthState, { kind: 'oidc' }>>
   openExternal(url: string): Promise<void>
   notify(input: { title: string; body: string; route?: string }): Promise<void>
+  getMacHostStatus(): Promise<MacHostStatus>
+  setMacHostEnabled(enabled: boolean): Promise<MacHostStatus>
   onNavigate(listener: (route: string) => void): () => void
 }
 
@@ -71,6 +80,16 @@ export async function notifyDesktop(input: {
   route?: string
 }): Promise<void> {
   if (window.tesseraDesktop) await window.tesseraDesktop.notify(input)
+}
+
+export function getMacHostStatus(): Promise<MacHostStatus> {
+  if (!window.tesseraDesktop) return Promise.resolve({ available: false, state: 'CLIENT_ONLY', bundleIdentifier: 'ro.hont.tessera.host' })
+  return window.tesseraDesktop.getMacHostStatus()
+}
+
+export function setMacHostEnabled(enabled: boolean): Promise<MacHostStatus> {
+  if (!window.tesseraDesktop) throw new Error('Mac Host mode is available only in packaged Tessera.')
+  return window.tesseraDesktop.setMacHostEnabled(enabled)
 }
 
 export async function openTrustedExternal(url: string): Promise<void> {

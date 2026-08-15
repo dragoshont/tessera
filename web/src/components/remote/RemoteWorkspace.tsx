@@ -89,6 +89,7 @@ export interface RemoteCurrentJob {
 
 export interface RemoteHostSummary {
   hostId: string
+  version: number
   href: string
   displayName: string
   platform: string
@@ -498,7 +499,7 @@ function RevokeHostDialog({
 }: {
   host: RemoteHostSummary | null
   onClose: () => void
-  onConfirm?: (hostId: string) => void
+  onConfirm?: (host: RemoteHostSummary) => void
   onReturnFocus?: () => void
 }) {
   const [typedName, setTypedName] = useState('')
@@ -521,7 +522,7 @@ function RevokeHostDialog({
       >
         <DialogHeader>
           <DialogTitle>Revoke {host?.displayName}?</DialogTitle>
-          <DialogDescription>New work will stop using this Mac immediately. If execution cannot be proven, the Job will require reconciliation. Historical Jobs, Actions, Evidence, artifacts, and Activity remain available.</DialogDescription>
+          <DialogDescription>Host revision {host?.version}. New work will stop using this Mac immediately. If execution cannot be proven, the Job will require reconciliation. Historical Jobs, Actions, Evidence, artifacts, and Activity remain available.</DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
           <Label htmlFor="remote-revoke-name">Type {host?.displayName} to confirm</Label>
@@ -530,7 +531,7 @@ function RevokeHostDialog({
         </div>
         <DialogFooter>
           <Button ref={cancelRef} className="min-h-11" variant="outline" onClick={close}>Cancel</Button>
-          <Button className="min-h-11" variant="destructive" disabled={!matched} onClick={() => { if (host) onConfirm?.(host.hostId); close() }}>Revoke Host</Button>
+          <Button className="min-h-11" variant="destructive" disabled={!matched} onClick={() => { if (host) onConfirm?.(host); close() }}>Revoke Host</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -584,12 +585,13 @@ export interface RemoteWorkspaceProps {
   onRetry?: () => void
   onPair?: () => void
   onOpenHost?: (hostId: string) => void
-  onRevokeHost?: (hostId: string) => void
+  onRevokeHost?: (host: RemoteHostSummary) => void
   onDismissPairing?: () => void
   onCancelPairing?: () => void
   onContinuePairing?: (code: string) => void
   onConfirmPairing?: (selection: { displayName: string; capabilityIds: string[]; resourceIds: string[] }) => void
   onRestartPairing?: () => void
+  pairingUnavailableReason?: string
 }
 
 export function RemoteWorkspace({
@@ -608,12 +610,13 @@ export function RemoteWorkspace({
   onContinuePairing,
   onConfirmPairing,
   onRestartPairing,
+  pairingUnavailableReason,
 }: RemoteWorkspaceProps) {
   const [revokeHost, setRevokeHost] = useState<RemoteHostSummary | null>(null)
   const [revokeReturnFocus, setRevokeReturnFocus] = useState<HTMLElement | null>(null)
   const [pairingReturnFocus, setPairingReturnFocus] = useState<HTMLElement | null>(null)
   const pairingMode = mode === 'pairing-code' || mode === 'pairing-review' || mode === 'pairing-expired' ? mode : null
-  const pairUnavailable = mode === 'unsupported' || mode === 'loading'
+  const pairUnavailable = mode === 'unsupported' || mode === 'loading' || Boolean(pairingUnavailableReason)
   const pairReasonId = useId()
   const beginPairing = (event: MouseEvent<HTMLButtonElement>) => {
     setPairingReturnFocus(event.currentTarget)
@@ -630,7 +633,9 @@ export function RemoteWorkspace({
           <Link2 aria-hidden />Pair a Mac
         </Button>
       </div>
-      <p id={pairReasonId} className="sr-only">Pairing is unavailable until the server capability check completes.</p>
+      <p id={pairReasonId} className={pairingUnavailableReason ? 'text-xs text-muted-foreground' : 'sr-only'}>
+        {pairingUnavailableReason ?? 'Pairing is unavailable until the server capability check completes.'}
+      </p>
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</p>
 
       {mode === 'unsupported' ? (
@@ -653,7 +658,7 @@ export function RemoteWorkspace({
           <Laptop className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden />
           <h2 className="mt-3 font-semibold">No Macs are paired</h2>
           <p className="mx-auto mt-1 max-w-lg text-sm text-muted-foreground">Pair a Mac to supervise eligible Jobs. Server Jobs continue normally.</p>
-          <Button className="mt-4 min-h-11" onClick={beginPairing}><Link2 aria-hidden />Pair a Mac</Button>
+          <Button className="mt-4 min-h-11" onClick={beginPairing} disabled={pairUnavailable} aria-describedby={pairUnavailable ? pairReasonId : undefined}><Link2 aria-hidden />Pair a Mac</Button>
         </div>
       ) : null}
 
@@ -687,7 +692,7 @@ export function RemoteWorkspace({
       <RevokeHostDialog
         host={revokeHost}
         onClose={() => setRevokeHost(null)}
-        onConfirm={(hostId) => onRevokeHost?.(hostId)}
+        onConfirm={(host) => onRevokeHost?.(host)}
         onReturnFocus={() => revokeReturnFocus?.focus()}
       />
     </section>
@@ -704,8 +709,21 @@ function DetailSection({ title, icon: Icon, children }: { title: string; icon: t
   )
 }
 
-function ArtifactList({ artifacts }: { artifacts: RemoteArtifact[] }) {
+function ArtifactList({ artifacts, onLoadArtifact }: { artifacts: RemoteArtifact[]; onLoadArtifact?: (artifactId: string) => Promise<RemoteArtifact> }) {
   const [preview, setPreview] = useState<RemoteArtifact | null>(null)
+  const [loadingArtifact, setLoadingArtifact] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const openPreview = async (artifact: RemoteArtifact) => {
+    setLoadError(null)
+    if (artifact.textContent !== undefined || !onLoadArtifact) {
+      setPreview(artifact)
+      return
+    }
+    setLoadingArtifact(artifact.artifactId)
+    try { setPreview(await onLoadArtifact(artifact.artifactId)) }
+    catch { setLoadError('Artifact content could not be loaded. Its integrity metadata remains available.') }
+    finally { setLoadingArtifact(null) }
+  }
   return (
     <>
       {artifacts.length === 0 ? <p className="text-sm text-muted-foreground">No artifacts were retained for this run.</p> : (
@@ -728,8 +746,8 @@ function ArtifactList({ artifacts }: { artifacts: RemoteArtifact[] }) {
                     {expired ? <p id={reasonId} className="mt-2 text-xs text-muted-foreground">This artifact expired {formatTime(artifact.expiresAt)}. Its metadata remains available.</p> : null}
                     {artifact.truncated ? <p className="mt-2 text-xs text-health-expiring">Tessera retained a bounded preview. Content beyond the server limit is unavailable.</p> : null}
                   </div>
-                  <Button className="min-h-11" variant="outline" disabled={expired} aria-describedby={expired ? reasonId : undefined} onClick={() => setPreview(artifact)}>
-                    Preview
+                  <Button className="min-h-11" variant="outline" disabled={expired || loadingArtifact === artifact.artifactId} aria-describedby={expired ? reasonId : undefined} onClick={() => void openPreview(artifact)}>
+                    {loadingArtifact === artifact.artifactId ? 'Loading…' : 'Preview'}
                   </Button>
                 </div>
               </li>
@@ -737,6 +755,7 @@ function ArtifactList({ artifacts }: { artifacts: RemoteArtifact[] }) {
           })}
         </ul>
       )}
+      {loadError ? <Alert variant="destructive"><AlertDescription>{loadError}</AlertDescription></Alert> : null}
       <Dialog open={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreview(null) }}>
         <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto">
           <DialogHeader>
@@ -764,7 +783,9 @@ export interface RemoteHostDetailProps {
   announcement?: string
   onPause?: () => void
   onCancel?: () => void
-  onRevoke?: (hostId: string) => void
+  onRevoke?: (host: RemoteHostSummary) => void
+  onLoadArtifact?: (artifactId: string) => Promise<RemoteArtifact>
+  activityUnavailable?: boolean
 }
 
 export function RemoteHostDetail({
@@ -782,8 +803,10 @@ export function RemoteHostDetail({
   onPause,
   onCancel,
   onRevoke,
+  onLoadArtifact,
+  activityUnavailable = false,
 }: RemoteHostDetailProps) {
-  const [revokeOpen, setRevokeOpen] = useState(false)
+  const [revokeHost, setRevokeHost] = useState<RemoteHostSummary | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
   const revokeTriggerRef = useRef<HTMLButtonElement>(null)
   const cancelTriggerRef = useRef<HTMLButtonElement>(null)
@@ -852,7 +875,7 @@ export function RemoteHostDetail({
         )}
       </DetailSection>
 
-      <DetailSection title="Artifacts" icon={FileText}><ArtifactList artifacts={artifacts} /></DetailSection>
+      <DetailSection title="Artifacts" icon={FileText}><ArtifactList artifacts={artifacts} onLoadArtifact={onLoadArtifact} /></DetailSection>
 
       <DetailSection title="Granted access" icon={KeyRound}>
         <div className="grid gap-5 md:grid-cols-2">
@@ -862,7 +885,7 @@ export function RemoteHostDetail({
       </DetailSection>
 
       <DetailSection title="Activity" icon={Activity}>
-        {activity.length === 0 ? <p className="text-sm text-muted-foreground">No Host activity has been recorded.</p> : (
+        {activityUnavailable ? <p className="text-sm text-muted-foreground">Host activity is not shown in this preview client.</p> : activity.length === 0 ? <p className="text-sm text-muted-foreground">No Host activity has been recorded.</p> : (
           <ol className="divide-y divide-border" aria-label="Host activity">
             {activity.map((item) => <li key={item.id} className="grid grid-cols-[1rem_minmax(0,1fr)] gap-3 py-3"><Circle className="mt-1 h-2.5 w-2.5 fill-current text-muted-foreground" aria-hidden /><div><p className="text-sm font-medium">{item.summary}</p><time className="text-xs text-muted-foreground" dateTime={item.occurredAt}>{formatTime(item.occurredAt)}</time></div></li>)}
           </ol>
@@ -870,11 +893,11 @@ export function RemoteHostDetail({
       </DetailSection>
 
       <div className="flex justify-end border-t border-border pt-5">
-        <Button ref={revokeTriggerRef} className="min-h-11" variant="destructive" disabled={state === 'revoked'} onClick={() => setRevokeOpen(true)}>
+        <Button ref={revokeTriggerRef} className="min-h-11" variant="destructive" disabled={state === 'revoked'} onClick={() => setRevokeHost(host)}>
           <Ban aria-hidden />{state === 'revoked' ? 'Host revoked' : 'Revoke Host…'}
         </Button>
       </div>
-      <RevokeHostDialog host={revokeOpen ? host : null} onClose={() => setRevokeOpen(false)} onConfirm={onRevoke} onReturnFocus={() => revokeTriggerRef.current?.focus()} />
+      <RevokeHostDialog host={revokeHost} onClose={() => setRevokeHost(null)} onConfirm={onRevoke} onReturnFocus={() => revokeTriggerRef.current?.focus()} />
       <CancelJobDialog open={cancelOpen} job={currentJob} onClose={() => setCancelOpen(false)} onConfirm={onCancel} onReturnFocus={() => cancelTriggerRef.current?.focus()} />
     </article>
   )

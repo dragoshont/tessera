@@ -2,6 +2,7 @@ import { authHeader } from '../app/auth'
 import { apiUrl } from '../app/runtime'
 import {
   createHttpClient,
+  createRemoteApi,
   TesseraProblem,
   type Account,
   type Action,
@@ -67,6 +68,7 @@ const sharedHttp = createHttpClient({
 })
 const request = sharedHttp.request
 const mutate = sharedHttp.mutate
+export const remoteApi = createRemoteApi(sharedHttp)
 
 export const r2Api = {
   setupStatus: () => request<R2SetupStatus>('/setup/status'),

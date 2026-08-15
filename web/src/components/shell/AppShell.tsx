@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Activity, Blocks, Bot, Brain, CalendarClock, LogOut, Menu, Radar, Settings2, Users, Wallet } from 'lucide-react'
+import { Activity, Blocks, Bot, Brain, CalendarClock, Laptop, LogOut, Menu, Radar, Settings2, Users, Wallet } from 'lucide-react'
 import type { Person } from '../../data/types'
 import { cn } from '../../lib/utils'
 import { useSession } from '../../app/session'
@@ -60,6 +60,10 @@ export function SidebarNav({
         <NavLink to="/memory" className={navItemClass} onClick={onNavigate}>
           <Brain className="h-4 w-4" aria-hidden />
           Memory
+        </NavLink>
+        <NavLink to="/remote" className={navItemClass} onClick={onNavigate}>
+          <Laptop className="h-4 w-4" aria-hidden />
+          Remote
         </NavLink>
         <NavLink to="/settings" className={navItemClass} onClick={onNavigate}>
           <Settings2 className="h-4 w-4" aria-hidden />

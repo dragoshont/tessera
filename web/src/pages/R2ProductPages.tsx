@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   R2Problem,
   r2Api,
@@ -493,6 +494,9 @@ export function AccountsPage() {
 
 export function JobsPage() {
   const client = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedJobId = searchParams.get("jobId");
+  const requestedRunId = searchParams.get("runId");
   const query = useQuery({
     queryKey: ["r2", "jobs"],
     queryFn: r2Api.jobs,
@@ -522,11 +526,13 @@ export function JobsPage() {
   const [at, setAt] = useState("");
   const [localTime, setLocalTime] = useState("08:00");
   const [accountIds, setAccountIds] = useState<string[]>([]);
-  const [selected, setSelected] = useState<R2Job | null>(null);
+  const [selectedLocal, setSelected] = useState<R2Job | null>(null);
   const [cancelJob, setCancelJob] = useState<R2Job | null>(null);
-  const [selectedRun, setSelectedRun] = useState<string | null>(null);
+  const [selectedRunLocal, setSelectedRun] = useState<string | null>(null);
   const [developmentConversationId, setDevelopmentConversationId] = useState("");
   const [developmentWorkspaceId, setDevelopmentWorkspaceId] = useState("");
+  const selected = selectedLocal ?? (requestedJobId ? query.data?.items.find((item) => item.id === requestedJobId) ?? null : null);
+  const selectedRun = selectedRunLocal ?? requestedRunId;
   const conversations = useQuery({
     queryKey: ["r2", "conversations", "development"],
     queryFn: r2Api.conversations,
@@ -862,6 +868,7 @@ export function JobsPage() {
           if (!open) {
             setSelected(null);
             setSelectedRun(null);
+            if (requestedJobId || requestedRunId) setSearchParams({}, { replace: true });
           }
         }}
       >

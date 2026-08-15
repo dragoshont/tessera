@@ -19,6 +19,7 @@ export const pairingCandidateData: RemotePairingCandidate = {
 export const remoteHostsData: RemoteHostSummary[] = [
   {
     hostId: 'host-macbook-pro',
+    version: 4,
     href: '/remote/hosts/host-macbook-pro',
     displayName: 'Dragos MacBook Pro',
     platform: 'macOS 15.6',
@@ -41,6 +42,7 @@ export const remoteHostsData: RemoteHostSummary[] = [
   },
   {
     hostId: 'host-mac-mini',
+    version: 2,
     href: '/remote/hosts/host-mac-mini',
     displayName: 'Home Mac mini',
     platform: 'macOS 15.6',
@@ -62,6 +64,7 @@ export const remoteHostsData: RemoteHostSummary[] = [
   },
   {
     hostId: 'host-old-mac',
+    version: 7,
     href: '/remote/hosts/host-old-mac',
     displayName: 'Office Mac',
     platform: 'macOS 14.7',

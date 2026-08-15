@@ -26,6 +26,7 @@ import { PendingWritesPage } from './pages/PendingWritesPage'
 import { SignInPage } from './pages/SignInPage'
 import { UsersPage } from './pages/UsersPage'
 import { ChatPage } from './pages/ChatPage'
+import { RemoteHostPage, RemoteHostsPage } from './pages/RemoteHostsPage'
 import { ModelDefaultsPanel } from './components/product/ModelDefaultsPanel'
 import { JobAccessPanel } from './components/product/JobAccessPanel'
 import { AccountsPage, ActivityPage, JobsPage, MemoryPage, PluginsPage, SettingsPage } from './pages/R2ProductPages'
@@ -181,6 +182,8 @@ function AppRoutes() {
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/accounts/:connectionId" element={<LegacyAccountsPage />} />
           <Route path="/activity" element={<ActivityPage />} />
+          <Route path="/remote" element={<RemoteHostsPage />} />
+          <Route path="/remote/hosts/:hostId" element={<RemoteHostPage />} />
           <Route path="/connect" element={<Navigate to="/accounts" replace />} />
           <Route path="/continuity" element={<ContinuityRoute />} />
           <Route path="/pending-writes" element={<Navigate to="/activity" replace />} />

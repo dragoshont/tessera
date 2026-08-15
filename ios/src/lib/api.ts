@@ -1,5 +1,6 @@
 import {
   createHttpClient,
+  createRemoteApi,
   type Account,
   type Action,
   type Activity,
@@ -22,6 +23,10 @@ import {
   type Settings,
   type AuthLease,
   type RouteManager,
+  type RemoteHostArtifactDetailDto,
+  type RemoteHostDetailDto,
+  type RemoteHostRunProjectionDto,
+  type RemoteHostSummaryDto,
 } from '@tessera/client'
 
 type HttpClient = ReturnType<typeof createHttpClient>
@@ -35,7 +40,11 @@ export type IntegrationSearch = { items: IntegrationCatalogItem[]; sources: Inte
 export type IntegrationInstallReceipt = { pluginId: string; version: string; installState: 'INSTALLED' }
 
 export class TesseraApi {
-  constructor(private readonly http: HttpClient, private readonly routes: RouteManager, private readonly auth: () => Promise<AuthLease>) {}
+  private readonly remote
+
+  constructor(private readonly http: HttpClient, private readonly routes: RouteManager, private readonly auth: () => Promise<AuthLease>) {
+    this.remote = createRemoteApi(http)
+  }
 
   setupStatus = () => this.http.request<SetupStatus>('/setup/status')
   bootstrapSetup = () => this.http.mutate<SetupStatus>('/setup/bootstrap', 'POST', {}, 'setup-bootstrap')
@@ -72,10 +81,15 @@ export class TesseraApi {
   memoryWhy = (id: string) => this.http.request<MemoryWhy>(`/memory/${encodeURIComponent(id)}/why`)
   stopUsingMemory = (item: Memory) => this.http.mutate<Memory>(`/memory/${encodeURIComponent(item.assertionId)}/stop-using`, 'POST', { expectedVersion: item.version }, 'memory-stop')
   activity = () => this.http.request<Page<Activity>>('/activity')
-  actions = () => this.http.request<Page<Action>>('/actions')
+  actions = (query = '') => this.http.request<Page<Action>>(`/actions${query}`)
   action = (id: string) => this.http.request<Action>(`/actions/${encodeURIComponent(id)}`)
   approveAction = (item: Action) => this.http.mutate<Action>(`/actions/${encodeURIComponent(item.id)}/approve`, 'POST', { expectedVersion: item.version }, 'approval')
   cancelAction = (item: Action) => this.http.mutate<Action>(`/actions/${encodeURIComponent(item.id)}/cancel`, 'POST', { expectedVersion: item.version })
+  remoteHosts = (): Promise<Page<RemoteHostSummaryDto>> => this.remote.hosts()
+  remoteHost = (hostId: string): Promise<RemoteHostDetailDto> => this.remote.host(hostId)
+  revokeRemoteHost = (host: RemoteHostSummaryDto): Promise<RemoteHostDetailDto> => this.remote.revokeHost(host)
+  remoteRunProjection = (runId: string): Promise<RemoteHostRunProjectionDto> => this.remote.runProjection(runId)
+  remoteArtifact = (artifactId: string): Promise<RemoteHostArtifactDetailDto> => this.remote.artifact(artifactId)
 
   async watchExecution(conversationId: string, executionId: string, signal: AbortSignal, onEvent: (event: ExecutionEvent) => void) {
     const seen = new Set<string>()

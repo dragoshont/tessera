@@ -30,6 +30,8 @@ function Navigation() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="action/[id]" options={{ title: 'Review action', presentation: 'modal' }} />
           <Stack.Screen name="job-run/[id]" options={{ title: 'Development run', presentation: 'modal' }} />
+          <Stack.Screen name="remote" options={{ title: 'Remote Host preview' }} />
+          <Stack.Screen name="remote-host/[id]" options={{ title: 'Remote Host' }} />
           <Stack.Screen name="plugins" options={{ title: 'Plugins' }} />
           <Stack.Screen name="activity" options={{ title: 'Activity' }} />
           <Stack.Screen name="settings" options={{ title: 'Settings' }} />

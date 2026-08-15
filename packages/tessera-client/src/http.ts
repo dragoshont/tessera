@@ -56,6 +56,8 @@ export function createHttpClient(options: HttpClientOptions) {
   return { request, mutate }
 }
 
+export type TesseraHttpClient = ReturnType<typeof createHttpClient>
+
 export async function readBoundedJsonResponse<T>(response: Response, maximumBytes: number, timeoutMs = 10_000): Promise<T> {
   if (!response.headers || typeof response.headers.get !== 'function') return response.json() as Promise<T>
   const deadline = Date.now() + timeoutMs

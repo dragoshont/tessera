@@ -137,7 +137,7 @@ test('R2 lands on truthful Chat and exposes primary product navigation', async (
   await page.screenshot({ path: `test-results/screens/${testInfo.project.name}-r2-chat-first-run.png`, fullPage: true })
   const menu = page.getByRole('button', { name: 'Open navigation' })
   if (await menu.isVisible()) await menu.click()
-  for (const name of ['Chat', 'Jobs', 'Accounts', 'Plugins', 'Memory', 'Activity & access', 'Settings']) {
+  for (const name of ['Chat', 'Jobs', 'Accounts', 'Plugins', 'Memory', 'Remote', 'Activity & access', 'Settings']) {
     await expect(page.getByRole('link', { name })).toBeVisible()
   }
 })

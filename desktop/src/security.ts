@@ -13,6 +13,7 @@ export const PRODUCT_ROUTES = new Set([
   '/memory',
   '/activity',
   '/settings',
+  '/remote',
   '/sign-in',
 ])
 

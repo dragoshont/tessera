@@ -34,6 +34,7 @@ describe('desktop trust boundary', () => {
   it('rejects privileged or malformed routes and deep links', () => {
     expect(() => validateRoute('/actions')).toThrow()
     expect(parseDeepLink('tessera://open/jobs')).toEqual({ kind: 'navigate', route: '/jobs' })
+    expect(parseDeepLink('tessera://open/remote')).toEqual({ kind: 'navigate', route: '/remote' })
     expect(parseDeepLink('tessera://auth/callback?code=x&state=y').kind).toBe('auth')
     for (const link of [
       'tessera://open/chat?capability=send',
