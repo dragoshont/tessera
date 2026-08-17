@@ -17,7 +17,8 @@ export default {
       config: { usesNonExemptEncryption: false },
       infoPlist: {
         NSFaceIDUsageDescription: 'Use Face ID to unlock your Tessera session.',
-        NSMicrophoneUsageDescription: 'Tessera uses the microphone only while you explicitly run a realtime voice conversation.',
+        NSMicrophoneUsageDescription: 'Tessera uses the microphone only while you explicitly dictate a draft or run a realtime voice conversation.',
+        NSSpeechRecognitionUsageDescription: 'Tessera uses Apple Speech Recognition only while you explicitly dictate text into a message draft.',
       },
     },
     android: {
@@ -35,6 +36,10 @@ export default {
       ['expo-secure-store', { faceIDPermission: 'Use Face ID to unlock your Tessera session.' }],
       ['expo-local-authentication', { faceIDPermission: 'Use Face ID to unlock Tessera.' }],
       ['expo-notifications', { enableBackgroundRemoteNotifications: false }],
+      ['expo-speech-recognition', {
+        microphonePermission: 'Tessera uses the microphone only while you explicitly dictate a draft or run a realtime voice conversation.',
+        speechRecognitionPermission: 'Tessera uses Apple Speech Recognition only while you explicitly dictate text into a message draft.',
+      }],
     ],
     experiments: { typedRoutes: true, reactCompiler: true },
     extra: { tessera: { serverId, remoteOrigin, localOrigin, clientVersion: '0.1.0' } },

@@ -33,7 +33,7 @@ describe('Remote API', () => {
         calls.push({ path, init })
         return new Response(JSON.stringify(path.includes('/confirm')
           ? { host: { hostId: 'host-1' }, capabilities: [], capabilityGrants: [], resources: [], resourceGrants: [] }
-          : { artifact: { artifactId: 'artifact-1' }, textContent: 'plain' }), { status: 200 })
+          : { artifact: { artifactId: 'artifact-1' }, textContent: 'plain' }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       },
     })
     const remote = createRemoteApi(http)
@@ -55,7 +55,7 @@ describe('Remote API', () => {
   it('accepts the server ISSUED initial pairing state', async () => {
     const http = createHttpClient({
       createIdempotencyKey: () => 'host-pairing-fixed',
-      send: async () => new Response(JSON.stringify({ pairingId: 'pairing-1', state: 'ISSUED', requestedHost: null, expiresAt: '2026-08-14T13:00:00Z', version: 1 }), { status: 201 }),
+      send: async () => new Response(JSON.stringify({ pairingId: 'pairing-1', state: 'ISSUED', requestedHost: null, expiresAt: '2026-08-14T13:00:00Z', version: 1 }), { status: 201, headers: { 'Content-Type': 'application/json' } }),
     })
     const pairing = await createRemoteApi(http).createPairing('a'.repeat(64))
     expect(pairing.state).toBe('ISSUED')

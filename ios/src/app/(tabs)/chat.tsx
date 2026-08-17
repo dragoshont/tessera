@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { FlatList, KeyboardAvoidingView, Linking, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { router } from 'expo-router'
 import { GenerationFence, type Conversation, type Message, type ModelProfile, type RealtimeVoiceStatus } from '@tessera/client'
 
 import { Button, Empty, ErrorState, Icon, Loading, Status, sharedStyles } from '@/components/ui'
 import { Radius, Space, usePalette } from '@/constants/theme'
 import { useSession } from '@/providers/session'
+import { useNativeDictation, type NativeDictationState } from '@/hooks/use-native-dictation'
+import { isRealtimeVoiceCapturing } from '@/hooks/dictation-state'
+import { MicrophoneLease } from '@/hooks/microphone-lease'
 import { useNativeRealtimeVoice, type NativeVoiceView } from '@/hooks/use-native-realtime-voice'
 
 export default function ChatScreen() {
@@ -29,13 +32,17 @@ export default function ChatScreen() {
   const messageFence = useRef(new GenerationFence())
   const streamFence = useRef(new GenerationFence())
   const streamAbort = useRef<AbortController | null>(null)
+  const microphoneLease = useRef(new MicrophoneLease()).current
   const realtimeVoice = useNativeRealtimeVoice({
     api,
     conversationId: conversation?.id,
     status: voiceStatus,
+    microphoneLease,
     onTurnSaved: () => conversation && void loadMessages(conversation.id),
     onApprovalRequired: (actionId) => router.push(`/action/${actionId}`),
   })
+  const voiceCapturing = isRealtimeVoiceCapturing(realtimeVoice.voice.state)
+  const dictation = useNativeDictation({ draft: input, onDraftChange: setInput, microphoneLease, disabled: sending || voiceCapturing })
 
   const loadMessages = async (id: string) => {
     const result = await messageFence.current.runLatest(() => api.messages(id))
@@ -74,7 +81,7 @@ export default function ChatScreen() {
 
   const send = async () => {
     const text = input.trim()
-    if (!text || !profile || sending) return
+    if (!text || !profile || sending || dictation.active) return
     setSending(true)
     setError(null)
     streamAbort.current?.abort()
@@ -176,13 +183,18 @@ export default function ChatScreen() {
             </ScrollView>
             <Button label="New" icon="square.and.pencil" busy={creating} disabled={sending} onPress={() => void createConversation()} />
           </View>
-          {conversation ? <NativeVoicePanel voice={realtimeVoice.voice} onStart={() => void realtimeVoice.start()} onRetry={() => void realtimeVoice.retry()} onToggleMute={realtimeVoice.toggleMute} onInterrupt={realtimeVoice.interrupt} onEnd={() => void realtimeVoice.end()} /> : null}
+          {conversation ? <NativeVoicePanel voice={realtimeVoice.voice} startDisabled={dictation.active} onStart={() => void realtimeVoice.start()} onRetry={() => void realtimeVoice.retry()} onOpenSettings={() => void Linking.openSettings()} onToggleMute={realtimeVoice.toggleMute} onInterrupt={realtimeVoice.interrupt} onEnd={() => void realtimeVoice.end()} /> : null}
           <FlatList ref={list} data={messages} keyExtractor={(item) => item.id} renderItem={renderMessage} contentContainerStyle={[styles.list, !messages.length && !streamingText && styles.emptyList]} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />} ListEmptyComponent={streamingText ? null : <Empty icon="message" title="What should Tessera help with?" detail="Ask a question, inspect connected information, or explicitly ask Tessera to remember something." />} ListFooterComponent={streamingText ? <View style={[styles.message, styles.theirs, { backgroundColor: palette.surface, borderColor: palette.line }]}><Text style={[styles.speaker, { color: palette.muted }]}>Tessera · streaming</Text><Text style={[sharedStyles.body, { color: palette.text }]}>{streamingText}</Text></View> : null} />
           {streamStatus ? <View style={[styles.stream, { backgroundColor: palette.accentSoft }]}><Status value={streamStatus} /></View> : null}
           {error ? <Text accessibilityRole="alert" style={[styles.error, { color: palette.danger }]}>{error}</Text> : null}
           <View style={[styles.composer, { backgroundColor: palette.surface, borderColor: palette.line }]}>
-            <TextInput value={input} onChangeText={setInput} placeholder="Message Tessera" placeholderTextColor={palette.muted} multiline maxLength={12_000} style={[styles.input, { color: palette.text }]} editable={!sending} />
-            <Button label="Send" icon="arrow.up" tone="primary" busy={sending} disabled={!input.trim()} onPress={() => void send()} />
+            <TextInput value={input} onChangeText={setInput} placeholder="Message Tessera" placeholderTextColor={palette.muted} multiline maxLength={12_000} style={[styles.input, { color: palette.text }]} editable={!sending && !dictation.active} accessibilityLabel="Message draft" accessibilityHint={dictation.active ? 'Dictation is editing this draft. Use the Finish dictation button to resume typing.' : 'Type or dictate a message. Sending always requires the Send button.'} />
+            {dictation.state !== 'IDLE' ? <Text accessibilityLiveRegion="polite" style={[sharedStyles.detail, { color: dictation.state === 'PERMISSION_DENIED' || dictation.state === 'RESTRICTED' || dictation.state === 'ERROR' ? palette.danger : palette.muted }]}>{dictationDetail(dictation.state)}</Text> : null}
+            <View style={styles.composerActions}>
+              <Button label={dictation.state === 'LISTENING' ? 'Done dictating' : dictation.state === 'REQUESTING_PERMISSION' || dictation.state === 'PROCESSING' ? 'Starting dictation' : 'Dictate'} icon={dictation.state === 'LISTENING' ? 'stop.circle' : 'waveform'} busy={dictation.state === 'REQUESTING_PERMISSION' || dictation.state === 'PROCESSING'} disabled={sending || voiceCapturing} accessibilityLabel={dictation.state === 'LISTENING' ? 'Finish dictation' : 'Start dictation'} accessibilityHint={dictation.state === 'LISTENING' ? 'Stops listening and keeps the recognized text in your editable draft.' : 'Uses the microphone to add recognized speech to your editable draft without sending it.'} onPress={dictation.state === 'LISTENING' ? dictation.stop : () => void dictation.start()} />
+              {dictation.state === 'PERMISSION_DENIED' || dictation.state === 'RESTRICTED' ? <Button label="Open Settings" icon="gear" accessibilityHint="Opens iPhone Settings so you can review microphone and speech recognition access." onPress={() => void dictation.openSettings()} /> : null}
+              <Button label="Send" icon="arrow.up" tone="primary" busy={sending} disabled={!input.trim() || dictation.active} onPress={() => void send()} />
+            </View>
           </View>
         </>
       )}
@@ -190,8 +202,20 @@ export default function ChatScreen() {
   )
 }
 
-function NativeVoicePanel({ voice, onStart, onRetry, onToggleMute, onInterrupt, onEnd }: {
-  voice: NativeVoiceView; onStart: () => void; onRetry: () => void; onToggleMute: () => void; onInterrupt: () => void; onEnd: () => void
+function dictationDetail(state: NativeDictationState) {
+  if (state === 'REQUESTING_PERMISSION') return 'Checking microphone and speech recognition permission…'
+  if (state === 'LISTENING') return 'Listening. Tap Done dictating to finish. Your draft will not send automatically.'
+  if (state === 'PROCESSING') return 'Finishing dictation…'
+  if (state === 'PERMISSION_DENIED') return 'Microphone or speech recognition access is off. Enable it in Settings, then retry.'
+  if (state === 'RESTRICTED') return 'Speech recognition is restricted on this iPhone.'
+  if (state === 'NO_SPEECH') return 'No speech was detected. Your draft is unchanged.'
+  if (state === 'INTERRUPTED') return 'Dictation stopped. Your draft was preserved.'
+  if (state === 'UNAVAILABLE') return 'Dictation is unavailable on this iPhone. Typed Chat still works.'
+  return 'Dictation ended safely. Your draft was preserved.'
+}
+
+function NativeVoicePanel({ voice, startDisabled, onStart, onRetry, onOpenSettings, onToggleMute, onInterrupt, onEnd }: {
+  voice: NativeVoiceView; startDisabled: boolean; onStart: () => void; onRetry: () => void; onOpenSettings: () => void; onToggleMute: () => void; onInterrupt: () => void; onEnd: () => void
 }) {
   const palette = usePalette()
   const active = ['NEGOTIATING', 'LISTENING', 'USER_SPEAKING', 'ASSISTANT_SPEAKING', 'TOOL_RUNNING', 'APPROVAL_REQUIRED', 'ENDING'].includes(voice.state)
@@ -211,10 +235,11 @@ function NativeVoicePanel({ voice, onStart, onRetry, onToggleMute, onInterrupt, 
     {voice.userCaption ? <Text style={[sharedStyles.body, { color: palette.text }]}><Text style={{ fontWeight: '700' }}>You: </Text>{voice.userCaption}</Text> : null}
     {voice.assistantCaption ? <Text style={[sharedStyles.body, { color: palette.text }]}><Text style={{ fontWeight: '700' }}>Tessera: </Text>{voice.assistantCaption}</Text> : null}
     <View style={sharedStyles.actions}>
-      {voice.state === 'IDLE' ? <Button label="Start voice" icon="mic.fill" tone="primary" onPress={onStart} /> : null}
+      {voice.state === 'IDLE' ? <Button label="Start voice" icon="mic.fill" tone="primary" disabled={startDisabled} onPress={onStart} /> : null}
       {voice.state === 'UNAVAILABLE' ? <Button label="Voice unavailable" icon="mic.slash" disabled /> : null}
       {voice.state === 'REQUESTING_PERMISSION' || voice.state === 'NEGOTIATING' || voice.state === 'ENDING' ? <Button label={voice.state === 'ENDING' ? 'Ending voice' : 'Connecting voice'} busy disabled /> : null}
-      {retryable ? <Button label="Retry voice" icon="arrow.clockwise" onPress={onRetry} /> : null}
+      {retryable ? <Button label="Retry voice" icon="arrow.clockwise" disabled={startDisabled} onPress={onRetry} /> : null}
+      {voice.state === 'PERMISSION_DENIED' ? <Button label="Open Settings" icon="gear" accessibilityHint="Opens iPhone Settings so you can allow microphone access." onPress={onOpenSettings} /> : null}
       {active && voice.state !== 'NEGOTIATING' && voice.state !== 'ENDING' ? <Button label={voice.muted ? 'Unmute' : 'Mute'} icon={voice.muted ? 'mic.fill' : 'mic.slash'} accessibilityState={{ selected: Boolean(voice.muted) }} onPress={onToggleMute} /> : null}
       {voice.state === 'ASSISTANT_SPEAKING' ? <Button label="Interrupt" icon="stop.circle" onPress={onInterrupt} /> : null}
       {active && voice.state !== 'ENDING' ? <Button label="End voice" icon="phone.down.fill" tone="danger" onPress={onEnd} /> : null}
@@ -238,5 +263,6 @@ const styles = StyleSheet.create({
   stream: { paddingHorizontal: Space.lg, paddingVertical: Space.sm },
   error: { paddingHorizontal: Space.lg, paddingVertical: Space.sm, fontSize: 13 },
   composer: { borderTopWidth: StyleSheet.hairlineWidth, padding: Space.md, paddingBottom: Space.lg, gap: Space.sm },
+  composerActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: Space.sm, flexWrap: 'wrap' },
   input: { minHeight: 44, maxHeight: 130, fontSize: 16, lineHeight: 21, paddingHorizontal: Space.sm, paddingVertical: Space.sm },
 })

@@ -1,5 +1,6 @@
 {
   "name": "tessera-ios",
+  "type": "module",
   "main": "expo-router/entry",
   "version": "0.1.0",
   "dependencies": {
@@ -15,6 +16,7 @@
     "expo-notifications": "~57.0.10",
     "expo-router": "~57.0.12",
     "expo-secure-store": "~57.0.1",
+    "expo-speech-recognition": "56.0.1",
     "expo-splash-screen": "~57.0.6",
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.2",
@@ -35,6 +37,7 @@
     "start": "expo start --dev-client",
     "prebuild": "expo prebuild",
     "ios": "expo run:ios",
+    "test": "node --test 'src/**/*.test.mjs'",
     "typecheck": "tsc --noEmit"
   },
   "private": true

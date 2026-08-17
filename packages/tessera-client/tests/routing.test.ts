@@ -191,8 +191,43 @@ describe('injected HTTP transport', () => {
   })
 
   it('rejects an oversized API response', async () => {
-    const client = createHttpClient({ send: async () => new Response(JSON.stringify({ value: 'x'.repeat(2 * 1024 * 1024) }), { status: 200 }) })
+    const client = createHttpClient({ send: async () => new Response(JSON.stringify({ value: 'x'.repeat(2 * 1024 * 1024) }), { status: 200, headers: { 'Content-Type': 'application/json' } }) })
     await expect(client.request('/settings')).rejects.toThrow('response_too_large')
+  })
+
+  it('rejects a successful SPA fallback as a typed protocol error', async () => {
+    const client = createHttpClient({ send: async () => new Response('<!doctype html><title>Tessera</title>', { status: 200, headers: { 'Content-Type': 'text/html' } }) })
+    await expect(client.request('/hosts')).rejects.toMatchObject({ name: 'TesseraProtocolError', code: 'response_not_json' })
+  })
+
+  it('rejects a successful response with no declared media type', async () => {
+    const client = createHttpClient({ send: async () => new Response('{"items":[]}', { status: 200 }) })
+    await expect(client.request('/hosts')).rejects.toMatchObject({ name: 'TesseraProtocolError', code: 'response_not_json' })
+  })
+
+  it('rejects malformed JSON with a stable protocol code', async () => {
+    const client = createHttpClient({ send: async () => new Response('{"items":', { status: 200, headers: { 'Content-Type': 'application/json' } }) })
+    await expect(client.request('/hosts')).rejects.toMatchObject({ name: 'TesseraProtocolError', code: 'response_invalid_json' })
+  })
+
+  it('accepts structured suffix JSON media types', async () => {
+    const client = createHttpClient({ send: async () => new Response('{"items":[]}', { status: 200, headers: { 'Content-Type': 'application/vnd.tessera+json; charset=utf-8' } }) })
+    await expect(client.request('/hosts')).resolves.toEqual({ items: [] })
+  })
+
+  it('keeps oversized error details out of the public problem', async () => {
+    const client = createHttpClient({ send: async () => new Response(JSON.stringify({ detail: 'x'.repeat(64 * 1024) }), { status: 502, headers: { 'Content-Type': 'application/problem+json' } }) })
+    await expect(client.request('/hosts')).rejects.toMatchObject({ name: 'TesseraProblem', status: 502, code: 'http_502', problem: undefined })
+  })
+
+  it('normalizes a non-JSON error response without exposing its body', async () => {
+    const client = createHttpClient({ send: async () => new Response('<title>upstream detail</title>', { status: 500, headers: { 'Content-Type': 'text/html' } }) })
+    await expect(client.request('/hosts')).rejects.toMatchObject({ name: 'TesseraProblem', status: 500, code: 'http_500', problem: undefined })
+  })
+
+  it('normalizes malformed JSON from a minimal defensive response object', async () => {
+    const response = { headers: null, json: async () => { throw new SyntaxError('raw parser detail') } } as unknown as Response
+    await expect(readBoundedJsonResponse(response, 1024)).rejects.toMatchObject({ name: 'TesseraProtocolError', code: 'response_invalid_json', message: 'response_invalid_json' })
   })
 })
 
@@ -233,7 +268,7 @@ describe('session generation fence', () => {
 describe('bounded response reader', () => {
   it('times out a stalled response body', async () => {
     let canceled = false
-    const stalled = new Response(new ReadableStream({ start() {}, cancel() { canceled = true } }), { status: 200 })
+    const stalled = new Response(new ReadableStream({ start() {}, cancel() { canceled = true } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     await expect(readBoundedJsonResponse(stalled, 1024, 10)).rejects.toThrow('response_timeout')
     expect(canceled).toBe(true)
   })

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import { Alert, AppState, Linking, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import * as Notifications from 'expo-notifications'
 
 import { Button, Card, SectionTitle, Status, formatTime, sharedStyles } from '@/components/ui'
 import { Space, usePalette } from '@/constants/theme'
 import { useSession } from '@/providers/session'
+import { notificationPermissionState, type NotificationPermissionState } from '@/hooks/notification-state'
 
 function DiagnosticRow({ label, value }: { label: string; value: string }) {
   const palette = usePalette()
@@ -14,16 +15,36 @@ function DiagnosticRow({ label, value }: { label: string; value: string }) {
 export default function SettingsScreen() {
   const palette = usePalette()
   const session = useSession()
-  const [notificationStatus, setNotificationStatus] = useState('unknown')
-  const [busy, setBusy] = useState(false)
-  useEffect(() => { void Notifications.getPermissionsAsync().then((value) => setNotificationStatus(value.status)) }, [])
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionState>({ label: 'NOT_DETERMINED', usable: false, canAskAgain: true })
+  const [notificationError, setNotificationError] = useState<string | null>(null)
+  const [notificationBusy, setNotificationBusy] = useState(false)
+  const refreshNotifications = async () => {
+    const value = await Notifications.getPermissionsAsync()
+    setNotificationPermission(notificationPermissionState(value))
+  }
+  useEffect(() => {
+    void refreshNotifications().catch(() => setNotificationError('Notification permission could not be read.'))
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void refreshNotifications().catch(() => setNotificationError('Notification permission could not be read.'))
+    })
+    return () => subscription.remove()
+  }, [])
   const requestNotifications = async () => {
-    setBusy(true)
+    if (notificationPermission.label === 'DENIED' && !notificationPermission.canAskAgain) {
+      await Linking.openSettings()
+      return
+    }
+    setNotificationBusy(true)
+    setNotificationError(null)
     try {
-      const value = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowBadge: true, allowSound: false } })
-      setNotificationStatus(value.status)
-      if (value.granted) await Notifications.scheduleNotificationAsync({ content: { title: 'Tessera test notification', body: 'Local notifications work on this device.', data: { url: '/settings' } }, trigger: null })
-    } finally { setBusy(false) }
+      const value = notificationPermission.usable
+        ? await Notifications.getPermissionsAsync()
+        : await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowBadge: true, allowSound: false } })
+      const next = notificationPermissionState(value)
+      setNotificationPermission(next)
+      if (next.usable) await Notifications.scheduleNotificationAsync({ content: { title: 'Tessera test notification', body: 'Local notifications work on this device.', data: { url: '/settings' } }, trigger: null })
+    } catch { setNotificationError('The notification test could not be completed.') }
+    finally { setNotificationBusy(false) }
   }
   const confirmSignOut = () => Alert.alert('Sign out of Tessera?', 'This removes the session from Keychain. Server-side Jobs and canonical data are not affected.', [{ text: 'Stay signed in', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: () => void session.signOut() }])
   return (
@@ -37,7 +58,7 @@ export default function SettingsScreen() {
         <DiagnosticRow label="Server version" value={session.diagnostics.serverVersion ?? 'Unavailable'} />
         <DiagnosticRow label="Client version" value={session.diagnostics.clientVersion} />
         <DiagnosticRow label="Last successful connection" value={formatTime(session.diagnostics.lastSuccessfulConnection)} />
-        <Button label="Test connection" icon="arrow.triangle.2.circlepath" busy={busy} onPress={() => void session.reconnect()} />
+        <Button label="Test connection" icon="arrow.triangle.2.circlepath" onPress={() => void session.reconnect()} />
       </Card>
       <SectionTitle>Security</SectionTitle>
       <Card>
@@ -46,7 +67,7 @@ export default function SettingsScreen() {
         <DiagnosticRow label="Role" value={session.principal?.role ?? 'Unknown'} />
       </Card>
       <SectionTitle>Notifications</SectionTitle>
-      <Card><View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>Local notification test</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>Permission: {notificationStatus}</Text></View><Status value={notificationStatus} /></View><Button label="Send test notification" icon="bell.badge" busy={busy} onPress={() => void requestNotifications()} /></Card>
+      <Card><View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>Local notification test</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>Permission: {notificationPermission.label.replaceAll('_', ' ').toLowerCase()}</Text></View><Status value={notificationPermission.label} /></View>{notificationError ? <Text accessibilityRole="alert" style={[sharedStyles.detail, { color: palette.danger }]}>{notificationError}</Text> : null}<Button label={notificationPermission.label === 'DENIED' && !notificationPermission.canAskAgain ? 'Open notification settings' : notificationPermission.usable ? 'Send test notification' : 'Allow and send test'} icon={notificationPermission.label === 'DENIED' && !notificationPermission.canAskAgain ? 'gear' : 'bell.badge'} busy={notificationBusy} onPress={() => void requestNotifications()} /></Card>
       <SectionTitle>Session</SectionTitle>
       <Button label="Sign out" icon="rectangle.portrait.and.arrow.right" tone="danger" onPress={confirmSignOut} />
     </ScrollView>

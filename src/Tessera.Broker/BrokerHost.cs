@@ -5,6 +5,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Template;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Tessera.Core.Audit;
@@ -500,6 +502,7 @@ public static class BrokerHost
         foreach (var hostPlugin in pluginRegistry.ListPlugins().OfType<ITesseraHostPlugin>())
             hostPlugin.MapEndpoints(app);
         app.MapMcp("/mcp");
+        MapApiFallback(app);
 
         // Startup self-test (read-only) — proves the authorize+resolve spine against
         // the real store without any upstream call. Time-boxed + fail-soft so a slow
@@ -696,8 +699,8 @@ public static class BrokerHost
     /// at an existing directory (the <c>web/dist</c> output). Same origin as the API,
     /// so the SPA's fetches need no CORS and no second deployment. The SPA fallback
     /// (index.html for client-side routes) has the lowest priority, so it never
-    /// shadows <c>/portal</c>, <c>/mcp</c>, or the health endpoints. Unset = API only,
-    /// so existing API-only deployments are unaffected.
+    /// shadows <c>/portal</c>, <c>/mcp</c>, or the health endpoints. Unset means
+    /// API-only hosting; structured <c>/api/v1</c> fallbacks are registered separately.
     /// </summary>
     private static void ServePortalSpa(WebApplication app, TesseraConfig config)
     {
@@ -709,10 +712,57 @@ public static class BrokerHost
 
         var fileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.GetFullPath(webRoot));
         var staticOptions = new StaticFileOptions { FileProvider = fileProvider };
-        app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
-        app.UseStaticFiles(staticOptions);
+        app.UseWhen(
+            context => !context.Request.Path.StartsWithSegments("/api/v1"),
+            portal =>
+            {
+                portal.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
+                portal.UseStaticFiles(staticOptions);
+            });
         // Client-side routes (e.g. /accounts, /admin/users) fall back to the SPA shell.
         app.MapFallbackToFile("index.html", staticOptions);
+    }
+
+    private static void MapApiFallback(WebApplication app)
+    {
+        app.Map("/api/v1/{**path}", (HttpContext context) =>
+            ApiFallback(context, ((IEndpointRouteBuilder)app).DataSources));
+    }
+
+    private static IResult ApiFallback(HttpContext context, IEnumerable<EndpointDataSource> dataSources)
+    {
+        var allowedMethods = dataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => endpoint.RoutePattern.RawText is { } route
+                && route.StartsWith("/api/v1", StringComparison.Ordinal)
+                && !route.Contains("{**path}", StringComparison.Ordinal)
+                && new TemplateMatcher(
+                    TemplateParser.Parse(route.TrimStart('/')),
+                    new RouteValueDictionary()).TryMatch(context.Request.Path, new RouteValueDictionary()))
+            .SelectMany(endpoint => endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var methodMismatch = allowedMethods.Length > 0;
+        if (methodMismatch) context.Response.Headers.Allow = string.Join(", ", allowedMethods);
+        var status = methodMismatch ? StatusCodes.Status405MethodNotAllowed : StatusCodes.Status404NotFound;
+        var code = methodMismatch ? "method_not_allowed" : "api_route_not_found";
+        return Results.Json(
+            new
+            {
+                type = $"https://tessera.local/problems/{code.Replace('_', '-')}",
+                title = methodMismatch ? "Method not allowed" : "API route not found",
+                status,
+                detail = methodMismatch
+                    ? "The requested API route does not support this HTTP method."
+                    : "This Tessera server does not expose the requested API route.",
+                instance = context.Request.Path.Value,
+                code,
+                traceId = context.TraceIdentifier,
+            },
+            statusCode: status,
+            contentType: "application/problem+json");
     }
 
     private static void EmitStartupBanner(TesseraConfig config, BrokerStatus status)

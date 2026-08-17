@@ -3,7 +3,7 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'rea
 import { router } from 'expo-router'
 import type { Action } from '@tessera/client'
 
-import { Card, Empty, Icon, Loading, SectionTitle, Status, formatTime, sharedStyles } from '@/components/ui'
+import { Button, Card, Empty, Icon, Loading, SectionTitle, Status, formatTime, sharedStyles } from '@/components/ui'
 import { Radius, Space, usePalette } from '@/constants/theme'
 import { useSession } from '@/providers/session'
 
@@ -20,9 +20,13 @@ export default function MoreScreen() {
   const [actions, setActions] = useState<Action[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const load = async (refresh = false) => {
     refresh ? setRefreshing(true) : setLoading(true)
-    try { setActions((await api.actions()).items) } finally { setLoading(false); setRefreshing(false) }
+    setError(null)
+    try { setActions((await api.actions()).items) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Actions unavailable') }
+    finally { setLoading(false); setRefreshing(false) }
   }
   useEffect(() => { void load() }, [])
   const pending = actions.filter((item) => item.state === 'PROPOSED' || item.state === 'RECONCILIATION_REQUIRED')
@@ -31,7 +35,8 @@ export default function MoreScreen() {
   return (
     <FlatList style={{ backgroundColor: palette.background }} data={pending} keyExtractor={(item) => item.id} contentContainerStyle={sharedStyles.listContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />} ListHeaderComponent={<>
       <SectionTitle detail="Open review and recovery work">Actions</SectionTitle>
-      {!pending.length ? <Card><Empty icon="checkmark.shield" title="Nothing needs review" detail="Consequential operations appear here before Tessera can execute them." /></Card> : null}
+      {error ? <Card><Text accessibilityRole="alert" style={[sharedStyles.body, { color: palette.danger }]}>Actions could not be loaded. Product navigation remains available.</Text><Button label="Retry actions" icon="arrow.clockwise" onPress={() => void load()} /></Card> : null}
+      {!pending.length && !error ? <Card><Empty icon="checkmark.shield" title="Nothing needs review" detail="Consequential operations appear here before Tessera can execute them." /></Card> : null}
     </>} renderItem={({ item }) => (
       <Pressable accessibilityRole="button" onPress={() => router.push(`/action/${item.id}`)}>
         <Card><View style={sharedStyles.split}><Text style={[sharedStyles.title, { color: palette.text, flex: 1 }]}>{item.capabilityId}</Text><Status value={item.state} /></View><Text style={[sharedStyles.body, { color: palette.text }]} numberOfLines={2}>{item.target}</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>Expires {formatTime(item.expiresAt)}</Text></Card>

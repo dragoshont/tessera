@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View, type PressablePro
 import { SymbolView, type SymbolViewProps } from 'expo-symbols'
 
 import { Radius, Space, usePalette } from '@/constants/theme'
+import { statusTone } from '@/components/status-tone'
 
 export function Mark({ size = 36 }: { size?: number }) {
   const palette = usePalette()
@@ -35,7 +36,7 @@ export function Card({ children, style }: PropsWithChildren<{ style?: ViewStyle 
 
 export function SectionTitle({ children, detail }: PropsWithChildren<{ detail?: string }>) {
   const palette = usePalette()
-  return <View style={styles.sectionTitle}><Text style={[styles.sectionText, { color: palette.text }]}>{children}</Text>{detail ? <Text style={[styles.detail, { color: palette.muted }]}>{detail}</Text> : null}</View>
+  return <View style={styles.sectionTitle}><Text accessibilityRole="header" maxFontSizeMultiplier={2} style={[styles.sectionText, { color: palette.text }]}>{children}</Text>{detail ? <Text maxFontSizeMultiplier={2} style={[styles.detail, { color: palette.muted }]}>{detail}</Text> : null}</View>
 }
 
 type ButtonProps = PressableProps & { label: string; icon?: SymbolViewProps['name']; tone?: 'primary' | 'secondary' | 'danger'; busy?: boolean }
@@ -46,17 +47,16 @@ export function Button({ label, icon, tone = 'secondary', busy, disabled, style,
   return (
     <Pressable accessibilityRole="button" disabled={disabled || busy} style={({ pressed }) => [styles.button, { backgroundColor, opacity: disabled || busy ? 0.45 : pressed ? 0.72 : 1 }, style as ViewStyle]} {...props}>
       {busy ? <ActivityIndicator color={color} /> : icon ? <Icon name={icon} color={color} size={17} /> : null}
-      <Text maxFontSizeMultiplier={1.5} style={[styles.buttonLabel, { color }]}>{label}</Text>
+      <Text style={[styles.buttonLabel, { color }]}>{label}</Text>
     </Pressable>
   )
 }
 
 export function Status({ value }: { value: string }) {
   const palette = usePalette()
-  const normalized = value.toUpperCase()
-  const color = normalized.includes('FAIL') || normalized.includes('ERROR') || normalized.includes('REVOK') || normalized.includes('OFFLINE') ? palette.danger
-    : normalized.includes('WARN') || normalized.includes('WAIT') || normalized.includes('DEGRA') ? palette.warning : palette.success
-  return <View style={[styles.status, { borderColor: color }]}><View style={[styles.dot, { backgroundColor: color }]} /><Text maxFontSizeMultiplier={1.4} style={[styles.statusText, { color }]}>{value.replaceAll('_', ' ')}</Text></View>
+  const tone = statusTone(value)
+  const color = tone === 'danger' ? palette.danger : tone === 'warning' ? palette.warning : tone === 'success' ? palette.success : palette.muted
+  return <View style={[styles.status, { borderColor: color }]}><View style={[styles.dot, { backgroundColor: color }]} /><Text style={[styles.statusText, { color }]}>{value.replaceAll('_', ' ')}</Text></View>
 }
 
 export function Empty({ icon, title, detail, action }: { icon: SymbolViewProps['name']; title: string; detail: string; action?: ReactNode }) {
@@ -86,7 +86,7 @@ export const sharedStyles = StyleSheet.create({
   body: { fontSize: 15, lineHeight: 21 },
   detail: { fontSize: 13, lineHeight: 18 },
   row: { flexDirection: 'row', alignItems: 'center', gap: Space.md },
-  split: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Space.md },
+  split: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: Space.md },
   actions: { flexDirection: 'row', gap: Space.sm, flexWrap: 'wrap' },
 })
 

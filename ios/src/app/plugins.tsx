@@ -7,6 +7,7 @@ import { Button, Card, Empty, ErrorState, Loading, SectionTitle, Status, sharedS
 import { Radius, Space, usePalette } from '@/constants/theme'
 import type { IntegrationCatalogItem, IntegrationSource } from '@/lib/api'
 import { useSession } from '@/providers/session'
+import { trustedHttpsUrl } from '@/components/display-boundary'
 
 export default function PluginsScreen() {
   const palette = usePalette()
@@ -48,9 +49,9 @@ export default function PluginsScreen() {
   }
   const inspect = async (item: IntegrationCatalogItem) => {
     if (!item.inspectUrl) return
-    const url = new URL(item.inspectUrl)
-    if (url.protocol !== 'https:') { setError('Integration source URL is not trusted'); return }
-    await WebBrowser.openBrowserAsync(url.toString(), { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET })
+    const url = trustedHttpsUrl(item.inspectUrl)
+    if (!url) { setError('Integration source URL is not trusted'); return }
+    await WebBrowser.openBrowserAsync(url, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET })
   }
   const install = (item: IntegrationCatalogItem) => Alert.alert(
     `Install ${item.name}?`,

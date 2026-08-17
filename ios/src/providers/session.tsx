@@ -9,6 +9,7 @@ import { createHttpClient, GenerationFence, readBoundedJsonResponse, requestOidc
 
 import { TesseraApi } from '@/lib/api'
 import { runtimeConfig } from '@/lib/config'
+import { unlockTransition, type UnlockAttempt } from '@/providers/unlock-state'
 
 type OidcConfig = { authority: string; clientId: string; scope: string }
 type PortalConfig = { authMode: 'dev' | 'oidc' | 'none'; devLoopback: boolean; oidc?: OidcConfig }
@@ -66,6 +67,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const refreshRef = useRef<Promise<StoredSession | null> | null>(null)
   const sessionFenceRef = useRef(new GenerationFence())
   const lockFenceRef = useRef(new GenerationFence())
+  const unlockAttemptRef = useRef<UnlockAttempt | null>(null)
   const appStateRef = useRef(AppState.currentState)
 
   const ensureFreshSession = useCallback(async () => {
@@ -183,7 +185,21 @@ export function SessionProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
       appStateRef.current = state
-      if (state !== 'active' && lockEnabled && sessionRef.current) {
+      const attempt = unlockAttemptRef.current
+      const transition = unlockTransition(
+        state,
+        attempt,
+        attempt ? lockFenceRef.current.isCurrent(attempt.generation) : true,
+        Date.now(),
+      )
+      if (transition === 'COMPLETE') {
+        unlockAttemptRef.current = null
+        setLocked(false)
+        return
+      }
+      if (transition === 'IGNORE') return
+      unlockAttemptRef.current = null
+      if (lockEnabled && sessionRef.current) {
         lockFenceRef.current.invalidate()
         setLocked(true)
       }
@@ -235,6 +251,8 @@ export function SessionProvider({ children }: PropsWithChildren) {
 
   const signOut = useCallback(async () => {
     sessionFenceRef.current.invalidate()
+    lockFenceRef.current.invalidate()
+    unlockAttemptRef.current = null
     sessionRef.current = null
     await writeSession(null)
     setPrincipal(null)
@@ -243,15 +261,28 @@ export function SessionProvider({ children }: PropsWithChildren) {
   }, [descriptor])
 
   const unlock = useCallback(async () => {
-    if (!lockEnabled) { setLocked(false); return }
+    if (!lockEnabled) { unlockAttemptRef.current = null; setLocked(false); return }
     const generation = lockFenceRef.current.capture()
-    const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock Tessera', fallbackLabel: 'Use Passcode' })
-    if (result.success && lockFenceRef.current.isCurrent(generation) && appStateRef.current === 'active') setLocked(false)
+    unlockAttemptRef.current = { generation, authenticatedAt: null }
+    try {
+      const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock Tessera', fallbackLabel: 'Use Passcode' })
+      if (!result.success || !lockFenceRef.current.isCurrent(generation)) return
+      if (appStateRef.current === 'active') {
+        unlockAttemptRef.current = null
+        setLocked(false)
+      } else if (appStateRef.current === 'inactive') {
+        unlockAttemptRef.current = { generation, authenticatedAt: Date.now() }
+      }
+    } finally {
+      if (unlockAttemptRef.current?.generation === generation && unlockAttemptRef.current.authenticatedAt === null)
+        unlockAttemptRef.current = null
+    }
   }, [lockEnabled])
 
   const setLockEnabled = useCallback(async (enabled: boolean) => {
     await SecureStore.setItemAsync(LOCK_KEY, String(enabled), storeOptions)
     lockFenceRef.current.invalidate()
+    unlockAttemptRef.current = null
     setLockEnabledState(enabled)
     if (!enabled) setLocked(false)
   }, [])

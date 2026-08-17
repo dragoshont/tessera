@@ -15,6 +15,13 @@ export class TesseraProblem extends Error {
   }
 }
 
+export class TesseraProtocolError extends Error {
+  constructor(readonly code: 'response_not_json' | 'response_invalid_json') {
+    super(code)
+    this.name = 'TesseraProtocolError'
+  }
+}
+
 export type HttpClientOptions = {
   routes?: RouteManager
   getAccessToken?: () => string | undefined | Promise<string | undefined>
@@ -59,15 +66,25 @@ export function createHttpClient(options: HttpClientOptions) {
 export type TesseraHttpClient = ReturnType<typeof createHttpClient>
 
 export async function readBoundedJsonResponse<T>(response: Response, maximumBytes: number, timeoutMs = 10_000): Promise<T> {
-  if (!response.headers || typeof response.headers.get !== 'function') return response.json() as Promise<T>
+  if (!response.headers || typeof response.headers.get !== 'function') {
+    try { return await response.json() as T }
+    catch { throw new TesseraProtocolError('response_invalid_json') }
+  }
   const deadline = Date.now() + timeoutMs
   const declaredLength = Number(response.headers.get('Content-Length'))
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) throw new Error('response_too_large')
+  const mediaType = response.headers.get('Content-Type')?.split(';', 1)[0]?.trim().toLowerCase()
+  if (!mediaType || (mediaType !== 'application/json' && !mediaType.endsWith('+json')))
+    throw new TesseraProtocolError('response_not_json')
   if (!response.body) {
-    if (typeof response.text !== 'function') return response.json() as Promise<T>
+    if (typeof response.text !== 'function') {
+      try { return await response.json() as T }
+      catch { throw new TesseraProtocolError('response_invalid_json') }
+    }
     const text = await withDeadline(response.text(), deadline)
     if (new TextEncoder().encode(text).byteLength > maximumBytes) throw new Error('response_too_large')
-    return JSON.parse(text) as T
+    try { return JSON.parse(text) as T }
+    catch { throw new TesseraProtocolError('response_invalid_json') }
   }
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
@@ -85,7 +102,8 @@ export async function readBoundedJsonResponse<T>(response: Response, maximumByte
     }
     text += decoder.decode(chunk.value, { stream: true })
   }
-  return JSON.parse(text + decoder.decode()) as T
+  try { return JSON.parse(text + decoder.decode()) as T }
+  catch { throw new TesseraProtocolError('response_invalid_json') }
 }
 
 async function withDeadline<T>(operation: Promise<T>, deadline: number): Promise<T> {

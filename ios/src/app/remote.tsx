@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
-import { TesseraProblem, type RemoteHostSummaryDto } from '@tessera/client'
+import { TesseraProblem, TesseraProtocolError, type RemoteHostSummaryDto } from '@tessera/client'
 
 import { Card, Empty, ErrorState, Loading, SectionTitle, Status, formatTime, sharedStyles } from '@/components/ui'
 import { Space, usePalette } from '@/constants/theme'
@@ -28,7 +28,11 @@ export default function RemoteScreen() {
       setHosts((await api.remoteHosts()).items)
       setUnsupported(false)
     } catch (cause) {
-      setUnsupported(cause instanceof TesseraProblem && [404, 405, 501].includes(cause.status))
+      const nextUnsupported =
+        cause instanceof TesseraProtocolError && cause.code === 'response_not_json'
+        || cause instanceof TesseraProblem && [404, 405, 501].includes(cause.status)
+      setUnsupported(nextUnsupported)
+      if (nextUnsupported) setHosts([])
       setError(cause instanceof Error ? cause.message : 'Remote Hosts unavailable')
     } finally { setLoading(false); setRefreshing(false) }
   }
@@ -44,10 +48,10 @@ export default function RemoteScreen() {
       contentContainerStyle={[sharedStyles.listContent, !hosts.length && styles.empty]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />}
       ListHeaderComponent={<View style={styles.header}>
-        <SectionTitle detail="Pair trusted Macs and supervise canonical Jobs. Server Jobs continue normally with no Hosts configured.">Remote Host preview</SectionTitle>
-        <Card><Text style={[sharedStyles.title, { color: palette.text }]}>{unsupported ? 'Remote Hosts unavailable' : 'Pairing not available in this preview'}</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>{unsupported ? 'This Tessera server does not expose the Remote Host API.' : 'Pairing waits for the signed Mac helper journey. This phone never receives a Host key or repository path.'}</Text></Card>
+        <SectionTitle detail="Pair trusted Macs and supervise canonical Jobs. Server Jobs continue normally with no Hosts configured.">Remote Hosts</SectionTitle>
+        <Card><Text style={[sharedStyles.title, { color: palette.text }]}>{unsupported ? 'Server update required' : 'Pairing starts from a verified client'}</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>{unsupported ? 'This server does not expose the structured Remote Host API used by this app. Update the Tessera server, then pull to refresh.' : 'This phone supervises paired Macs but never receives a Host key or repository path.'}</Text></Card>
       </View>}
-      ListEmptyComponent={<Empty icon="laptopcomputer.slash" title="No Macs are paired" detail="Server Jobs continue normally. Pull to refresh after pairing from a verified client." />}
+      ListEmptyComponent={unsupported ? null : <Empty icon="laptopcomputer.slash" title="No Macs are paired" detail="Server Jobs continue normally. Pull to refresh after pairing from a verified client." />}
       renderItem={({ item }) => (
         <Pressable
           accessibilityRole="button"

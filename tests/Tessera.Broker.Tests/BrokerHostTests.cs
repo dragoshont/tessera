@@ -17,6 +17,10 @@ public sealed class BrokerHostTests : IAsyncLifetime
     {
         var port = FreePort();
         _dir = Directory.CreateTempSubdirectory("tessera-broker-test").FullName;
+        var webRoot = Directory.CreateDirectory(Path.Combine(_dir, "web")).FullName;
+        File.WriteAllText(Path.Combine(webRoot, "index.html"), "<!doctype html><title>Tessera Test</title>");
+        var apiCollisionRoot = Directory.CreateDirectory(Path.Combine(webRoot, "api", "v1")).FullName;
+        File.WriteAllText(Path.Combine(apiCollisionRoot, "static-collision.json"), "{\"leaked\":true}");
 
         var configPath = Path.Combine(_dir, "tessera.json");
         File.WriteAllText(configPath, $$"""
@@ -25,6 +29,7 @@ public sealed class BrokerHostTests : IAsyncLifetime
               "serverIdentity": { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "displayName": "Tessera Test" },
               "identity": { "mode": "mtls", "trustDomain": "tessera.local" },
               "policy": { "default": "deny" },
+              "portal": { "webRoot": {{JsonSerializer.Serialize(webRoot)}} },
               "audit": { "enabled": false }
             }
             """);
@@ -74,6 +79,117 @@ public sealed class BrokerHostTests : IAsyncLifetime
     {
         var response = await _client.GetAsync(new Uri("/healthz", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Unknown_api_routes_return_problem_details_instead_of_the_spa()
+    {
+        var response = await _client.GetAsync(new Uri("/api/v1/static-collision.json", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        Assert.Equal(7, root.EnumerateObject().Count());
+        Assert.Equal("https://tessera.local/problems/api-route-not-found", root.GetProperty("type").GetString());
+        Assert.Equal("API route not found", root.GetProperty("title").GetString());
+        Assert.Equal(404, root.GetProperty("status").GetInt32());
+        Assert.Equal("This Tessera server does not expose the requested API route.", root.GetProperty("detail").GetString());
+        Assert.Equal("/api/v1/static-collision.json", root.GetProperty("instance").GetString());
+        Assert.DoesNotContain("leaked", root.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal("api_route_not_found", root.GetProperty("code").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("traceId").GetString()));
+        Assert.DoesNotContain("Tessera Test", root.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Api_only_servers_return_problem_details_for_unknown_api_routes()
+    {
+        var port = FreePort();
+        var path = Path.Combine(_dir, "api-only.json");
+        File.WriteAllText(path, $$"""
+            {
+              "server": { "host": "127.0.0.1", "port": {{port}} },
+              "serverIdentity": { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "displayName": "Tessera Test" },
+              "identity": { "mode": "dev", "trustDomain": "tessera.local" },
+              "policy": { "default": "deny" },
+              "audit": { "enabled": false }
+            }
+            """);
+        await using var app = await BrokerHost.BuildAppAsync(new BrokerHostOptions
+        {
+            ConfigPath = path,
+            PolicyPath = Path.Combine(_dir, "grants.json"),
+            StoreOverride = new InMemoryCredentialStore(),
+            ProductDatabasePath = Path.Combine(_dir, "api-only.db"),
+            PluginRoot = Path.Combine(_dir, "no-plugins"),
+        });
+        await app.StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+
+        var response = await client.GetAsync(new Uri("/api/v1/not-present", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(7, document.RootElement.EnumerateObject().Count());
+        Assert.Equal("api_route_not_found", document.RootElement.GetProperty("code").GetString());
+        await app.StopAsync();
+    }
+
+    [Fact]
+    public async Task Product_api_routes_keep_precedence_when_the_spa_is_enabled()
+    {
+        var port = FreePort();
+        var path = Path.Combine(_dir, "product-configured.json");
+        var webRoot = Path.Combine(_dir, "web");
+        File.WriteAllText(path, $$"""
+            {
+              "server": { "host": "127.0.0.1", "port": {{port}} },
+              "serverIdentity": { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "displayName": "Tessera Test" },
+              "identity": { "mode": "dev", "trustDomain": "tessera.local" },
+              "policy": { "default": "deny" },
+              "portal": { "webRoot": {{JsonSerializer.Serialize(webRoot)}} },
+              "audit": { "enabled": false }
+            }
+            """);
+        await using var app = await BrokerHost.BuildAppAsync(new BrokerHostOptions
+        {
+            ConfigPath = path,
+            PolicyPath = Path.Combine(_dir, "grants.json"),
+            StoreOverride = new InMemoryCredentialStore(),
+            ProductDatabasePath = Path.Combine(_dir, "product-precedence.db"),
+            PluginRoot = Path.Combine(_dir, "no-plugins"),
+        });
+        await app.StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+
+        var response = await client.GetAsync(new Uri("/api/v1/conversations", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.DoesNotContain("Tessera Test", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        await app.StopAsync();
+    }
+
+    [Fact]
+    public async Task Unsupported_api_methods_are_structured_and_never_the_spa()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/v1/conversations");
+        var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("GET", response.Content.Headers.Allow);
+        Assert.Contains("POST", response.Content.Headers.Allow);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("https://tessera.local/problems/method-not-allowed", document.RootElement.GetProperty("type").GetString());
+        Assert.Equal("method_not_allowed", document.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Client_side_routes_still_fall_back_to_the_spa()
+    {
+        var response = await _client.GetAsync(new Uri("/accounts", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("Tessera Test", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
     [Fact]

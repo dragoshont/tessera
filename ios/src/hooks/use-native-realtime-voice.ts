@@ -4,14 +4,17 @@ import { parseRealtimeProtocolEvent, type RealtimeTurnInput, type RealtimeVoiceS
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription, type MediaStream, type MediaStreamTrack } from 'react-native-webrtc'
 
 import type { TesseraApi } from '@/lib/api'
+import { closeMicrophoneCapture, type MicrophoneLease } from '@/hooks/microphone-lease'
+import { boundedRealtimeCaption, classifyRealtimeStartFailure, handoffVoiceToAction } from '@/hooks/realtime-voice-state'
 
 export type NativeVoiceState = 'UNAVAILABLE' | 'IDLE' | 'REQUESTING_PERMISSION' | 'PERMISSION_DENIED' | 'NEGOTIATING' | 'LISTENING' | 'USER_SPEAKING' | 'ASSISTANT_SPEAKING' | 'TOOL_RUNNING' | 'APPROVAL_REQUIRED' | 'INTERRUPTED' | 'SESSION_EXPIRED' | 'ERROR' | 'ENDING'
 export type NativeVoiceView = { state: NativeVoiceState; muted?: boolean; blockedCode?: string | null; userCaption?: string; assistantCaption?: string; toolName?: string }
 
-export function useNativeRealtimeVoice({ api, conversationId, status, onTurnSaved, onApprovalRequired }: {
+export function useNativeRealtimeVoice({ api, conversationId, status, microphoneLease, onTurnSaved, onApprovalRequired }: {
   api: TesseraApi
   conversationId?: string
   status?: RealtimeVoiceStatus
+  microphoneLease: MicrophoneLease
   onTurnSaved?: () => void
   onApprovalRequired?: (actionId: string) => void
 }) {
@@ -58,17 +61,19 @@ export function useNativeRealtimeVoice({ api, conversationId, status, onTurnSave
   }
 
   const closeLocal = () => {
-    generation.current += 1
-    if (expiryTimer.current) clearTimeout(expiryTimer.current)
-    expiryTimer.current = null
-    try { channel.current?.close() } catch { /* already closed */ }
-    try { peer.current?.close() } catch { /* already closed */ }
-    stream.current?.getTracks().forEach((track: MediaStreamTrack) => track.stop())
-    channel.current = null
-    peer.current = null
-    stream.current = null
-    pendingUser.current = null
-    assistantText.current = ''
+    closeMicrophoneCapture(microphoneLease, 'realtime-voice', () => {
+      generation.current += 1
+      if (expiryTimer.current) clearTimeout(expiryTimer.current)
+      expiryTimer.current = null
+      try { channel.current?.close() } catch { /* already closed */ }
+      try { peer.current?.close() } catch { /* already closed */ }
+      stream.current?.getTracks().forEach((track: MediaStreamTrack) => track.stop())
+      channel.current = null
+      peer.current = null
+      stream.current = null
+      pendingUser.current = null
+      assistantText.current = ''
+    })
   }
 
   const end = async (reason: string = 'USER_ENDED') => {
@@ -112,19 +117,17 @@ export function useNativeRealtimeVoice({ api, conversationId, status, onTurnSave
     const currentSession = sessionId.current
     const currentConversation = activeConversation.current
     if (!currentSession || !currentConversation || !args || typeof args !== 'object' || Array.isArray(args)) return
-    const currentGeneration = generation.current
     const toolKey = `rt-${crypto.randomUUID()}`
     setVoice((current) => ({ ...current, state: 'TOOL_RUNNING', toolName: name }))
     try {
       let result = await api.invokeRealtimeTool(currentConversation, currentSession, callId, name, args as Record<string, unknown>, toolKey)
       if (result.state === 'APPROVAL_REQUIRED' && result.actionId) {
         setVoice((current) => ({ ...current, state: 'APPROVAL_REQUIRED', toolName: name }))
-        onApprovalRequiredRef.current?.(result.actionId)
-        while (result.state === 'APPROVAL_REQUIRED') {
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-          if (ended.current || generation.current !== currentGeneration) return
-          result = await api.invokeRealtimeTool(currentConversation, currentSession, callId, name, args as Record<string, unknown>, toolKey)
-        }
+        await handoffVoiceToAction(
+          () => end('ACTION_REVIEW_REQUIRED'),
+          () => onApprovalRequiredRef.current?.(result.actionId!),
+        )
+        return
       }
       if (channel.current?.readyState === 'open') {
         const output = result.state === 'COMPLETED' && result.output ? result.output : { error: result.errorCode ?? 'tool_failed' }
@@ -142,13 +145,14 @@ export function useNativeRealtimeVoice({ api, conversationId, status, onTurnSave
       assistantText.current = ''
       setVoice((current) => ({ ...current, state: 'USER_SPEAKING', assistantCaption: undefined }))
     } else if (event.type === 'user_transcript') {
-      pendingUser.current = { itemId: event.itemId, transcript: event.transcript }
-      setVoice((current) => ({ ...current, state: 'LISTENING', userCaption: event.transcript }))
+      const transcript = boundedRealtimeCaption(event.transcript)
+      pendingUser.current = { itemId: event.itemId, transcript }
+      setVoice((current) => ({ ...current, state: 'LISTENING', userCaption: transcript }))
     } else if (event.type === 'assistant_delta') {
-      assistantText.current = `${assistantText.current}${event.delta}`.slice(0, 32 * 1024)
+      assistantText.current = boundedRealtimeCaption(`${assistantText.current}${event.delta}`)
       setVoice((current) => ({ ...current, state: 'ASSISTANT_SPEAKING', assistantCaption: assistantText.current }))
     } else if (event.type === 'assistant_done') {
-      const transcript = event.transcript || assistantText.current
+      const transcript = boundedRealtimeCaption(event.transcript || assistantText.current)
       assistantText.current = ''
       setVoice((current) => ({ ...current, state: 'LISTENING', assistantCaption: transcript }))
       void saveTurn(transcript, event.itemId, 'COMPLETED')
@@ -158,7 +162,7 @@ export function useNativeRealtimeVoice({ api, conversationId, status, onTurnSave
   }
 
   const start = async () => {
-    if (!conversationId || status?.state !== 'READY' || !ended.current) return
+    if (!conversationId || status?.state !== 'READY' || !ended.current || !microphoneLease.acquire('realtime-voice')) return
     const currentGeneration = ++generation.current
     ended.current = false
     activeConversation.current = conversationId
@@ -201,10 +205,12 @@ export function useNativeRealtimeVoice({ api, conversationId, status, onTurnSave
         if (expiredSession) void api.endRealtimeVoice(conversationId, expiredSession, 'EXPIRED').catch(() => undefined)
       }, expiresIn)
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'realtime_start_failed'
-      const denied = /permission|not.?allowed|denied/i.test(message)
-      if (denied) { closeLocal(); ended.current = true; setVoice({ state: 'PERMISSION_DENIED', blockedCode: message }) }
-      else await fail(message)
+      const failure = classifyRealtimeStartFailure(cause)
+      if (failure.state === 'PERMISSION_DENIED') {
+        closeLocal()
+        ended.current = true
+        setVoice({ state: 'PERMISSION_DENIED', blockedCode: failure.code })
+      } else await fail(failure.code)
     }
   }
 
