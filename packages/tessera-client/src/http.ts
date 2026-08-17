@@ -16,9 +16,12 @@ export class TesseraProblem extends Error {
 }
 
 export class TesseraProtocolError extends Error {
-  constructor(readonly code: 'response_not_json' | 'response_invalid_json') {
+  readonly code: 'response_not_json' | 'response_invalid_json'
+
+  constructor(code: 'response_not_json' | 'response_invalid_json') {
     super(code)
     this.name = 'TesseraProtocolError'
+    this.code = code
   }
 }
 
