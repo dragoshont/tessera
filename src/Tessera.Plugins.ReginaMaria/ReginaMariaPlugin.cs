@@ -351,13 +351,6 @@ public sealed class ReginaMariaPlugin : ITesseraCapabilityPlugin, ITesseraModelT
             using var document = JsonDocument.Parse(account.NonSecretConfigJson);
             var endpoint = new Uri(document.RootElement.GetProperty("endpoint").GetString()
                 ?? throw new InvalidOperationException("invalid_configuration"));
-            if (!endpoint.IsAbsoluteUri
-                || endpoint.Scheme is not ("http" or "https")
-                || !string.IsNullOrEmpty(endpoint.UserInfo)
-                || !string.IsNullOrEmpty(endpoint.Query)
-                || !string.IsNullOrEmpty(endpoint.Fragment)
-                || endpoint.AbsolutePath.TrimEnd('/') != "/mcp")
-                throw new InvalidOperationException("invalid_configuration");
             return CanonicalMcpEndpoint(endpoint);
         }
         catch (Exception exception) when (exception is JsonException or KeyNotFoundException or UriFormatException)
