@@ -7,11 +7,15 @@ namespace Tessera.Identity;
 /// </summary>
 public sealed class CanonicalIssuerTokenValidator(
     ITokenValidator validator,
-    string canonicalIssuer) : ITokenValidator
+    string canonicalIssuer,
+    string canonicalSubjectClaim) : ITokenValidator
 {
     private readonly string _canonicalIssuer = !string.IsNullOrWhiteSpace(canonicalIssuer)
         ? canonicalIssuer
         : throw new ArgumentException("Canonical issuer is required.", nameof(canonicalIssuer));
+    private readonly string _canonicalSubjectClaim = !string.IsNullOrWhiteSpace(canonicalSubjectClaim)
+        ? canonicalSubjectClaim
+        : throw new ArgumentException("Canonical subject claim is required.", nameof(canonicalSubjectClaim));
 
     public bool DelegationEnabled => validator.DelegationEnabled;
 
@@ -20,6 +24,6 @@ public sealed class CanonicalIssuerTokenValidator(
         CancellationToken cancellationToken = default)
     {
         var result = await validator.ValidateAsync(token, cancellationToken).ConfigureAwait(false);
-        return result.WithCanonicalIssuer(_canonicalIssuer);
+        return result.WithCanonicalIdentity(_canonicalIssuer, _canonicalSubjectClaim);
     }
 }

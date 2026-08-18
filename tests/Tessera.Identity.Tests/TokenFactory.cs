@@ -72,6 +72,7 @@ internal sealed class TokenFactory
     public string SubjectTokenWithAudiences(
         string subject,
         string preferredUsername,
+        string? canonicalSubject,
         params string[] audiences)
     {
         var descriptor = new SecurityTokenDescriptor
@@ -89,6 +90,8 @@ internal sealed class TokenFactory
             },
             SigningCredentials = _credentials,
         };
+        if (!string.IsNullOrWhiteSpace(canonicalSubject))
+            descriptor.Claims["tessera_subject"] = canonicalSubject;
         foreach (var audience in audiences) descriptor.Audiences.Add(audience);
         return new JsonWebTokenHandler().CreateToken(descriptor);
     }

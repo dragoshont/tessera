@@ -63,19 +63,40 @@ public sealed class CompositeTokenValidatorTests
     {
         var delegated = TesseraTokenResult.Success(new Dictionary<string, string>
         {
-            ["sub"] = "stable-owner",
+            ["sub"] = "owner@example.com",
             ["iss"] = "https://auth.example/application/o/librechat/",
             ["email"] = "owner@example.com",
+            ["tessera_subject"] = "stable-owner",
         });
         var validator = new CanonicalIssuerTokenValidator(
             new FakeValidator(delegated),
-            "https://auth.example/application/o/tessera/");
+            "https://auth.example/application/o/tessera/",
+            "tessera_subject");
 
         var result = await validator.ValidateAsync("token");
 
         Assert.True(result.Succeeded);
         Assert.Equal("stable-owner", result.Subject);
         Assert.Equal("https://auth.example/application/o/tessera/", result.Issuer);
+    }
+
+    [Fact]
+    public async Task Canonical_lane_rejects_a_valid_token_missing_the_signed_subject_mapping()
+    {
+        var delegated = TesseraTokenResult.Success(new Dictionary<string, string>
+        {
+            ["sub"] = "owner@example.com",
+            ["iss"] = "https://auth.example/application/o/librechat/",
+        });
+        var validator = new CanonicalIssuerTokenValidator(
+            new FakeValidator(delegated),
+            "https://auth.example/application/o/tessera/",
+            "tessera_subject");
+
+        var result = await validator.ValidateAsync("token");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("canonical subject", result.FailureReason, StringComparison.Ordinal);
     }
 
     private sealed class FakeValidator(TesseraTokenResult result, bool enabled = true) : ITokenValidator

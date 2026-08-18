@@ -114,14 +114,16 @@ for the chat token only when the chat can request Tessera's resource audience:
 |---|---|
 | `TESSERA_DELEGATED_OIDC_ISSUER` | Exact issuer on the chat access token |
 | `TESSERA_DELEGATED_OIDC_AUDIENCE` | Tessera resource audience that must be present in `aud` |
+| `TESSERA_DELEGATED_OIDC_SUBJECT_CLAIM` | Signed claim containing the subject used by the primary Tessera issuer |
 | `TESSERA_DELEGATED_OIDC_TENANT_ID` | Optional tenant claim required on that lane |
 | `TESSERA_DELEGATED_OIDC_ALLOWED_EMAILS` | Optional comma-separated signed owner allow-list |
 
-Both issuer and audience are required; partial configuration disables delegation
-fail-closed. Each token must validate in exactly one lane. A token accepted by
+Issuer, audience, and canonical subject claim are required; partial configuration
+disables delegation fail-closed. Each token must validate in exactly one lane. A token accepted by
 overlapping lanes is rejected. After delegated validation succeeds, Tessera maps
-only the issuer namespace to the primary issuer so one signed subject owns one
-durable product account; it does not rewrite the signed subject or email.
+the issuer and subject to Tessera's primary identity namespace using the configured
+resource-specific signed claim. This is required when two application providers use
+different subject modes; email remains a display/allow-list claim, not the owner key.
 
 Do not configure the chat client audience as the delegated resource audience.
 The token must carry Tessera's audience explicitly (or be exchanged for a

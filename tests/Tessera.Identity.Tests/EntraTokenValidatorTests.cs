@@ -128,12 +128,14 @@ public sealed class EntraTokenValidatorTests
             factory.SubjectTokenWithAudiences(
                 "owner",
                 "owner@example.com",
+                null,
                 "librechat-client",
                 TokenFactory.Audience));
         var rejected = await validator.ValidateAsync(
             factory.SubjectTokenWithAudiences(
                 "owner",
                 "owner@example.com",
+                null,
                 "librechat-client",
                 "another-resource"));
 
@@ -156,12 +158,14 @@ public sealed class EntraTokenValidatorTests
             });
         var validator = new CanonicalIssuerTokenValidator(
             delegated,
-            "https://auth.example/application/o/tessera/");
+            "https://auth.example/application/o/tessera/",
+            "tessera_subject");
 
         var result = await validator.ValidateAsync(
             factory.SubjectTokenWithAudiences(
-                "stable-authentik-subject",
                 "owner@example.com",
+                "owner@example.com",
+                "stable-authentik-subject",
                 "librechat-client",
                 TokenFactory.Audience));
 

@@ -547,11 +547,14 @@ public static class BrokerHost
             });
             var delegatedIssuer = Get(environment, "TESSERA_DELEGATED_OIDC_ISSUER");
             var delegatedAudience = Get(environment, "TESSERA_DELEGATED_OIDC_AUDIENCE");
+            var delegatedSubjectClaim = Get(environment, "TESSERA_DELEGATED_OIDC_SUBJECT_CLAIM");
             if (string.IsNullOrWhiteSpace(delegatedIssuer)
-                && string.IsNullOrWhiteSpace(delegatedAudience))
+                && string.IsNullOrWhiteSpace(delegatedAudience)
+                && string.IsNullOrWhiteSpace(delegatedSubjectClaim))
                 return primary;
             if (string.IsNullOrWhiteSpace(delegatedIssuer)
-                || string.IsNullOrWhiteSpace(delegatedAudience))
+                || string.IsNullOrWhiteSpace(delegatedAudience)
+                || string.IsNullOrWhiteSpace(delegatedSubjectClaim))
                 return new DenyAllTokenValidator("delegated OIDC trust lane is incomplete");
             var delegated = EntraTokenValidator.Create(new OidcValidationOptions
             {
@@ -564,7 +567,10 @@ public static class BrokerHost
                     .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
             });
             return new CompositeTokenValidator(
-                [primary, new CanonicalIssuerTokenValidator(delegated, config.Identity.Oidc.Issuer)]);
+                [primary, new CanonicalIssuerTokenValidator(
+                    delegated,
+                    config.Identity.Oidc.Issuer,
+                    delegatedSubjectClaim)]);
         }
 
         return new DenyAllTokenValidator($"OIDC delegation not configured (identity.mode={config.Identity.Mode})");
