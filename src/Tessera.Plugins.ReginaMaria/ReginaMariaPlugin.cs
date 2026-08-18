@@ -143,7 +143,7 @@ public sealed class ReginaMariaPlugin : ITesseraCapabilityPlugin, ITesseraModelT
                 return Problem(400, "invalid_request");
             var connector = options.Connectors.SingleOrDefault(item => item.Id == request.ConnectorId);
             if (connector is null) return Problem(404, "connector_unavailable");
-            var endpoint = new Uri(connector.Endpoint);
+            var endpoint = CanonicalMcpEndpoint(new Uri(connector.Endpoint));
             var mcp = new ReginaMariaMcp(mcpRuntime, $"regina-maria:{connector.Id}", endpoint);
             var status = await mcp.SessionStatusAsync(token);
             var alive = status.Succeeded && status.Output is { } statusOutput
@@ -351,19 +351,25 @@ public sealed class ReginaMariaPlugin : ITesseraCapabilityPlugin, ITesseraModelT
             using var document = JsonDocument.Parse(account.NonSecretConfigJson);
             var endpoint = new Uri(document.RootElement.GetProperty("endpoint").GetString()
                 ?? throw new InvalidOperationException("invalid_configuration"));
-            if (!endpoint.IsAbsoluteUri
-                || endpoint.Scheme is not ("http" or "https")
-                || !string.IsNullOrEmpty(endpoint.UserInfo)
-                || !string.IsNullOrEmpty(endpoint.Query)
-                || !string.IsNullOrEmpty(endpoint.Fragment)
-                || endpoint.AbsolutePath.TrimEnd('/') != "/mcp")
-                throw new InvalidOperationException("invalid_configuration");
-            return endpoint;
+            return CanonicalMcpEndpoint(endpoint);
         }
         catch (Exception exception) when (exception is JsonException or KeyNotFoundException or UriFormatException)
         {
             throw new InvalidOperationException("invalid_configuration", exception);
         }
+    }
+
+    internal static Uri CanonicalMcpEndpoint(Uri endpoint)
+    {
+        if (!endpoint.IsAbsoluteUri
+            || endpoint.Scheme is not ("http" or "https")
+            || !string.IsNullOrEmpty(endpoint.UserInfo)
+            || !string.IsNullOrEmpty(endpoint.Query)
+            || !string.IsNullOrEmpty(endpoint.Fragment)
+            || endpoint.AbsolutePath.TrimEnd('/') != "/mcp")
+            throw new InvalidOperationException("invalid_configuration");
+        var builder = new UriBuilder(endpoint) { Path = "/mcp/" };
+        return builder.Uri;
     }
 }
 
@@ -495,7 +501,10 @@ internal sealed partial class ReginaMariaPluginHealthService(
                 using var configuration = JsonDocument.Parse(account.NonSecretConfigJson);
                 var endpoint = configuration.RootElement.GetProperty("endpoint").GetString()
                     ?? throw new InvalidOperationException("invalid_configuration");
-                var mcp = new ReginaMariaMcp(runtime, $"regina-maria:{account.AccountId}", new Uri(endpoint));
+                var mcp = new ReginaMariaMcp(
+                    runtime,
+                    $"regina-maria:{account.AccountId}",
+                    ReginaMariaPlugin.CanonicalMcpEndpoint(new Uri(endpoint)));
                 var status = await mcp.SessionStatusAsync(token);
                 var alive = status.Succeeded && status.Output is { } output
                     && output.TryGetProperty("alive", out var value) && value.ValueKind == JsonValueKind.True;
