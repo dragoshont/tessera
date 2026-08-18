@@ -297,6 +297,23 @@ public sealed class TesseraPluginRegistry
         string capabilityVersion,
         PluginCapabilityContext context,
         CancellationToken cancellationToken = default)
+        => await CreateCapabilityAsync(
+            pluginId,
+            pluginVersion,
+            capabilityId,
+            capabilityVersion,
+            context,
+            null,
+            cancellationToken).ConfigureAwait(false);
+
+    public async ValueTask<ICapability> CreateCapabilityAsync(
+        string pluginId,
+        string pluginVersion,
+        string capabilityId,
+        string capabilityVersion,
+        PluginCapabilityContext context,
+        Action<string>? setStage,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         if (!_plugins.TryGetValue((pluginId, pluginVersion), out var entry))
@@ -325,11 +342,14 @@ public sealed class TesseraPluginRegistry
         {
             if (capability.SideEffectClass == SideEffectClass.ReadOnly)
             {
+                setStage?.Invoke("mcp-discovery");
                 discoveredMcp = await mcpPlugin.DiscoverMcpAsync(context, cancellationToken).ConfigureAwait(false);
+                setStage?.Invoke("mcp-validation");
                 ValidateMcpCompatibility(mcpPlugin.RequiredMcpServer, mcpPlugin.RequiredMcpTools, discoveredMcp);
             }
         }
 
+        setStage?.Invoke("plugin-create");
         var implementation = await entry.Plugin.CreateCapabilityAsync(
             capabilityId,
             capabilityVersion,

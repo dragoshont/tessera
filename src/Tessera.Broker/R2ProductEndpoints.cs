@@ -3298,6 +3298,7 @@ internal static class R2ProductEndpoints
                 request.CapabilityId,
                 request.CapabilityVersion,
                 context,
+                setStage,
                 token
             );
         }
