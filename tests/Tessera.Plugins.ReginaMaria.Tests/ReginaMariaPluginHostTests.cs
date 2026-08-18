@@ -420,7 +420,7 @@ public sealed class ReginaMariaPluginHostTests
             call => call.AccountId == "rm-owner" && call.CapabilityId == "reginamaria.appointments.list");
         Assert.Equal("rm-owner", persistedCall.ExternalServerId);
         Assert.Equal("reginamaria-mcp", persistedCall.ExternalServerName);
-        Assert.Equal("0.5.42", persistedCall.ExternalServerVersion);
+        Assert.Equal("0.5.43", persistedCall.ExternalServerVersion);
         Assert.Equal("rm_list_appointments", persistedCall.ExternalToolName);
     }
 
@@ -742,7 +742,7 @@ public sealed class ReginaMariaPluginHostTests
             return Task.FromResult(new McpServerContract(
                 endpoint.ServerId,
                 "reginamaria-mcp",
-                "0.5.42",
+                "0.5.43",
                 [
                     Tool("rm_session_status"),
                     Tool("rm_account_identity"),
@@ -819,6 +819,7 @@ public sealed class ReginaMariaPluginHostTests
             {
                 "rm_prepare_appointment" => JsonSerializer.SerializeToElement(new
                 {
+                    type = "object",
                     oneOf = new[]
                     {
                         ObjectSchema(new Dictionary<string, object?>
@@ -834,6 +835,7 @@ public sealed class ReginaMariaPluginHostTests
                 }),
                 "rm_create_appointment" => JsonSerializer.SerializeToElement(new
                 {
+                    type = "object",
                     oneOf = new[]
                     {
                         ObjectSchema(new Dictionary<string, object?>
@@ -859,6 +861,7 @@ public sealed class ReginaMariaPluginHostTests
                 }),
                 "rm_cancel_appointment" => JsonSerializer.SerializeToElement(new
                 {
+                    type = "object",
                     oneOf = new[]
                     {
                         ObjectSchema(new Dictionary<string, object?>
