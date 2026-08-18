@@ -547,24 +547,28 @@ public static class BrokerHost
             });
             var delegatedIssuer = Get(environment, "TESSERA_DELEGATED_OIDC_ISSUER");
             var delegatedAudience = Get(environment, "TESSERA_DELEGATED_OIDC_AUDIENCE");
+            var delegatedTenant = Get(environment, "TESSERA_DELEGATED_OIDC_TENANT_ID");
             var delegatedSubjectClaim = Get(environment, "TESSERA_DELEGATED_OIDC_SUBJECT_CLAIM");
+            var delegatedOwners = (Get(environment, "TESSERA_DELEGATED_OIDC_ALLOWED_EMAILS") ?? "")
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             if (string.IsNullOrWhiteSpace(delegatedIssuer)
                 && string.IsNullOrWhiteSpace(delegatedAudience)
-                && string.IsNullOrWhiteSpace(delegatedSubjectClaim))
+                && string.IsNullOrWhiteSpace(delegatedTenant)
+                && string.IsNullOrWhiteSpace(delegatedSubjectClaim)
+                && delegatedOwners.Length == 0)
                 return primary;
             if (string.IsNullOrWhiteSpace(delegatedIssuer)
                 || string.IsNullOrWhiteSpace(delegatedAudience)
-                || string.IsNullOrWhiteSpace(delegatedSubjectClaim))
+                || string.IsNullOrWhiteSpace(delegatedTenant)
+                || string.IsNullOrWhiteSpace(delegatedSubjectClaim)
+                || delegatedOwners.Length == 0)
                 return new DenyAllTokenValidator("delegated OIDC trust lane is incomplete");
             var delegated = EntraTokenValidator.Create(new OidcValidationOptions
             {
                 Issuer = delegatedIssuer,
                 Audience = delegatedAudience,
-                TenantId = Get(environment, "TESSERA_DELEGATED_OIDC_TENANT_ID") ?? "",
-                AllowedPreferredUsernames = (Get(
-                    environment,
-                    "TESSERA_DELEGATED_OIDC_ALLOWED_EMAILS") ?? "")
-                    .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
+                TenantId = delegatedTenant,
+                AllowedPreferredUsernames = delegatedOwners,
             });
             return new CompositeTokenValidator(
                 [primary, new CanonicalIssuerTokenValidator(
