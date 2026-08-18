@@ -128,6 +128,35 @@ public sealed class ReginaMariaPluginHostTests
         Assert.Empty(runtime.Calls);
     }
 
+    [Fact]
+    public async Task Direct_invoke_discovery_rejection_reports_registry_capability_stage()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime(rejectDiscovery: true);
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+
+        var response = await host.SendAsync(
+            "/api/v1/capabilities/reginamaria.appointments.list/invoke",
+            new
+            {
+                capabilityId = "reginamaria.appointments.list",
+                capabilityVersion = "1",
+                pluginId = "regina-maria",
+                pluginVersion = "1.0.0",
+                accountId = "rm-owner",
+                target = "appointments:list",
+                input = new { upcoming = true },
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("invalid_request", problem.GetProperty("code").GetString());
+        Assert.Equal("registry-capability", problem.GetProperty("stage").GetString());
+        Assert.False(problem.TryGetProperty("detail", out _));
+        Assert.Empty(runtime.Calls);
+    }
+
     [Theory]
     [InlineData("https://rm.example/mcp")]
     [InlineData("https://rm.example/mcp/")]
@@ -699,13 +728,16 @@ public sealed class ReginaMariaPluginHostTests
         public void Dispose() => Directory.Delete(directory, recursive: true);
     }
 
-    private sealed class ListMcpRuntime(bool incompatibleCreateOutput = false) : IMcpClientRuntime
+    private sealed class ListMcpRuntime(
+        bool incompatibleCreateOutput = false,
+        bool rejectDiscovery = false) : IMcpClientRuntime
     {
         public List<string> Calls { get; } = [];
         public List<Uri> Endpoints { get; } = [];
 
         public Task<McpServerContract> DiscoverAsync(McpServerEndpoint endpoint, McpCallPolicy policy, CancellationToken cancellationToken = default)
         {
+            if (rejectDiscovery) throw new ArgumentException("synthetic");
             Endpoints.Add(endpoint.Endpoint);
             return Task.FromResult(new McpServerContract(
                 endpoint.ServerId,
