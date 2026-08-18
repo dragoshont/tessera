@@ -47,7 +47,15 @@ public sealed class ReginaMariaPluginHostTests
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal("appointment-1", body.GetProperty("result").GetProperty("appointments")[0].GetProperty("id").GetString());
         Assert.Equal(["rm_list_appointments"], runtime.Calls);
+        Assert.All(runtime.Endpoints, endpoint => Assert.Equal("/mcp/", endpoint.AbsolutePath));
     }
+
+    [Theory]
+    [InlineData("https://rm.example/mcp")]
+    [InlineData("https://rm.example/mcp/")]
+    [InlineData("https://rm.example/mcp//")]
+    public void Canonical_endpoint_has_exact_streamable_http_path(string value)
+        => Assert.Equal("https://rm.example/mcp/", ReginaMariaPlugin.CanonicalMcpEndpoint(new Uri(value)).AbsoluteUri);
 
     [Fact]
     public async Task Host_discovers_hash_catalog_and_joins_declarative_package()
@@ -101,6 +109,26 @@ public sealed class ReginaMariaPluginHostTests
         Assert.Equal("CONNECTED", account.GetProperty("lifecycle").GetString());
         Assert.Contains("rm_session_status", runtime.Calls);
         Assert.Contains("rm_account_identity", runtime.Calls);
+        Assert.All(runtime.Endpoints, endpoint => Assert.Equal("/mcp/", endpoint.AbsolutePath));
+    }
+
+    [Fact]
+    public async Task Background_health_canonicalizes_existing_stored_endpoint()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime();
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+
+        await host.RunReginaMariaHealthPassAsync(runtime);
+
+        Assert.Contains("rm_session_status", runtime.Calls);
+        Assert.Contains("rm_account_identity", runtime.Calls);
+        Assert.All(runtime.Endpoints, endpoint => Assert.Equal("/mcp/", endpoint.AbsolutePath));
+        var account = await host.Store.GetConnectedAccountAsync(TestHost.Owner(), "rm-owner");
+        Assert.NotNull(account);
+        Assert.Equal(AccountLifecycle.Connected, account.Lifecycle);
+        Assert.Equal(AccountHealth.Healthy, account.Health);
     }
 
     [Fact]
@@ -312,6 +340,13 @@ public sealed class ReginaMariaPluginHostTests
         public HttpClient Client { get; } = new() { BaseAddress = new Uri(app.Urls.Single()) };
         public SqliteKernelStore Store => app.Services.GetRequiredService<SqliteKernelStore>();
         public CountingCredentialStore Custody => custody;
+
+        public Task RunReginaMariaHealthPassAsync(IMcpClientRuntime runtime)
+            => new ReginaMariaPluginHealthService(
+                app.Services.GetRequiredService<IPluginAccountRuntime>(),
+                runtime,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ReginaMariaPluginHealthService>.Instance)
+                .HealthPassAsync(CancellationToken.None);
 
         public static async Task<TestHost> StartAsync(TesseraPluginRegistry registry, IMcpClientRuntime runtime)
             => await StartCoreAsync(registry, null, null, runtime);
@@ -589,9 +624,12 @@ public sealed class ReginaMariaPluginHostTests
     private sealed class ListMcpRuntime : IMcpClientRuntime
     {
         public List<string> Calls { get; } = [];
+        public List<Uri> Endpoints { get; } = [];
 
         public Task<McpServerContract> DiscoverAsync(McpServerEndpoint endpoint, McpCallPolicy policy, CancellationToken cancellationToken = default)
-            => Task.FromResult(new McpServerContract(
+        {
+            Endpoints.Add(endpoint.Endpoint);
+            return Task.FromResult(new McpServerContract(
                 endpoint.ServerId,
                 "reginamaria-mcp",
                 "0.5.41",
@@ -604,10 +642,12 @@ public sealed class ReginaMariaPluginHostTests
                     Tool("rm_create_appointment", "interval_id", "physician_id"),
                     Tool("rm_cancel_appointment", "appointment_id"),
                 ]));
+        }
 
         public Task<McpInvocationResult> CallAsync(McpServerEndpoint endpoint, string toolName, IReadOnlyDictionary<string, object?> arguments, McpCallPolicy policy, CancellationToken cancellationToken = default)
         {
             Calls.Add(toolName);
+            Endpoints.Add(endpoint.Endpoint);
             if (toolName == "rm_session_status")
                 return Task.FromResult(new McpInvocationResult(
                     McpInvocationOutcome.Succeeded,
