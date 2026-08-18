@@ -142,7 +142,7 @@ GET list/detail routes return their named DTOs/Page DTOs and `404 not_found` wit
 
 List filters reject unknown enum values and malformed timestamps with `400 invalid_request`. `query` is trimmed, limited to 200 Unicode scalar values, and treated as literal text rather than SQL or a regular expression. `from` and `to` are inclusive UTC bounds. Plugin routes always address `(id, version)`; a bare plugin ID is never sufficient for mutation when versions coexist.
 
-`POST /api/v1/capabilities/{id}/invoke` may add a coarse `stage` extension (`request`, `registry`, `execution`, `evidence`, or `message`) to `400 invalid_request`. It never includes exception text, input, identity, or credential material.
+`POST /api/v1/capabilities/{id}/invoke` may add a coarse `stage` extension (`request`, `registry-account`, `registry-context`, `registry-capability`, `execution`, `evidence`, or `message`) to `400 invalid_request`. It never includes exception text, input, identity, or credential material.
 
 `JobRunDetailDto` embeds the first page of each canonical child collection using the common default/max limits and supplies `nextCursor` when more exists. Output `text` is bounded to 32 KiB and `truncated=true` when more content exists; binary/provider payloads are never returned. `approvalState` and `verificationState` are projections of the referenced durable Action, not independently mutable run fields. `ContextSnapshotDto` exposes provenance references and omission counts only, not the hidden assembled model prompt.
 

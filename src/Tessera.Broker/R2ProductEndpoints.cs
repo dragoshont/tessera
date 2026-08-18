@@ -1853,7 +1853,8 @@ internal static class R2ProductEndpoints
                         executionRequest,
                         token,
                         services.GetRequiredService<TesseraPluginRegistry>(),
-                        services.GetRequiredService<IMcpClientRuntime>()
+                        services.GetRequiredService<IMcpClientRuntime>(),
+                        value => stage = value
                     );
                     stage = "execution";
                     var coordinator = new ExecutionCoordinator(
@@ -3222,7 +3223,8 @@ internal static class R2ProductEndpoints
         ExecutionRequest request,
         CancellationToken token,
         TesseraPluginRegistry? plugins = null,
-        IMcpClientRuntime? mcpRuntime = null
+        IMcpClientRuntime? mcpRuntime = null,
+        Action<string>? setStage = null
     )
     {
         var registry = new CapabilityRegistry();
@@ -3251,7 +3253,7 @@ internal static class R2ProductEndpoints
             throw new InvalidOperationException("plugin_runtime_unavailable");
         if (!plugins.TryResolve(request.PluginId, request.PluginVersion, out _))
             throw new InvalidOperationException("plugin_module_unavailable");
-        return await PluginRegistry(store, custody, transport, plugins, mcpRuntime, request, token);
+        return await PluginRegistry(store, custody, transport, plugins, mcpRuntime, request, token, setStage);
     }
 
     private static async Task<CapabilityRegistry> PluginRegistry(
@@ -3261,9 +3263,11 @@ internal static class R2ProductEndpoints
         TesseraPluginRegistry plugins,
         IMcpClientRuntime mcpRuntime,
         ExecutionRequest request,
-        CancellationToken token
+        CancellationToken token,
+        Action<string>? setStage = null
     )
     {
+        setStage?.Invoke("registry-account");
         ConnectedAccount? account = null;
         if (request.AccountId is not null)
         {
@@ -3275,6 +3279,7 @@ internal static class R2ProductEndpoints
                 ) ?? throw new InvalidOperationException("account_unavailable");
             ConnectedAccountCredentialRef.Validate(account, request.OwnerPrincipalId);
         }
+        setStage?.Invoke("registry-context");
         var context = new PluginCapabilityContext(
             account,
             CredentialBundle.Empty,
@@ -3284,6 +3289,7 @@ internal static class R2ProductEndpoints
                 await custody.GetBundleAsync(reference, cancellationToken)
         );
         ICapability capability;
+        setStage?.Invoke("registry-capability");
         try
         {
             capability = await plugins.CreateCapabilityAsync(
