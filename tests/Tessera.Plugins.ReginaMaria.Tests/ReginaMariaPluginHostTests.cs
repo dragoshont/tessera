@@ -76,6 +76,58 @@ public sealed class ReginaMariaPluginHostTests
         Assert.Empty(runtime.Calls);
     }
 
+    [Fact]
+    public async Task Direct_invoke_invalid_request_reports_only_a_safe_stage()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime();
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+        object input = "leaf";
+        for (var depth = 0; depth < 14; depth++)
+            input = new Dictionary<string, object?> { ["nested"] = input };
+
+        var response = await host.SendAsync(
+            "/api/v1/capabilities/reginamaria.appointments.list/invoke",
+            new
+            {
+                capabilityId = "reginamaria.appointments.list",
+                capabilityVersion = "1",
+                pluginId = "regina-maria",
+                pluginVersion = "1.0.0",
+                accountId = "rm-owner",
+                target = "appointments:list",
+                input,
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("invalid_request", problem.GetProperty("code").GetString());
+        Assert.Equal("execution", problem.GetProperty("stage").GetString());
+        Assert.False(problem.TryGetProperty("detail", out _));
+        Assert.Empty(runtime.Calls);
+    }
+
+    [Fact]
+    public async Task Direct_invoke_unbound_request_reports_the_request_stage()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime();
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+
+        var response = await host.SendAsync(
+            "/api/v1/capabilities/reginamaria.appointments.list/invoke",
+            new { });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("invalid_request", problem.GetProperty("code").GetString());
+        Assert.Equal("request", problem.GetProperty("stage").GetString());
+        Assert.False(problem.TryGetProperty("detail", out _));
+        Assert.Empty(runtime.Calls);
+    }
+
     [Theory]
     [InlineData("https://rm.example/mcp")]
     [InlineData("https://rm.example/mcp/")]
