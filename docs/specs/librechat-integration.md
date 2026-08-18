@@ -104,6 +104,29 @@ A shared chat mixes owners (who may reach sensitive tools) with other/new users
 > server's gate **and** add the Tessera grant/binding. Never one without the other.
 > A new user with neither reaches nothing sensitive.
 
+### Separate application issuers
+
+Some identity providers issue a distinct `iss` value per application. Keep
+Tessera's portal issuer/audience as the primary lane, and configure a second lane
+for the chat token only when the chat can request Tessera's resource audience:
+
+| Environment variable | Meaning |
+|---|---|
+| `TESSERA_DELEGATED_OIDC_ISSUER` | Exact issuer on the chat access token |
+| `TESSERA_DELEGATED_OIDC_AUDIENCE` | Tessera resource audience that must be present in `aud` |
+| `TESSERA_DELEGATED_OIDC_TENANT_ID` | Optional tenant claim required on that lane |
+| `TESSERA_DELEGATED_OIDC_ALLOWED_EMAILS` | Optional comma-separated signed owner allow-list |
+
+Both issuer and audience are required; partial configuration disables delegation
+fail-closed. Each token must validate in exactly one lane. A token accepted by
+overlapping lanes is rejected. After delegated validation succeeds, Tessera maps
+only the issuer namespace to the primary issuer so one signed subject owns one
+durable product account; it does not rewrite the signed subject or email.
+
+Do not configure the chat client audience as the delegated resource audience.
+The token must carry Tessera's audience explicitly (or be exchanged for a
+Tessera-targeted token) so a generic chat token is not a broker credential.
+
 Where membership is fixed (a household), also **turn off self-registration** once
 the known users have signed in once — closing the population *before* the per-tool
 gates apply. Sequence it **after** first sign-in so it never locks anyone out.

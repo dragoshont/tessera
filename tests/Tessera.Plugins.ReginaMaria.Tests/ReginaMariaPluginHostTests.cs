@@ -285,7 +285,7 @@ public sealed class ReginaMariaPluginHostTests
             call => call.AccountId == "rm-owner" && call.CapabilityId == "reginamaria.appointments.list");
         Assert.Equal("rm-owner", persistedCall.ExternalServerId);
         Assert.Equal("reginamaria-mcp", persistedCall.ExternalServerName);
-        Assert.Equal("0.5.38", persistedCall.ExternalServerVersion);
+        Assert.Equal("0.5.41", persistedCall.ExternalServerVersion);
         Assert.Equal("rm_list_appointments", persistedCall.ExternalToolName);
     }
 
@@ -594,7 +594,7 @@ public sealed class ReginaMariaPluginHostTests
             => Task.FromResult(new McpServerContract(
                 endpoint.ServerId,
                 "reginamaria-mcp",
-                "0.5.38",
+                "0.5.41",
                 [
                     Tool("rm_session_status"),
                     Tool("rm_account_identity"),

@@ -96,7 +96,7 @@ public sealed class ReginaMariaPluginTests
         var result = await capability.InvokeAsync(Invocation(
             "reginamaria.appointment.book",
             "appointment:book",
-            BookingInput("Provider Doctor"),
+            BookingInput("Provider Doctor", "Child"),
             authorizationId: "action-1"));
 
         Assert.Equal(CapabilityOutcome.Succeeded, result.Outcome);
@@ -105,6 +105,80 @@ public sealed class ReginaMariaPluginTests
         Assert.Equal(["rm_prepare_appointment", "rm_create_appointment", "rm_list_appointments"], runtime.Calls.Select(item => item.Tool));
         var mutation = runtime.Calls.Single(item => item.Tool == "rm_create_appointment");
         Assert.Equal("action-token", ((JsonElement)mutation.Arguments["_tessera_action_token"]!).GetString());
+        Assert.Equal("Child", ((JsonElement)mutation.Arguments["as_dependent"]!).GetString());
+        var preflight = runtime.Calls.First(item => item.Tool == "rm_prepare_appointment");
+        Assert.Equal("Child", ((JsonElement)preflight.Arguments["as_dependent"]!).GetString());
+    }
+
+    [Fact]
+    public async Task Cancellation_proposal_preserves_dependent_in_exact_payload()
+    {
+        var runtime = new RecordingMcpRuntime((tool, arguments) => tool switch
+        {
+            "rm_list_appointments" => Success(JsonSerializer.SerializeToElement(new
+            {
+                appointments = new[]
+                {
+                    new { id = "appointment-1", doctor = "Provider Doctor" },
+                },
+            })),
+            _ => throw new InvalidOperationException(tool),
+        });
+        var capability = await new ReginaMariaPlugin().CreateCapabilityAsync(
+            "reginamaria.appointment.propose_cancel",
+            "1",
+            Context(runtime));
+        var input = JsonSerializer.SerializeToElement(new
+        {
+            appointmentId = "appointment-1",
+            asDependent = "Child",
+        });
+
+        var result = await capability.InvokeAsync(Invocation(
+            "reginamaria.appointment.propose_cancel",
+            "appointment/appointment-1/cancel",
+            input));
+
+        Assert.Equal(CapabilityOutcome.Succeeded, result.Outcome);
+        Assert.Equal("Child", result.Output.GetProperty("asDependent").GetString());
+        var listed = runtime.Calls.Single();
+        Assert.Equal("Child", ((JsonElement)listed.Arguments["as_dependent"]!).GetString());
+    }
+
+    [Fact]
+    public async Task Approved_cancellation_and_verification_use_the_selected_dependent()
+    {
+        var runtime = new RecordingMcpRuntime((tool, arguments) => tool switch
+        {
+            "rm_cancel_appointment" => Success(JsonSerializer.SerializeToElement(new
+            {
+                cancelled = true,
+            })),
+            "rm_list_appointments" => Success(JsonSerializer.SerializeToElement(new
+            {
+                appointments = Array.Empty<object>(),
+            })),
+            _ => throw new InvalidOperationException(tool),
+        });
+        var capability = await new ReginaMariaPlugin().CreateCapabilityAsync(
+            "reginamaria.appointment.cancel",
+            "1",
+            Context(runtime, resolveActionCredential: true));
+        var input = JsonSerializer.SerializeToElement(new
+        {
+            appointmentId = "appointment-1",
+            asDependent = "Child",
+        });
+
+        var result = await capability.InvokeAsync(Invocation(
+            "reginamaria.appointment.cancel",
+            "appointment/appointment-1/cancel",
+            input,
+            authorizationId: "action-1"));
+
+        Assert.Equal(CapabilityOutcome.Succeeded, result.Outcome);
+        Assert.All(runtime.Calls, call =>
+            Assert.Equal("Child", ((JsonElement)call.Arguments["as_dependent"]!).GetString()));
     }
 
     private static PluginCapabilityContext Context(RecordingMcpRuntime runtime, bool resolveActionCredential = false)
@@ -157,22 +231,27 @@ public sealed class ReginaMariaPluginTests
             authorizationId,
             "idempotency-key");
 
-    private static JsonElement BookingInput(string doctor) => JsonSerializer.SerializeToElement(new
+    private static JsonElement BookingInput(string doctor, string? dependent = null)
     {
-        slotReceipt = "signed-slot",
-        intervalId = "slot-1",
-        physicianId = "doctor-1",
-        serviceId = "service-1",
-        service = "Consultation",
-        doctor,
-        specialty = "Cardiology",
-        location = "Provider Clinic",
-        date = "2026-08-20",
-        time = "17:00",
-        mode = "in-clinic",
-        price = 123,
-        currency = "RON",
-    });
+        var values = new Dictionary<string, object?>
+        {
+            ["slotReceipt"] = "signed-slot",
+            ["intervalId"] = "slot-1",
+            ["physicianId"] = "doctor-1",
+            ["serviceId"] = "service-1",
+            ["service"] = "Consultation",
+            ["doctor"] = doctor,
+            ["specialty"] = "Cardiology",
+            ["location"] = "Provider Clinic",
+            ["date"] = "2026-08-20",
+            ["time"] = "17:00",
+            ["mode"] = "in-clinic",
+            ["price"] = 123,
+            ["currency"] = "RON",
+        };
+        if (dependent is not null) values["asDependent"] = dependent;
+        return JsonSerializer.SerializeToElement(values);
+    }
 
     private static JsonElement Prepared(string receipt, string interval, string physician) => JsonSerializer.SerializeToElement(new
     {
@@ -209,7 +288,7 @@ public sealed class ReginaMariaPluginTests
     }
 
     private static McpServerContract RmContract(string serverId)
-        => new(serverId, "reginamaria-mcp", "0.5.38",
+        => new(serverId, "reginamaria-mcp", "0.5.41",
         [
             Tool("rm_session_status"),
             Tool("rm_account_identity"),
