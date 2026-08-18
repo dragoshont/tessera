@@ -1811,7 +1811,7 @@ internal static class R2ProductEndpoints
                 if (boundary.Error is not null)
                     return boundary.Error;
                 if (request is null || request.CapabilityId != id)
-                    return Problem(400, "invalid_request");
+                    return InvalidRequest("request");
                 var idempotency = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
                 if (string.IsNullOrWhiteSpace(idempotency))
                     return Problem(400, "invalid_idempotency_key");
@@ -1972,14 +1972,7 @@ internal static class R2ProductEndpoints
                 }
                 catch (ArgumentException)
                 {
-                    return Results.Problem(
-                        statusCode: 400,
-                        title: "invalid_request",
-                        extensions: new Dictionary<string, object?>
-                        {
-                            ["code"] = "invalid_request",
-                            ["stage"] = stage,
-                        });
+                    return InvalidRequest(stage);
                 }
             }
         );
@@ -4906,6 +4899,16 @@ internal static class R2ProductEndpoints
             title: code,
             extensions: new Dictionary<string, object?> { { "code", code } }
         );
+
+    private static IResult InvalidRequest(string stage) =>
+        Results.Problem(
+            statusCode: 400,
+            title: "invalid_request",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = "invalid_request",
+                ["stage"] = stage,
+            });
 
     private sealed record ProductBoundary(
         SqliteKernelStore? Store = null,

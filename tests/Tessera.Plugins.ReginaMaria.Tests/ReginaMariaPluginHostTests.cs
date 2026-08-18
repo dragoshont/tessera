@@ -108,6 +108,26 @@ public sealed class ReginaMariaPluginHostTests
         Assert.Empty(runtime.Calls);
     }
 
+    [Fact]
+    public async Task Direct_invoke_unbound_request_reports_the_request_stage()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime();
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+
+        var response = await host.SendAsync(
+            "/api/v1/capabilities/reginamaria.appointments.list/invoke",
+            new { });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("invalid_request", problem.GetProperty("code").GetString());
+        Assert.Equal("request", problem.GetProperty("stage").GetString());
+        Assert.False(problem.TryGetProperty("detail", out _));
+        Assert.Empty(runtime.Calls);
+    }
+
     [Theory]
     [InlineData("https://rm.example/mcp")]
     [InlineData("https://rm.example/mcp/")]
