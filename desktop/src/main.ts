@@ -10,6 +10,7 @@ import {
   session,
   shell,
   type IpcMainInvokeEvent,
+  type WebFrameMain,
 } from 'electron'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -118,6 +119,7 @@ async function createWindow(): Promise<BrowserWindow> {
       devTools: !app.isPackaged,
     },
   })
+  mainWindow = window
   window.once('ready-to-show', () => window.show())
   window.on('close', () => void saveWindowState(window))
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -131,8 +133,14 @@ async function createWindow(): Promise<BrowserWindow> {
   })
   window.webContents.on('will-attach-webview', (event) => event.preventDefault())
   window.webContents.session.on('will-download', (event) => event.preventDefault())
-  await window.loadURL(APP_URL)
-  return window
+  try {
+    await window.loadURL(APP_URL)
+    return window
+  } catch (error) {
+    if (mainWindow === window) mainWindow = null
+    window.destroy()
+    throw error
+  }
 }
 
 function registerIpc(): void {
@@ -176,9 +184,15 @@ function registerIpc(): void {
 }
 
 function assertSender(event: IpcMainInvokeEvent): void {
-  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame)
+  const frame = event.senderFrame
+  if (!frame || !mainWindow || event.sender.id !== mainWindow.webContents.id || !isMainFrame(frame))
     throw new Error('IPC sender is not the main Tessera frame.')
-  assertRendererUrl(event.senderFrame.url)
+  assertRendererUrl(frame.url)
+}
+
+function isMainFrame(frame: WebFrameMain): boolean {
+  const top = frame.top
+  return Boolean(top && frame.processId === top.processId && frame.routingId === top.routingId)
 }
 
 function installPermissionPolicy(): void {

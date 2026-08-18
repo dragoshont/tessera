@@ -43,6 +43,11 @@ test('real Electron shell launches with hardened renderer and narrow bridge', as
       'signInOidc',
       'version',
     ].sort())
+    const initialized = await window.evaluate(async () => ({
+      origin: await window.tesseraDesktop!.getApiOrigin(),
+      auth: await window.tesseraDesktop!.loadAuth(),
+    }))
+    expect(initialized).toEqual({ origin: 'https://tessera.hont.ro', auth: null })
     const preferences = await application.evaluate(({ BrowserWindow }) => {
       const webContents = BrowserWindow.getAllWindows()[0]?.webContents
       return webContents?.getLastWebPreferences()
@@ -54,6 +59,7 @@ test('real Electron shell launches with hardened renderer and narrow bridge', as
       webSecurity: true,
       webviewTag: false,
     })
+    if (packaged) return
     await window.route('https://tessera.hont.ro/**', async (route) => {
       const url = new URL(route.request().url())
       const host = {

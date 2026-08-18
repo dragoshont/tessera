@@ -53,7 +53,6 @@ export class AuthStore {
   }
 
   private async read(): Promise<SecureData> {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('macOS secure storage is unavailable.')
     let info
     try {
       info = await lstat(this.file)
@@ -63,6 +62,7 @@ export class AuthStore {
     }
     if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_BYTES)
       throw new Error('Secure state file is invalid.')
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('macOS secure storage is unavailable.')
     const encrypted = await readFile(this.file)
     const parsed = JSON.parse(safeStorage.decryptString(encrypted)) as SecureData
     return {
