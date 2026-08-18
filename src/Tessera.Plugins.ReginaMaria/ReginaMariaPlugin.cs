@@ -639,7 +639,9 @@ internal static class ReginaMariaCapabilities
                 if (invocation.TargetScope != (reschedule ? $"appointment/{oldId}/reschedule" : "appointment:book")) return Failure("invalid_request");
                 var preflight = await mcp.PrepareAppointmentAsync(arguments, token);
                 if (!preflight.Succeeded || preflight.Output is null || !PreflightMatches(invocation.Input, arguments, preflight.Output.Value)) return Failure(preflight.ErrorCode ?? "provider_preflight_mismatch");
-                var result = await mcp.BookAsync(arguments, await actionToken(token), token);
+                var mutationArguments = arguments.EnumerateObject().ToDictionary(property => property.Name, property => property.Value.Clone(), StringComparer.Ordinal);
+                mutationArguments["confirm"] = JsonSerializer.SerializeToElement(true);
+                var result = await mcp.BookAsync(JsonSerializer.SerializeToElement(mutationArguments), await actionToken(token), token);
                 if (!result.Succeeded && !result.UnknownOutcome) return MutationFailure(result);
                 if (result.Succeeded && (result.Output is not { } successful || !successful.TryGetProperty("booked", out var booked) || booked.ValueKind != JsonValueKind.True)) return Failure("provider_rejected");
                 var providerId = result.Output is { } output && output.TryGetProperty("id", out var idValue) && idValue.ValueKind == JsonValueKind.String ? idValue.GetString() : null;
@@ -704,7 +706,7 @@ internal static class ReginaMariaCapabilities
     {
         Only(input, "accountId", "slotReceipt", "intervalId", "physicianId", "serviceId", "service", "doctor", "specialty", "location", "date", "time", "mode", "price", "currency", "oldAppointmentId", "asDependent");
         var serviceId = input.TryGetProperty("serviceId", out var value) && value.ValueKind == JsonValueKind.String ? ProviderReference(value.GetString()) : null;
-        return JsonSerializer.SerializeToElement(new { slot_receipt = ProviderReference(RequiredString(input, "slotReceipt", 4096)), interval_id = ProviderReference(RequiredString(input, "intervalId", 2048)), physician_id = ProviderReference(RequiredString(input, "physicianId", 2048)), service_id = serviceId, service = OptionalString(input, "service", 256), agree_virtual = true, old_appointment_id = reschedule ? ProviderReference(RequiredString(input, "oldAppointmentId", 2048)) : null, as_dependent = OptionalString(input, "asDependent", 256), confirm = true });
+        return JsonSerializer.SerializeToElement(new { slot_receipt = ProviderReference(RequiredString(input, "slotReceipt", 4096)), interval_id = ProviderReference(RequiredString(input, "intervalId", 2048)), physician_id = ProviderReference(RequiredString(input, "physicianId", 2048)), service_id = serviceId, service = OptionalString(input, "service", 256), agree_virtual = true, old_appointment_id = reschedule ? ProviderReference(RequiredString(input, "oldAppointmentId", 2048)) : null, as_dependent = OptionalString(input, "asDependent", 256) });
     }
 
     private static string RequiredAppointmentId(CapabilityInvocation invocation)

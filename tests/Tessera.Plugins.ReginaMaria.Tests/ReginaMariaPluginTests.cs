@@ -69,6 +69,7 @@ public sealed class ReginaMariaPluginTests
         Assert.Equal(123m, result.Output.GetProperty("price").GetDecimal());
         Assert.Equal("signed-slot", result.Output.GetProperty("slotReceipt").GetString());
         Assert.Equal(["rm_prepare_appointment"], runtime.Calls.Select(item => item.Tool));
+        Assert.DoesNotContain("confirm", Assert.Single(runtime.Calls).Arguments.Keys);
     }
 
     [Fact]
@@ -105,8 +106,10 @@ public sealed class ReginaMariaPluginTests
         Assert.Equal(["rm_prepare_appointment", "rm_create_appointment", "rm_list_appointments"], runtime.Calls.Select(item => item.Tool));
         var mutation = runtime.Calls.Single(item => item.Tool == "rm_create_appointment");
         Assert.Equal("action-token", ((JsonElement)mutation.Arguments["_tessera_action_token"]!).GetString());
+        Assert.True(((JsonElement)mutation.Arguments["confirm"]!).GetBoolean());
         Assert.Equal("Child", ((JsonElement)mutation.Arguments["as_dependent"]!).GetString());
         var preflight = runtime.Calls.First(item => item.Tool == "rm_prepare_appointment");
+        Assert.DoesNotContain("confirm", preflight.Arguments.Keys);
         Assert.Equal("Child", ((JsonElement)preflight.Arguments["as_dependent"]!).GetString());
     }
 
