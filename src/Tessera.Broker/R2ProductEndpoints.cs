@@ -1815,6 +1815,7 @@ internal static class R2ProductEndpoints
                 var idempotency = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
                 if (string.IsNullOrWhiteSpace(idempotency))
                     return Problem(400, "invalid_idempotency_key");
+                var stage = "request";
                 try
                 {
                     var store = boundary.Store!;
@@ -1844,6 +1845,7 @@ internal static class R2ProductEndpoints
                         request.ConversationId,
                         request.MessageId
                     );
+                    stage = "registry";
                     var registry = await ReadRegistry(
                         store,
                         custody,
@@ -1853,6 +1855,7 @@ internal static class R2ProductEndpoints
                         services.GetRequiredService<TesseraPluginRegistry>(),
                         services.GetRequiredService<IMcpClientRuntime>()
                     );
+                    stage = "execution";
                     var coordinator = new ExecutionCoordinator(
                         registry,
                         store,
@@ -1873,6 +1876,7 @@ internal static class R2ProductEndpoints
                             response.Result.FailureCode == "provider_timeout" ? 504 : 502,
                             response.Result.FailureCode ?? "provider_unavailable"
                         );
+                    stage = "evidence";
                     var now = DateTimeOffset.UtcNow;
                     var output = response.Result.Output.GetRawText();
                     var excerpt = output.Length <= 4096 ? output : output[..4096];
@@ -1922,6 +1926,7 @@ internal static class R2ProductEndpoints
                     );
                     if (request.ConversationId is not null)
                     {
+                        stage = "message";
                         var messageId = Guid.NewGuid().ToString("N");
                         await store.AddMessageAsync(
                             new(
@@ -1967,7 +1972,14 @@ internal static class R2ProductEndpoints
                 }
                 catch (ArgumentException)
                 {
-                    return Problem(400, "invalid_request");
+                    return Results.Problem(
+                        statusCode: 400,
+                        title: "invalid_request",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["code"] = "invalid_request",
+                            ["stage"] = stage,
+                        });
                 }
             }
         );
