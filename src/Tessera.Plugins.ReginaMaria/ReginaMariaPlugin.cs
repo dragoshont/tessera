@@ -52,10 +52,10 @@ public sealed class ReginaMariaPlugin : ITesseraCapabilityPlugin, ITesseraModelT
         new("search_regina_maria_availability", "reginamaria.availability.search", "1", "Search live scheduling availability for the explicitly selected Regina Maria account. This never books.", Schema(new Dictionary<string, object?> { ["specialty"] = Type("string"), ["service"] = Type("string"), ["doctor"] = Type("string"), ["location"] = Type("string"), ["city"] = Type("string"), ["dateFrom"] = Type("string"), ["dateTo"] = Type("string"), ["timePreferences"] = Type("string"), ["remoteOrInPerson"] = Type("string"), ["maxResults"] = Integer(1, 20) })),
         new("book_regina_maria_appointment", "reginamaria.appointment.book", "1", "Prepare a provider-validated Regina Maria booking for one-use human approval.", BookingSchema(reschedule: false), JobEligible: false, "reginamaria.appointment.propose_book", "1"),
         new("reschedule_regina_maria_appointment", "reginamaria.appointment.reschedule", "1", "Prepare a provider-validated Regina Maria reschedule for one-use human approval.", BookingSchema(reschedule: true), JobEligible: false, "reginamaria.appointment.propose_reschedule", "1"),
-        new("cancel_regina_maria_appointment", "reginamaria.appointment.cancel", "1", "Prepare an exact Regina Maria cancellation for one-use human approval.", Schema(new Dictionary<string, object?> { ["appointmentId"] = Type("string") }, ["appointmentId"]), JobEligible: false, "reginamaria.appointment.propose_cancel", "1"),
+        new("cancel_regina_maria_appointment", "reginamaria.appointment.cancel", "1", "Prepare an exact Regina Maria cancellation for one-use human approval.", Schema(new Dictionary<string, object?> { ["appointmentId"] = Type("string"), ["asDependent"] = Type("string") }, ["appointmentId"]), JobEligible: false, "reginamaria.appointment.propose_cancel", "1"),
     ];
 
-    public RequiredMcpServer RequiredMcpServer { get; } = new("reginamaria-mcp", "0.5.38");
+    public RequiredMcpServer RequiredMcpServer { get; } = new("reginamaria-mcp", "0.5.41");
 
     public IReadOnlyList<RequiredMcpTool> RequiredMcpTools { get; } =
     [
@@ -318,7 +318,7 @@ public sealed class ReginaMariaPlugin : ITesseraCapabilityPlugin, ITesseraModelT
     {
         var properties = new Dictionary<string, object?>
         {
-            ["slotReceipt"] = Type("string"), ["intervalId"] = Type("string"), ["physicianId"] = Type("string"), ["serviceId"] = Type("string"),
+            ["slotReceipt"] = Type("string"), ["intervalId"] = Type("string"), ["physicianId"] = Type("string"), ["serviceId"] = Type("string"), ["asDependent"] = Type("string"),
             ["service"] = Type("string"), ["doctor"] = Type("string"), ["specialty"] = Type("string"), ["location"] = Type("string"),
             ["date"] = Type("string"), ["time"] = Type("string"), ["mode"] = Type("string"), ["price"] = Type("number"), ["currency"] = Type("string"),
         };
@@ -608,10 +608,11 @@ internal static class ReginaMariaCapabilities
             try
             {
                 var id = RequiredAppointmentId(invocation);
-                var listed = await mcp.ListAppointmentsAsync(JsonSerializer.SerializeToElement(new { upcoming = true, first = 0, max_results = 20 }), token);
+                var dependent = OptionalString(invocation.Input, "asDependent", 256);
+                var listed = await mcp.ListAppointmentsAsync(JsonSerializer.SerializeToElement(new { upcoming = true, first = 0, max_results = 20, as_dependent = dependent }), token);
                 if (!listed.Succeeded || listed.Output is null) return Result(listed);
                 var appointment = Appointment(listed.Output.Value, id);
-                return appointment is null ? Failure("appointment_not_found") : Success(CanonicalCancellation(appointment.Value));
+                return appointment is null ? Failure("appointment_not_found") : Success(CanonicalCancellation(appointment.Value, invocation.Input));
             }
             catch (ArgumentException) { return Failure("invalid_request"); }
         }
@@ -633,7 +634,8 @@ internal static class ReginaMariaCapabilities
                 if (!result.Succeeded && !result.UnknownOutcome) return MutationFailure(result);
                 if (result.Succeeded && (result.Output is not { } successful || !successful.TryGetProperty("booked", out var booked) || booked.ValueKind != JsonValueKind.True)) return Failure("provider_rejected");
                 var providerId = result.Output is { } output && output.TryGetProperty("id", out var idValue) && idValue.ValueKind == JsonValueKind.String ? idValue.GetString() : null;
-                var listed = await mcp.ListAppointmentsAsync(JsonSerializer.SerializeToElement(new { upcoming = true, first = 0, max_results = 20 }), token);
+                var dependent = OptionalString(invocation.Input, "asDependent", 256);
+                var listed = await mcp.ListAppointmentsAsync(JsonSerializer.SerializeToElement(new { upcoming = true, first = 0, max_results = 20, as_dependent = dependent }), token);
                 if (!listed.Succeeded || listed.Output is null) return Unknown(providerId, result.ErrorCode ?? "verification_failed");
                 var match = providerId is null ? FindNaturalMatch(listed.Output.Value, invocation.Input) : Appointment(listed.Output.Value, providerId);
                 if (match is null) return Unknown(providerId, result.ErrorCode ?? "verification_failed");
@@ -652,10 +654,11 @@ internal static class ReginaMariaCapabilities
             try
             {
                 var id = RequiredAppointmentId(invocation);
-                var result = await mcp.CancelAsync(JsonSerializer.SerializeToElement(new { appointment_id = id, confirm = true }), await actionToken(token), token);
+                var dependent = OptionalString(invocation.Input, "asDependent", 256);
+                var result = await mcp.CancelAsync(JsonSerializer.SerializeToElement(new { appointment_id = id, confirm = true, as_dependent = dependent }), await actionToken(token), token);
                 if (!result.Succeeded && !result.UnknownOutcome) return MutationFailure(result);
                 if (result.Succeeded && (result.Output is not { } successful || !successful.TryGetProperty("cancelled", out var cancelled) || cancelled.ValueKind != JsonValueKind.True)) return Failure("provider_rejected");
-                var listed = await mcp.ListAppointmentsAsync(JsonSerializer.SerializeToElement(new { upcoming = true, first = 0, max_results = 20 }), token);
+                var listed = await mcp.ListAppointmentsAsync(JsonSerializer.SerializeToElement(new { upcoming = true, first = 0, max_results = 20, as_dependent = dependent }), token);
                 if (!listed.Succeeded || listed.Output is null) return Unknown(id, result.ErrorCode ?? "verification_failed");
                 return Appointment(listed.Output.Value, id) is null
                     ? new(CapabilityOutcome.Succeeded, JsonSerializer.SerializeToElement(new { appointmentId = id, cancelled = true, reconciled = result.UnknownOutcome }), id, "provider_verified", null)
@@ -690,16 +693,16 @@ internal static class ReginaMariaCapabilities
 
     private static JsonElement BookingArguments(JsonElement input, bool reschedule)
     {
-        Only(input, "accountId", "slotReceipt", "intervalId", "physicianId", "serviceId", "service", "doctor", "specialty", "location", "date", "time", "mode", "price", "currency", "oldAppointmentId");
+        Only(input, "accountId", "slotReceipt", "intervalId", "physicianId", "serviceId", "service", "doctor", "specialty", "location", "date", "time", "mode", "price", "currency", "oldAppointmentId", "asDependent");
         var serviceId = input.TryGetProperty("serviceId", out var value) && value.ValueKind == JsonValueKind.String ? ProviderReference(value.GetString()) : null;
-        return JsonSerializer.SerializeToElement(new { slot_receipt = ProviderReference(RequiredString(input, "slotReceipt", 4096)), interval_id = ProviderReference(RequiredString(input, "intervalId", 2048)), physician_id = ProviderReference(RequiredString(input, "physicianId", 2048)), service_id = serviceId, service = OptionalString(input, "service", 256), agree_virtual = true, old_appointment_id = reschedule ? ProviderReference(RequiredString(input, "oldAppointmentId", 2048)) : null, confirm = true });
+        return JsonSerializer.SerializeToElement(new { slot_receipt = ProviderReference(RequiredString(input, "slotReceipt", 4096)), interval_id = ProviderReference(RequiredString(input, "intervalId", 2048)), physician_id = ProviderReference(RequiredString(input, "physicianId", 2048)), service_id = serviceId, service = OptionalString(input, "service", 256), agree_virtual = true, old_appointment_id = reschedule ? ProviderReference(RequiredString(input, "oldAppointmentId", 2048)) : null, as_dependent = OptionalString(input, "asDependent", 256), confirm = true });
     }
 
     private static string RequiredAppointmentId(CapabilityInvocation invocation)
     {
         var id = ProviderReference(RequiredString(invocation.Input, "appointmentId", 2048));
         if (invocation.TargetScope != $"appointment/{id}/cancel") throw new ArgumentException();
-        Only(invocation.Input, "accountId", "appointmentId", "doctor", "specialty", "service", "location", "date", "time", "price", "currency");
+        Only(invocation.Input, "accountId", "appointmentId", "doctor", "specialty", "service", "location", "date", "time", "price", "currency", "asDependent");
         return id;
     }
 
@@ -724,14 +727,16 @@ internal static class ReginaMariaCapabilities
         if (provider.TryGetProperty("price", out var price) && price.ValueKind == JsonValueKind.Number) values["price"] = price.GetDecimal();
         if (provider.TryGetProperty("currency", out var currency) && currency.ValueKind == JsonValueKind.String) values["currency"] = currency.GetString();
         if (reschedule) values["oldAppointmentId"] = RequiredString(arguments, "old_appointment_id", 2048);
+        if (OptionalString(arguments, "as_dependent", 256) is { } dependent) values["asDependent"] = dependent;
         return JsonSerializer.SerializeToElement(values);
     }
 
-    private static JsonElement CanonicalCancellation(JsonElement appointment)
+    private static JsonElement CanonicalCancellation(JsonElement appointment, JsonElement input)
     {
         var values = new Dictionary<string, object?>(StringComparer.Ordinal) { ["appointmentId"] = RequiredString(appointment, "id", 2048) };
         foreach (var name in new[] { "doctor", "specialty", "location", "date", "time" }) if (OptionalString(appointment, name, 256) is { } value) values[name] = value;
         if (appointment.TryGetProperty("services", out var services) && services.ValueKind == JsonValueKind.Array && services.GetArrayLength() > 0 && services[0].ValueKind == JsonValueKind.String) values["service"] = services[0].GetString();
+        if (OptionalString(input, "asDependent", 256) is { } dependent) values["asDependent"] = dependent;
         return JsonSerializer.SerializeToElement(values);
     }
 
@@ -749,7 +754,7 @@ internal static class ReginaMariaCapabilities
     private static string? AppointmentId(JsonElement item) => item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString() : null;
     private static string ProviderReference(string? value) { if (string.IsNullOrWhiteSpace(value) || value.Length > 4096 || value.Any(char.IsControl)) throw new ArgumentException(); return value; }
     private static string RequiredString(JsonElement input, string name, int max) => OptionalString(input, name, max) ?? throw new ArgumentException();
-    private static string? OptionalString(JsonElement input, string name, int max) { if (!input.TryGetProperty(name, out var value)) return null; if (value.ValueKind != JsonValueKind.String) throw new ArgumentException(); var text = value.GetString(); if (string.IsNullOrWhiteSpace(text) || text.Length > max || text.Any(character => char.IsControl(character) && character != '\t')) throw new ArgumentException(); return text; }
+    private static string? OptionalString(JsonElement input, string name, int max) { if (!input.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null) return null; if (value.ValueKind != JsonValueKind.String) throw new ArgumentException(); var text = value.GetString(); if (string.IsNullOrWhiteSpace(text) || text.Length > max || text.Any(character => char.IsControl(character) && character != '\t')) throw new ArgumentException(); return text; }
     private static void Only(JsonElement input, params string[] names) { if (input.ValueKind != JsonValueKind.Object) throw new ArgumentException(); var allowed = names.ToHashSet(StringComparer.Ordinal); if (input.EnumerateObject().Any(property => !allowed.Contains(property.Name))) throw new ArgumentException(); }
     private static CapabilityResult Result(ReginaMariaMcpResult result) => result.Succeeded && result.Output is { } output ? Success(output) : new(result.UnknownOutcome ? CapabilityOutcome.UnknownOutcome : CapabilityOutcome.Failed, JsonSerializer.SerializeToElement(new { }), null, null, result.ErrorCode ?? "provider_unavailable");
     private static CapabilityResult MutationFailure(ReginaMariaMcpResult result) => result.UnknownOutcome ? Unknown(null, result.ErrorCode ?? "provider_unavailable") : Failure(result.ErrorCode ?? "provider_unavailable");

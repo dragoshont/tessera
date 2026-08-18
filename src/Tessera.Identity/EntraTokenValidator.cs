@@ -118,6 +118,18 @@ public sealed class EntraTokenValidator : ITokenValidator
             return TesseraTokenResult.Fail("token tenant (tid) is missing or does not match the configured tenant");
         }
 
+        if (_options.AllowedPreferredUsernames.Count > 0)
+        {
+            var preferred = claims.GetValueOrDefault("email");
+            if (string.IsNullOrWhiteSpace(preferred))
+                preferred = claims.GetValueOrDefault("preferred_username");
+            if (string.IsNullOrWhiteSpace(preferred)
+                || !_options.AllowedPreferredUsernames.Contains(
+                    preferred,
+                    StringComparer.OrdinalIgnoreCase))
+                return TesseraTokenResult.Fail("token principal is not in the configured allow-list");
+        }
+
         return TesseraTokenResult.Success(claims);
     }
 

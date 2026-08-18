@@ -63,6 +63,22 @@ public sealed class TesseraTokenResult
     public static TesseraTokenResult Success(IReadOnlyDictionary<string, string> claims) => new(true, null, claims);
 
     /// <summary>
+    /// Rebinds an already-validated token to the configured canonical issuer for
+    /// owner identity derivation. No unsigned claim is introduced: subject and
+    /// user claims remain those validated by the original trust lane.
+    /// </summary>
+    public TesseraTokenResult WithCanonicalIssuer(string issuer)
+    {
+        if (!Succeeded) return this;
+        ArgumentException.ThrowIfNullOrWhiteSpace(issuer);
+        var claims = new Dictionary<string, string>(_claims, StringComparer.Ordinal)
+        {
+            ["iss"] = issuer,
+        };
+        return Success(claims);
+    }
+
+    /// <summary>
     /// Converts a successful user token to the verified end-user assertion (FOR WHOM).
     /// Returns <c>null</c> for an app-only token or a failed validation.
     /// </summary>
