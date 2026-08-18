@@ -129,7 +129,7 @@ public sealed class ReginaMariaPluginHostTests
     }
 
     [Fact]
-    public async Task Direct_invoke_discovery_rejection_reports_registry_capability_stage()
+    public async Task Direct_invoke_discovery_rejection_reports_mcp_discovery_stage()
     {
         using var module = ModuleRegistry.Create();
         var runtime = new ListMcpRuntime(rejectDiscovery: true);
@@ -152,7 +152,7 @@ public sealed class ReginaMariaPluginHostTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal("invalid_request", problem.GetProperty("code").GetString());
-        Assert.Equal("registry-capability", problem.GetProperty("stage").GetString());
+        Assert.Equal("mcp-discovery", problem.GetProperty("stage").GetString());
         Assert.False(problem.TryGetProperty("detail", out _));
         Assert.Empty(runtime.Calls);
     }
