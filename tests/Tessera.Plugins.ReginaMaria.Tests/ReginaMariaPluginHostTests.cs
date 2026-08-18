@@ -50,6 +50,32 @@ public sealed class ReginaMariaPluginHostTests
         Assert.All(runtime.Endpoints, endpoint => Assert.Equal("/mcp/", endpoint.AbsolutePath));
     }
 
+    [Fact]
+    public async Task Direct_invoke_denies_RM_output_union_without_a_compatible_branch()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime(incompatibleCreateOutput: true);
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+
+        var response = await host.SendAsync(
+            "/api/v1/capabilities/reginamaria.appointments.list/invoke",
+            new
+            {
+                capabilityId = "reginamaria.appointments.list",
+                capabilityVersion = "1",
+                pluginId = "regina-maria",
+                pluginVersion = "1.0.0",
+                accountId = "rm-owner",
+                target = "appointments:list",
+                input = new { upcoming = true, maxResults = 20 },
+            });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains("mcp_schema_incompatible", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Empty(runtime.Calls);
+    }
+
     [Theory]
     [InlineData("https://rm.example/mcp")]
     [InlineData("https://rm.example/mcp/")]
@@ -313,7 +339,7 @@ public sealed class ReginaMariaPluginHostTests
             call => call.AccountId == "rm-owner" && call.CapabilityId == "reginamaria.appointments.list");
         Assert.Equal("rm-owner", persistedCall.ExternalServerId);
         Assert.Equal("reginamaria-mcp", persistedCall.ExternalServerName);
-        Assert.Equal("0.5.41", persistedCall.ExternalServerVersion);
+        Assert.Equal("0.5.42", persistedCall.ExternalServerVersion);
         Assert.Equal("rm_list_appointments", persistedCall.ExternalToolName);
     }
 
@@ -621,7 +647,7 @@ public sealed class ReginaMariaPluginHostTests
         public void Dispose() => Directory.Delete(directory, recursive: true);
     }
 
-    private sealed class ListMcpRuntime : IMcpClientRuntime
+    private sealed class ListMcpRuntime(bool incompatibleCreateOutput = false) : IMcpClientRuntime
     {
         public List<string> Calls { get; } = [];
         public List<Uri> Endpoints { get; } = [];
@@ -632,7 +658,7 @@ public sealed class ReginaMariaPluginHostTests
             return Task.FromResult(new McpServerContract(
                 endpoint.ServerId,
                 "reginamaria-mcp",
-                "0.5.41",
+                "0.5.42",
                 [
                     Tool("rm_session_status"),
                     Tool("rm_account_identity"),
@@ -696,7 +722,7 @@ public sealed class ReginaMariaPluginHostTests
                 null));
         }
 
-        private static McpToolContract Tool(string name, params string[] properties)
+        private McpToolContract Tool(string name, params string[] properties)
         {
             var input = JsonSerializer.SerializeToElement(new
             {
@@ -705,38 +731,85 @@ public sealed class ReginaMariaPluginHostTests
                 required = properties,
                 additionalProperties = false,
             });
-            var outputProperties = name switch
+            var output = name switch
             {
-                "rm_session_status" => new Dictionary<string, object?> { ["alive"] = new { type = "boolean" } },
-                "rm_account_identity" => new Dictionary<string, object?>
+                "rm_prepare_appointment" => JsonSerializer.SerializeToElement(new
+                {
+                    oneOf = new[]
+                    {
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["bookable"] = new { type = "boolean", @const = true },
+                            ["slot_receipt"] = new { type = "string" },
+                        }),
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["bookable"] = new { type = "boolean", @const = false },
+                        }),
+                    },
+                }),
+                "rm_create_appointment" => JsonSerializer.SerializeToElement(new
+                {
+                    oneOf = new[]
+                    {
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["approval_required"] = new { type = "boolean", @const = true },
+                            ["action_id"] = new { type = "string" },
+                        }),
+                        incompatibleCreateOutput
+                            ? ObjectSchema(new Dictionary<string, object?>
+                            {
+                                ["booked"] = new { type = "boolean", @const = false },
+                            })
+                            : ObjectSchema(new Dictionary<string, object?>
+                            {
+                                ["booked"] = new { type = "boolean", @const = true },
+                                ["id"] = new { type = "string" },
+                            }),
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["booked"] = new { type = "boolean", @const = false },
+                        }),
+                    },
+                }),
+                "rm_cancel_appointment" => JsonSerializer.SerializeToElement(new
+                {
+                    oneOf = new[]
+                    {
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["approval_required"] = new { type = "boolean", @const = true },
+                            ["action_id"] = new { type = "string" },
+                        }),
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["cancelled"] = new { type = "boolean" },
+                        }),
+                    },
+                }),
+                "rm_session_status" => ObjectSchema(new Dictionary<string, object?> { ["alive"] = new { type = "boolean" } }),
+                "rm_account_identity" => ObjectSchema(new Dictionary<string, object?>
                 {
                     ["provider_account_id"] = new { type = "string" },
                     ["display_name"] = new { type = "string" },
-                },
-                "rm_list_appointments" => new Dictionary<string, object?> { ["appointments"] = new { type = "array" } },
-                "rm_search_slots" => new Dictionary<string, object?> { ["slots"] = new { type = "array" } },
-                "rm_prepare_appointment" => new Dictionary<string, object?>
-                {
-                    ["bookable"] = new { type = "boolean" },
-                    ["slot_receipt"] = new { type = "string" },
-                },
-                "rm_create_appointment" => new Dictionary<string, object?>
-                {
-                    ["booked"] = new { type = "boolean" },
-                    ["id"] = new { type = "string" },
-                },
-                "rm_cancel_appointment" => new Dictionary<string, object?> { ["cancelled"] = new { type = "boolean" } },
-                _ => [],
+                }),
+                "rm_list_appointments" => ObjectSchema(new Dictionary<string, object?> { ["appointments"] = new { type = "array" } }),
+                "rm_search_slots" => ObjectSchema(new Dictionary<string, object?> { ["slots"] = new { type = "array" } }),
+                _ => ObjectSchema([]),
             };
-            var output = JsonSerializer.SerializeToElement(new
-            {
-                type = "object",
-                properties = outputProperties,
-                required = outputProperties.Keys.ToArray(),
-                additionalProperties = false,
-            });
+
             return new(name, input, output);
         }
+
+        private static JsonElement ObjectSchema(Dictionary<string, object?> properties)
+            => JsonSerializer.SerializeToElement(new
+            {
+                type = "object",
+                properties,
+                required = properties.Keys.ToArray(),
+                additionalProperties = false,
+            });
     }
 
     private sealed class NullTransport : IHttpTransport
