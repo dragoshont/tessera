@@ -418,6 +418,12 @@ public sealed class TesseraPluginRegistry
         JsonElement schema,
         IReadOnlyList<RequiredMcpProperty> requirements)
     {
+        foreach (var unionName in new[] { "oneOf", "anyOf" })
+        {
+            if (schema.TryGetProperty(unionName, out var branches)
+                && branches.ValueKind == JsonValueKind.Array)
+                return branches.EnumerateArray().Any(branch => CompatibleSchema(branch, requirements));
+        }
         if (schema.ValueKind != JsonValueKind.Object
             || !schema.TryGetProperty("type", out var rootType)
             || rootType.GetString() != "object"

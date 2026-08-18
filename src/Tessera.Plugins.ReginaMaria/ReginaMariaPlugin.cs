@@ -55,7 +55,7 @@ public sealed class ReginaMariaPlugin : ITesseraCapabilityPlugin, ITesseraModelT
         new("cancel_regina_maria_appointment", "reginamaria.appointment.cancel", "1", "Prepare an exact Regina Maria cancellation for one-use human approval.", Schema(new Dictionary<string, object?> { ["appointmentId"] = Type("string"), ["asDependent"] = Type("string") }, ["appointmentId"]), JobEligible: false, "reginamaria.appointment.propose_cancel", "1"),
     ];
 
-    public RequiredMcpServer RequiredMcpServer { get; } = new("reginamaria-mcp", "0.5.41");
+    public RequiredMcpServer RequiredMcpServer { get; } = new("reginamaria-mcp", "0.5.42");
 
     public IReadOnlyList<RequiredMcpTool> RequiredMcpTools { get; } =
     [

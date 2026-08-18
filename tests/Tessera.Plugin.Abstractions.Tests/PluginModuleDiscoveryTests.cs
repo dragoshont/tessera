@@ -280,6 +280,24 @@ public sealed class PluginModuleDiscoveryTests
     }
 
     [Fact]
+    public async Task Registry_accepts_a_compatible_MCP_output_union_branch()
+    {
+        using var directory = ModuleDirectory.Create();
+        var registry = PluginModuleDiscovery.Discover(directory.Path, [directory.Installation]);
+        var context = new PluginCapabilityContext(
+            null,
+            CredentialBundle.Empty,
+            new NullTransport(),
+            new NullMcpRuntime(unionSchema: true),
+            (_, _) => ValueTask.FromResult(CredentialBundle.Empty));
+
+        var capability = await registry.CreateCapabilityAsync(
+            "neutral.fixture", "1.0.0", "neutral.read", "1.0.0", context);
+
+        Assert.Equal("neutral.read", capability.Descriptor.CapabilityId);
+    }
+
+    [Fact]
     public async Task Write_capability_defers_MCP_discovery_and_credentials_until_invocation()
     {
         using var directory = ModuleDirectory.Create();
@@ -423,7 +441,8 @@ public sealed class PluginModuleDiscoveryTests
         string serverVersion = "1.0.0",
         bool includeExtraTool = false,
         bool duplicateRequiredTool = false,
-        bool propertiesRequired = true) : IMcpClientRuntime
+        bool propertiesRequired = true,
+        bool unionSchema = false) : IMcpClientRuntime
     {
         public int DiscoverCount { get; private set; }
 
@@ -443,7 +462,17 @@ public sealed class PluginModuleDiscoveryTests
                 required = propertiesRequired && schemaCompatible ? new[] { "value" } : [],
                 additionalProperties = false,
             });
-            var tools = new List<McpToolContract> { new("shared", schema, schema) };
+            var output = unionSchema
+                ? JsonSerializer.SerializeToElement(new
+                {
+                    oneOf = new object[]
+                    {
+                        new { type = "object", properties = new { denied = new { type = "boolean" } }, required = new[] { "denied" } },
+                        schema,
+                    },
+                })
+                : schema;
+            var tools = new List<McpToolContract> { new("shared", schema, output) };
             if (includeExtraTool) tools.Add(new("unclassified_write", schema, schema));
             if (duplicateRequiredTool) tools.Add(new("shared", schema, schema));
             return Task.FromResult(new McpServerContract(
