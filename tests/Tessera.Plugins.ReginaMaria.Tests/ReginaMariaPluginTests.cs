@@ -61,7 +61,7 @@ public sealed class ReginaMariaPluginTests
         var result = await capability.InvokeAsync(Invocation(
             "reginamaria.appointment.propose_book",
             "appointment:book",
-            BookingInput("Untrusted model label")));
+            BookingInput("Untrusted model label", includeServiceId: false, includeService: false)));
 
         Assert.Equal(CapabilityOutcome.Succeeded, result.Outcome);
         Assert.Equal("Provider Doctor", result.Output.GetProperty("doctor").GetString());
@@ -69,7 +69,36 @@ public sealed class ReginaMariaPluginTests
         Assert.Equal(123m, result.Output.GetProperty("price").GetDecimal());
         Assert.Equal("signed-slot", result.Output.GetProperty("slotReceipt").GetString());
         Assert.Equal(["rm_prepare_appointment"], runtime.Calls.Select(item => item.Tool));
-        Assert.DoesNotContain("confirm", Assert.Single(runtime.Calls).Arguments.Keys);
+        var arguments = Assert.Single(runtime.Calls).Arguments;
+        Assert.DoesNotContain("confirm", arguments.Keys);
+        Assert.DoesNotContain("service_id", arguments.Keys);
+        Assert.DoesNotContain("service", arguments.Keys);
+        Assert.DoesNotContain("old_appointment_id", arguments.Keys);
+        Assert.DoesNotContain("as_dependent", arguments.Keys);
+    }
+
+    [Fact]
+    public async Task Reschedule_proposal_includes_old_appointment_id_and_omits_absent_optionals()
+    {
+        var runtime = new RecordingMcpRuntime((tool, _) => tool == "rm_prepare_appointment"
+            ? Success(Prepared("signed-slot", "slot-1", "doctor-1"))
+            : throw new InvalidOperationException(tool));
+        var capability = await new ReginaMariaPlugin().CreateCapabilityAsync(
+            "reginamaria.appointment.propose_reschedule",
+            "1",
+            Context(runtime));
+        var result = await capability.InvokeAsync(Invocation(
+            "reginamaria.appointment.propose_reschedule",
+            "appointment/old-1/reschedule",
+            BookingInput("Provider Doctor", includeServiceId: false, oldAppointmentId: "old-1")));
+
+        Assert.Equal(CapabilityOutcome.Succeeded, result.Outcome);
+        Assert.Equal("old-1", result.Output.GetProperty("oldAppointmentId").GetString());
+        var arguments = Assert.Single(runtime.Calls).Arguments;
+        Assert.Equal("old-1", ((JsonElement)arguments["old_appointment_id"]!).GetString());
+        Assert.DoesNotContain("service_id", arguments.Keys);
+        Assert.DoesNotContain("as_dependent", arguments.Keys);
+        Assert.DoesNotContain("confirm", arguments.Keys);
     }
 
     [Fact]
@@ -110,6 +139,7 @@ public sealed class ReginaMariaPluginTests
         Assert.Equal("Child", ((JsonElement)mutation.Arguments["as_dependent"]!).GetString());
         var preflight = runtime.Calls.First(item => item.Tool == "rm_prepare_appointment");
         Assert.DoesNotContain("confirm", preflight.Arguments.Keys);
+        Assert.Equal("service-1", ((JsonElement)preflight.Arguments["service_id"]!).GetString());
         Assert.Equal("Child", ((JsonElement)preflight.Arguments["as_dependent"]!).GetString());
     }
 
@@ -234,15 +264,18 @@ public sealed class ReginaMariaPluginTests
             authorizationId,
             "idempotency-key");
 
-    private static JsonElement BookingInput(string doctor, string? dependent = null)
+    private static JsonElement BookingInput(
+        string doctor,
+        string? dependent = null,
+        bool includeServiceId = true,
+        bool includeService = true,
+        string? oldAppointmentId = null)
     {
         var values = new Dictionary<string, object?>
         {
             ["slotReceipt"] = "signed-slot",
             ["intervalId"] = "slot-1",
             ["physicianId"] = "doctor-1",
-            ["serviceId"] = "service-1",
-            ["service"] = "Consultation",
             ["doctor"] = doctor,
             ["specialty"] = "Cardiology",
             ["location"] = "Provider Clinic",
@@ -252,7 +285,10 @@ public sealed class ReginaMariaPluginTests
             ["price"] = 123,
             ["currency"] = "RON",
         };
+        if (includeServiceId) values["serviceId"] = "service-1";
+        if (includeService) values["service"] = "Consultation";
         if (dependent is not null) values["asDependent"] = dependent;
+        if (oldAppointmentId is not null) values["oldAppointmentId"] = oldAppointmentId;
         return JsonSerializer.SerializeToElement(values);
     }
 
