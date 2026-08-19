@@ -61,7 +61,7 @@ public sealed class ReginaMariaPluginTests
         var result = await capability.InvokeAsync(Invocation(
             "reginamaria.appointment.propose_book",
             "appointment:book",
-            BookingInput("Untrusted model label", includeServiceId: false)));
+            BookingInput("Untrusted model label", includeServiceId: false, includeService: false)));
 
         Assert.Equal(CapabilityOutcome.Succeeded, result.Outcome);
         Assert.Equal("Provider Doctor", result.Output.GetProperty("doctor").GetString());
@@ -72,6 +72,7 @@ public sealed class ReginaMariaPluginTests
         var arguments = Assert.Single(runtime.Calls).Arguments;
         Assert.DoesNotContain("confirm", arguments.Keys);
         Assert.DoesNotContain("service_id", arguments.Keys);
+        Assert.DoesNotContain("service", arguments.Keys);
         Assert.DoesNotContain("old_appointment_id", arguments.Keys);
         Assert.DoesNotContain("as_dependent", arguments.Keys);
     }
@@ -267,6 +268,7 @@ public sealed class ReginaMariaPluginTests
         string doctor,
         string? dependent = null,
         bool includeServiceId = true,
+        bool includeService = true,
         string? oldAppointmentId = null)
     {
         var values = new Dictionary<string, object?>
@@ -274,7 +276,6 @@ public sealed class ReginaMariaPluginTests
             ["slotReceipt"] = "signed-slot",
             ["intervalId"] = "slot-1",
             ["physicianId"] = "doctor-1",
-            ["service"] = "Consultation",
             ["doctor"] = doctor,
             ["specialty"] = "Cardiology",
             ["location"] = "Provider Clinic",
@@ -285,6 +286,7 @@ public sealed class ReginaMariaPluginTests
             ["currency"] = "RON",
         };
         if (includeServiceId) values["serviceId"] = "service-1";
+        if (includeService) values["service"] = "Consultation";
         if (dependent is not null) values["asDependent"] = dependent;
         if (oldAppointmentId is not null) values["oldAppointmentId"] = oldAppointmentId;
         return JsonSerializer.SerializeToElement(values);
