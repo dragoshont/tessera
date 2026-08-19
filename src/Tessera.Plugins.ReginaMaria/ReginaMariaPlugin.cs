@@ -706,7 +706,18 @@ internal static class ReginaMariaCapabilities
     {
         Only(input, "accountId", "slotReceipt", "intervalId", "physicianId", "serviceId", "service", "doctor", "specialty", "location", "date", "time", "mode", "price", "currency", "oldAppointmentId", "asDependent");
         var serviceId = input.TryGetProperty("serviceId", out var value) && value.ValueKind == JsonValueKind.String ? ProviderReference(value.GetString()) : null;
-        return JsonSerializer.SerializeToElement(new { slot_receipt = ProviderReference(RequiredString(input, "slotReceipt", 4096)), interval_id = ProviderReference(RequiredString(input, "intervalId", 2048)), physician_id = ProviderReference(RequiredString(input, "physicianId", 2048)), service_id = serviceId, service = OptionalString(input, "service", 256), agree_virtual = true, old_appointment_id = reschedule ? ProviderReference(RequiredString(input, "oldAppointmentId", 2048)) : null, as_dependent = OptionalString(input, "asDependent", 256) });
+        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["slot_receipt"] = ProviderReference(RequiredString(input, "slotReceipt", 4096)),
+            ["interval_id"] = ProviderReference(RequiredString(input, "intervalId", 2048)),
+            ["physician_id"] = ProviderReference(RequiredString(input, "physicianId", 2048)),
+            ["agree_virtual"] = true,
+        };
+        if (serviceId is not null) values["service_id"] = serviceId;
+        if (OptionalString(input, "service", 256) is { } service) values["service"] = service;
+        if (reschedule) values["old_appointment_id"] = ProviderReference(RequiredString(input, "oldAppointmentId", 2048));
+        if (OptionalString(input, "asDependent", 256) is { } dependent) values["as_dependent"] = dependent;
+        return JsonSerializer.SerializeToElement(values);
     }
 
     private static string RequiredAppointmentId(CapabilityInvocation invocation)
