@@ -185,7 +185,13 @@ public static class ContextBuilder
             canonical.Append(item.ItemId).Append('|').Append(item.Kind).Append('|')
                 .Append(item.Content).Append('|').Append(item.Sensitivity).Append('|')
                 .Append(item.Relevance.ToString(CultureInfo.InvariantCulture)).Append('|')
-                .Append(item.Timestamp.ToString("O", CultureInfo.InvariantCulture)).Append('\n');
+                .Append(item.Timestamp.ToString("O", CultureInfo.InvariantCulture));
+            foreach (var provenanceRef in item.ProvenanceRefs.Order(StringComparer.Ordinal))
+            {
+                canonical.Append('|').Append(provenanceRef);
+            }
+
+            canonical.Append('\n');
         }
 
         foreach (var omission in omissions)

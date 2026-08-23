@@ -184,6 +184,77 @@ public sealed class SqliteStatePersistenceTests
     }
 
     [Fact]
+    public async Task Trusted_state_projects_corrected_history_and_conflicts_from_existing_schema()
+    {
+        using var database = new TemporaryDatabase();
+        var principal = KernelTestData.Principal();
+        var store = database.CreateStore();
+        await store.InitializeAsync();
+        await store.AddAsync(principal);
+        var oldEvidence = KernelTestData.Evidence(principal.PrincipalId, "evidence-old", "Appointment at 15:00");
+        var newEvidence = KernelTestData.Evidence(principal.PrincipalId, "evidence-new", "Appointment at 16:30");
+        var locationA = KernelTestData.Evidence(principal.PrincipalId, "evidence-location-a", "Location A");
+        var locationB = KernelTestData.Evidence(principal.PrincipalId, "evidence-location-b", "Location B");
+        foreach (var evidence in new[] { oldEvidence, newEvidence, locationA, locationB })
+        {
+            await store.AddAsync(principal.PrincipalId, evidence);
+        }
+
+        var oldCurrent = AssertionService.PromoteCandidate(
+            KernelTestData.Assertion(
+                principal.PrincipalId,
+                "assertion-old",
+                "15:00",
+                AssertionType.Inferred,
+                EpistemicStatus.Candidate,
+                oldEvidence.EvidenceId),
+            "accepted");
+        await store.SaveBatchAsync(principal.PrincipalId, [oldCurrent]);
+        var correction = KernelTestData.Assertion(
+            principal.PrincipalId,
+            "assertion-new",
+            "16:30",
+            AssertionType.UserAsserted,
+            EpistemicStatus.Candidate,
+            newEvidence.EvidenceId,
+            KernelTestData.T0.AddMinutes(1));
+        var corrected = AssertionService.Correct(
+            oldCurrent,
+            correction,
+            KernelTestData.T0.AddMinutes(1),
+            "user correction");
+        await store.ApplyCorrectionAsync(principal.PrincipalId, corrected.Superseded, corrected.Current);
+        var conflict = AssertionService.MarkConflict(
+            AssertionRecord.Create(
+                "location-a", principal.PrincipalId, "appointment-1", "location", "A",
+                AssertionType.SourceAsserted, EpistemicStatus.Supported, 0.9m,
+                KernelTestData.T0, null, KernelTestData.T0, null,
+                [locationA.EvidenceId], [], null, KernelTestData.Producer, 1),
+            AssertionRecord.Create(
+                "location-b", principal.PrincipalId, "appointment-1", "location", "B",
+                AssertionType.SourceAsserted, EpistemicStatus.Supported, 0.9m,
+                KernelTestData.T0, null, KernelTestData.T0, null,
+                [locationB.EvidenceId], [], null, KernelTestData.Producer, 1),
+            "sources disagree");
+        await store.SaveBatchAsync(principal.PrincipalId, [conflict.First, conflict.Second]);
+
+        var snapshot = await new TrustedStateProjection(store, store).ProjectAsync(
+            TrustedStateQuery.Create(
+                principal.PrincipalId,
+                [
+                    TrustedStateKey.Create("appointment-1", "start-time"),
+                    TrustedStateKey.Create("appointment-1", "location"),
+                ]));
+
+        var time = Assert.Single(snapshot.Entries, entry => entry.Key.Predicate == "start-time");
+        Assert.Equal("16:30", time.Current?.Value);
+        Assert.Equal("15:00", Assert.Single(time.History).Value);
+        var location = Assert.Single(snapshot.Entries, entry => entry.Key.Predicate == "location");
+        Assert.Null(location.Current);
+        Assert.Equal(2, location.Conflicts.Count);
+    }
+
+    [Fact]
     public async Task Store_rejects_two_current_values_for_one_owner_and_key()
     {
         using var database = new TemporaryDatabase();

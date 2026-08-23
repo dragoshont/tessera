@@ -173,9 +173,20 @@ public static class AssertionService
         }
 
         var at = KernelValidation.Timestamp(correctedAt, nameof(correctedAt));
+        if (at < correction.CreatedAt)
+        {
+            throw new ArgumentException("Correction cannot be applied before the user assertion was created.", nameof(correctedAt));
+        }
+
         return (
             Copy(current, EpistemicStatus.Superseded, at, at, current.PromotionReason),
-            Copy(correction, EpistemicStatus.Current, null, null, promotionReason));
+            Copy(
+                correction,
+                EpistemicStatus.Current,
+                null,
+                null,
+                promotionReason,
+                correction.LineageRefs.Append(current.AssertionId)));
     }
 
     public static (AssertionRecord First, AssertionRecord Second) MarkConflict(
@@ -206,7 +217,8 @@ public static class AssertionService
         EpistemicStatus status,
         DateTimeOffset? validTo,
         DateTimeOffset? supersededAt,
-        string? promotionReason)
+        string? promotionReason,
+        IEnumerable<string>? lineageRefs = null)
         => AssertionRecord.Create(
             source.AssertionId,
             source.OwnerPrincipalId,
@@ -221,7 +233,7 @@ public static class AssertionService
             source.CreatedAt,
             supersededAt,
             source.EvidenceRefs,
-            source.LineageRefs,
+            lineageRefs ?? source.LineageRefs,
             promotionReason,
             source.Producer,
             source.SchemaVersion);

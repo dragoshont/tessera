@@ -37,6 +37,7 @@ public sealed class DomainSemanticTests
         Assert.Equal(EpistemicStatus.Current, changed.Current.EpistemicStatus);
         Assert.Equal(AssertionType.UserAsserted, changed.Current.AssertionType);
         Assert.Equal("e-correction", Assert.Single(changed.Current.EvidenceRefs));
+        Assert.Contains(current.AssertionId, changed.Current.LineageRefs);
     }
 
     [Fact]
@@ -49,6 +50,25 @@ public sealed class DomainSemanticTests
 
         Assert.Equal(EpistemicStatus.Conflicted, conflict.First.EpistemicStatus);
         Assert.Equal(EpistemicStatus.Conflicted, conflict.Second.EpistemicStatus);
+    }
+
+    [Fact]
+    public void Correction_cannot_predate_the_user_assertion()
+    {
+        var current = AssertionService.PromoteCandidate(
+            Assertion("a-old", "15:00", AssertionType.Inferred, EpistemicStatus.Candidate, "e-old"),
+            "accepted");
+        var correction = AssertionRecord.Create(
+            "a-new", Owner, "appointment-1", "start-time", "16:30",
+            AssertionType.UserAsserted, EpistemicStatus.Candidate, 1m,
+            T0.AddHours(2), null, T0.AddHours(2), null,
+            ["e-new"], [], null, Producer, 1);
+
+        Assert.Throws<ArgumentException>(() => AssertionService.Correct(
+            current,
+            correction,
+            T0.AddHours(1),
+            "user correction"));
     }
 
     [Fact]

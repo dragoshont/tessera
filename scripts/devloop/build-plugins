@@ -15,7 +15,7 @@ hash_file() {
 }
 
 mkdir -p "$MODULES"
-for plugin in Gmail GitHub ReginaMaria; do
+for plugin in Gmail GitHub OneDrive ReginaMaria; do
   "$DOTNET" build "$ROOT/src/Tessera.Plugins.$plugin/Tessera.Plugins.$plugin.csproj" \
     -c Release --nologo
   cp "$ROOT/src/Tessera.Plugins.$plugin/bin/Release/net10.0/Tessera.Plugins.$plugin.dll" "$MODULES/"
@@ -23,8 +23,9 @@ done
 
 gmail_hash="$(hash_file "$MODULES/Tessera.Plugins.Gmail.dll")"
 github_hash="$(hash_file "$MODULES/Tessera.Plugins.GitHub.dll")"
+onedrive_hash="$(hash_file "$MODULES/Tessera.Plugins.OneDrive.dll")"
 rm_hash="$(hash_file "$MODULES/Tessera.Plugins.ReginaMaria.dll")"
-printf '[{"PluginId":"gmail","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.Gmail.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"github","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.GitHub.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"regina-maria","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.ReginaMaria.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"}]\n' \
-  "$gmail_hash" "$github_hash" "$rm_hash" > "$OUTPUT/modules.json"
+printf '[{"PluginId":"gmail","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.Gmail.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"github","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.GitHub.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"onedrive","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.OneDrive.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"regina-maria","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.ReginaMaria.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"}]\n' \
+  "$gmail_hash" "$github_hash" "$onedrive_hash" "$rm_hash" > "$OUTPUT/modules.json"
 
 echo "plugins: $OUTPUT/modules.json"

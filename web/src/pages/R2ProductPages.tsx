@@ -145,6 +145,7 @@ export function AccountsPage() {
   const connect = useMutation({
     mutationFn: async () => {
       if (pluginId === "gmail") return r2Api.beginGmailOAuth(displayName);
+      if (pluginId === "onedrive") return r2Api.beginOneDriveOAuth(displayName);
       if (pluginId === "regina-maria")
         return r2Api.connectReginaMaria(connectorId, displayName);
       const account = await r2Api.connectAccount({

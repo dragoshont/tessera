@@ -116,6 +116,7 @@ export const r2Api = {
 
   accounts: () => request<R2Page<R2Account>>('/accounts'),
   beginGmailOAuth: (displayName: string) => mutate<{ authorizeUrl: string }>('/accounts/gmail/connect', 'POST', { displayName }),
+  beginOneDriveOAuth: (displayName: string) => mutate<{ authorizeUrl: string }>('/accounts/onedrive/connect', 'POST', { displayName }),
   reginaMariaConnectors: () => request<{ items: R2ReginaMariaConnector[] }>('/accounts/regina-maria/connectors'),
   connectReginaMaria: (connectorId: string, displayName: string) => mutate<R2Account>('/accounts/regina-maria/connect', 'POST', { connectorId, displayName }),
   connectAccount: (input: { pluginId: string; displayName: string; secretInput: string; nonSecretConfig: unknown }) => mutate<R2Account>('/accounts', 'POST', input, 'account'),

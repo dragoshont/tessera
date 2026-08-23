@@ -71,6 +71,7 @@ export class TesseraApi {
   jobRun = (runId: string) => this.http.request<{ run: JobRun; outputs: Page<{ outputRef: string; kind: string; mediaType: string; summary: string; text: string | null; truncated: boolean; createdAt: string }> }>(`/job-runs/${encodeURIComponent(runId)}`)
   accounts = () => this.http.request<Page<Account>>('/accounts')
   beginGmailOAuth = (displayName: string) => this.http.mutate<{ authorizeUrl: string }>('/accounts/gmail/connect', 'POST', { displayName })
+  beginOneDriveOAuth = (displayName: string) => this.http.mutate<{ authorizeUrl: string }>('/accounts/onedrive/connect', 'POST', { displayName })
   reginaMariaConnectors = () => this.http.request<{ items: ReginaMariaConnector[] }>('/accounts/regina-maria/connectors')
   connectReginaMaria = (connectorId: string, displayName: string) => this.http.mutate<Account>('/accounts/regina-maria/connect', 'POST', { connectorId, displayName })
   validateAccount = (item: Account) => this.http.mutate<Account>(`/accounts/${encodeURIComponent(item.id)}/validate`, 'POST', { expectedVersion: item.version }, 'account-validate')

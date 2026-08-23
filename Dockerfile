@@ -17,6 +17,7 @@ COPY src/ ./src/
 RUN dotnet restore src/Tessera.Cli/Tessera.Cli.csproj \
  && dotnet restore src/Tessera.Plugins.Gmail/Tessera.Plugins.Gmail.csproj \
  && dotnet restore src/Tessera.Plugins.GitHub/Tessera.Plugins.GitHub.csproj \
+ && dotnet restore src/Tessera.Plugins.OneDrive/Tessera.Plugins.OneDrive.csproj \
  && dotnet restore src/Tessera.Plugins.ReginaMaria/Tessera.Plugins.ReginaMaria.csproj
 
 # Publish framework-dependent (no apphost — run via `dotnet tessera.dll`, portable
@@ -29,15 +30,18 @@ RUN dotnet publish src/Tessera.Cli/Tessera.Cli.csproj \
 # catalog and let the generic runtime discover/validate them at startup.
 RUN dotnet build src/Tessera.Plugins.Gmail/Tessera.Plugins.Gmail.csproj -c Release --no-restore \
  && dotnet build src/Tessera.Plugins.GitHub/Tessera.Plugins.GitHub.csproj -c Release --no-restore \
+ && dotnet build src/Tessera.Plugins.OneDrive/Tessera.Plugins.OneDrive.csproj -c Release --no-restore \
  && dotnet build src/Tessera.Plugins.ReginaMaria/Tessera.Plugins.ReginaMaria.csproj -c Release --no-restore \
  && mkdir -p /plugin-artifacts/modules \
  && cp src/Tessera.Plugins.Gmail/bin/Release/net10.0/Tessera.Plugins.Gmail.dll /plugin-artifacts/modules/ \
  && cp src/Tessera.Plugins.GitHub/bin/Release/net10.0/Tessera.Plugins.GitHub.dll /plugin-artifacts/modules/ \
+ && cp src/Tessera.Plugins.OneDrive/bin/Release/net10.0/Tessera.Plugins.OneDrive.dll /plugin-artifacts/modules/ \
  && cp src/Tessera.Plugins.ReginaMaria/bin/Release/net10.0/Tessera.Plugins.ReginaMaria.dll /plugin-artifacts/modules/ \
  && gmail_sha="$(sha256sum /plugin-artifacts/modules/Tessera.Plugins.Gmail.dll | cut -d ' ' -f 1)" \
  && github_sha="$(sha256sum /plugin-artifacts/modules/Tessera.Plugins.GitHub.dll | cut -d ' ' -f 1)" \
+ && onedrive_sha="$(sha256sum /plugin-artifacts/modules/Tessera.Plugins.OneDrive.dll | cut -d ' ' -f 1)" \
  && rm_sha="$(sha256sum /plugin-artifacts/modules/Tessera.Plugins.ReginaMaria.dll | cut -d ' ' -f 1)" \
- && printf '[{"PluginId":"gmail","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.Gmail.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"github","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.GitHub.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"regina-maria","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.ReginaMaria.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"}]\n' "$gmail_sha" "$github_sha" "$rm_sha" > /plugin-artifacts/modules.json
+ && printf '[{"PluginId":"gmail","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.Gmail.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"github","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.GitHub.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"onedrive","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.OneDrive.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"},{"PluginId":"regina-maria","Version":"1.0.0","AssemblyFileName":"Tessera.Plugins.ReginaMaria.dll","AssemblySha256":"%s","TrustState":"BUILT_IN"}]\n' "$gmail_sha" "$github_sha" "$onedrive_sha" "$rm_sha" > /plugin-artifacts/modules.json
 
 # ---- build: admin-portal SPA ----
 # Built from source + the committed lockfile so the image is reproducible and the

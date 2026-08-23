@@ -131,6 +131,26 @@ public sealed class ContextCapabilityTests
     }
 
     [Fact]
+    public void Context_id_changes_when_provenance_changes()
+    {
+        var request = new ContextBuildRequest(
+            Owner,
+            "explain",
+            "task-1",
+            1024,
+            new HashSet<SensitivityClass> { SensitivityClass.Internal },
+            []);
+        var first = ContextBuilder.Build(
+            request,
+            [ContextItem.Create("fact", ContextItemKind.CurrentFact, "same", SensitivityClass.Internal, 1m, T0, ["evidence-1"])]);
+        var second = ContextBuilder.Build(
+            request,
+            [ContextItem.Create("fact", ContextItemKind.CurrentFact, "same", SensitivityClass.Internal, 1m, T0, ["evidence-2"])]);
+
+        Assert.NotEqual(first.ContextId, second.ContextId);
+    }
+
+    [Fact]
     public async Task Authorized_dispatch_rejects_payload_swap_before_capability_runs()
     {
         var invoked = false;

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Tessera.Plugins.OneDrive</RootNamespace>
+    <AssemblyName>Tessera.Plugins.OneDrive</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Tessera.Plugin.Abstractions/Tessera.Plugin.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

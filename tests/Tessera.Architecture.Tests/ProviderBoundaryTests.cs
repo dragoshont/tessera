@@ -85,6 +85,9 @@ public sealed class ProviderBoundaryTests
             "GmailSyncService",
             "GmailTokenRefreshService",
             "GitHubRestAdapter",
+            "OneDriveRestAdapter",
+            "OneDriveOAuthService",
+            "OneDriveTokenRefreshService",
             "using Tessera.Plugins.",
             "physicianId",
             "intervalId",
@@ -124,7 +127,7 @@ public sealed class ProviderBoundaryTests
             "src/Tessera.Providers",
             "src/Tessera.Persistence.Sqlite",
         };
-        var identifiers = new[] { "ReginaMaria", "regina-maria", "Gmail", "gmail", "GitHub", "github" };
+        var identifiers = new[] { "ReginaMaria", "regina-maria", "Gmail", "gmail", "GitHub", "github", "OneDrive", "onedrive" };
         foreach (var directory in directories)
         foreach (var file in Directory.EnumerateFiles(Path.Combine(Root, directory), "*.cs", SearchOption.AllDirectories)
                      .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)))

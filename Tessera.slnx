@@ -10,6 +10,7 @@
     <Project Path="src/Tessera.Plugin.Abstractions/Tessera.Plugin.Abstractions.csproj" />
     <Project Path="src/Tessera.Plugins.GitHub/Tessera.Plugins.GitHub.csproj" />
     <Project Path="src/Tessera.Plugins.Gmail/Tessera.Plugins.Gmail.csproj" />
+    <Project Path="src/Tessera.Plugins.OneDrive/Tessera.Plugins.OneDrive.csproj" />
     <Project Path="src/Tessera.Plugins.ReginaMaria/Tessera.Plugins.ReginaMaria.csproj" />
     <Project Path="src/Tessera.Providers/Tessera.Providers.csproj" />
     <Project Path="src/Tessera.Stores.AzureKeyVault/Tessera.Stores.AzureKeyVault.csproj" />
@@ -25,6 +26,7 @@
     <Project Path="tests/Tessera.Plugin.Abstractions.Tests/Tessera.Plugin.Abstractions.Tests.csproj" />
     <Project Path="tests/Tessera.Plugins.GitHub.Tests/Tessera.Plugins.GitHub.Tests.csproj" />
     <Project Path="tests/Tessera.Plugins.Gmail.Tests/Tessera.Plugins.Gmail.Tests.csproj" />
+    <Project Path="tests/Tessera.Plugins.OneDrive.Tests/Tessera.Plugins.OneDrive.Tests.csproj" />
     <Project Path="tests/Tessera.Plugins.ReginaMaria.Tests/Tessera.Plugins.ReginaMaria.Tests.csproj" />
     <Project Path="tests/Tessera.Providers.Tests/Tessera.Providers.Tests.csproj" />
     <Project Path="tests/Tessera.Stores.AzureKeyVault.Tests/Tessera.Stores.AzureKeyVault.Tests.csproj" />

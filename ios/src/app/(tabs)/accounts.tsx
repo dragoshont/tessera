@@ -40,16 +40,16 @@ export default function AccountsScreen() {
     { text: 'Keep enabled', style: 'cancel' },
     { text: 'Disable', style: 'destructive', onPress: () => void (async () => { setBusy(item.id); try { await api.disableAccount(item); await load(true) } catch (cause) { setError(cause instanceof Error ? cause.message : 'Disable failed') } finally { setBusy(null) } })() },
   ])
-  const connectGmail = async () => {
-    setBusy('gmail-connect')
+  const connectOAuth = async (provider: 'gmail' | 'onedrive') => {
+    setBusy(`${provider}-connect`)
     setError(null)
     try {
-      const result = await api.beginGmailOAuth('Gmail')
+      const result = provider === 'gmail' ? await api.beginGmailOAuth('Gmail') : await api.beginOneDriveOAuth('OneDrive')
       const url = new URL(result.authorizeUrl)
       if (url.protocol !== 'https:') throw new Error('oauth_url_invalid')
       await WebBrowser.openBrowserAsync(url.toString(), { presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET })
       await load(true)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Gmail connection failed') }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'OAuth connection failed') }
     finally { setBusy(null) }
   }
   const connectRm = (connector: ReginaMariaConnector) => Alert.alert('Connect Regina Maria?', `Connect the separately authorized profile “${connector.displayName}” to your Tessera account?`, [
@@ -61,7 +61,7 @@ export default function AccountsScreen() {
   if (error && !items.length) return <View style={[sharedStyles.page, { backgroundColor: palette.background }]}><ErrorState message={error} retry={() => void load()} /></View>
   return (
     <View style={[sharedStyles.page, { backgroundColor: palette.background }]}>
-      <FlatList data={items} keyExtractor={(item) => item.id} contentContainerStyle={[sharedStyles.listContent, !items.length && styles.empty]} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />} ListHeaderComponent={<View style={{ gap: Space.sm }}><SectionTitle detail="Installed runtime and account authorization are separate">Readiness</SectionTitle>{readiness.map((integration) => <Card key={integration.id}><View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>{integration.name}</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>{integration.state === 'CONNECTED' ? 'Account connected' : integration.runtimeState === 'READY' ? 'Runtime ready; account authorization remains' : integration.detailCode?.replaceAll('_', ' ') ?? 'Unavailable'}</Text></View><Status value={integration.state} /></View></Card>)}<SectionTitle detail="Authorization stays with each provider">Connect</SectionTitle><Button label="Connect Gmail" icon="envelope.badge" tone="primary" busy={busy === 'gmail-connect'} disabled={Boolean(busy)} onPress={() => void connectGmail()} />{connectors.map((connector) => <Button key={connector.id} label={`Connect ${connector.displayName}`} icon="cross.case" busy={busy === `rm:${connector.id}`} disabled={Boolean(busy)} onPress={() => connectRm(connector)} />)}<SectionTitle>Connected accounts</SectionTitle></View>} ListEmptyComponent={<Empty icon="person.crop.circle.badge.plus" title="No connected accounts" detail="Connect Gmail above, or ask the account holder to authorize a Regina Maria profile before connecting it." />} renderItem={({ item }) => (
+      <FlatList data={items} keyExtractor={(item) => item.id} contentContainerStyle={[sharedStyles.listContent, !items.length && styles.empty]} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />} ListHeaderComponent={<View style={{ gap: Space.sm }}><SectionTitle detail="Installed runtime and account authorization are separate">Readiness</SectionTitle>{readiness.map((integration) => <Card key={integration.id}><View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>{integration.name}</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>{integration.state === 'CONNECTED' ? 'Account connected' : integration.runtimeState === 'READY' ? 'Runtime ready; account authorization remains' : integration.detailCode?.replaceAll('_', ' ') ?? 'Unavailable'}</Text></View><Status value={integration.state} /></View></Card>)}<SectionTitle detail="Authorization stays with each provider">Connect</SectionTitle><Button label="Connect Gmail" icon="envelope.badge" tone="primary" busy={busy === 'gmail-connect'} disabled={Boolean(busy)} onPress={() => void connectOAuth('gmail')} /><Button label="Connect OneDrive" icon="externaldrive.badge.plus" busy={busy === 'onedrive-connect'} disabled={Boolean(busy)} onPress={() => void connectOAuth('onedrive')} />{connectors.map((connector) => <Button key={connector.id} label={`Connect ${connector.displayName}`} icon="cross.case" busy={busy === `rm:${connector.id}`} disabled={Boolean(busy)} onPress={() => connectRm(connector)} />)}<SectionTitle>Connected accounts</SectionTitle></View>} ListEmptyComponent={<Empty icon="person.crop.circle.badge.plus" title="No connected accounts" detail="Connect Gmail or OneDrive above, or ask the account holder to authorize a Regina Maria profile before connecting it." />} renderItem={({ item }) => (
         <Card>
           <View style={sharedStyles.split}><View style={{ flex: 1 }}><Text style={[sharedStyles.title, { color: palette.text }]}>{item.displayName}</Text><Text style={[sharedStyles.detail, { color: palette.muted }]}>{item.pluginId} · {item.lifecycle.replaceAll('_', ' ')}</Text></View><Status value={item.health} /></View>
           {item.identityHint ? <Text style={[sharedStyles.body, { color: palette.text }]}>{item.identityHint}</Text> : null}
