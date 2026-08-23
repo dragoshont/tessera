@@ -191,7 +191,7 @@ public static class BrokerHost
         }
 
         var broker = new BrokerCore(pdp, resolver, audit);
-        var validator = options.ValidatorOverride ?? BuildValidator(config);
+        var validator = options.ValidatorOverride ?? BuildValidator(config, options.Environment);
 
         var status = new BrokerStatus
         {
@@ -532,17 +532,49 @@ public static class BrokerHost
         return app;
     }
 
-    private static ITokenValidator BuildValidator(TesseraConfig config)
+    private static ITokenValidator BuildValidator(
+        TesseraConfig config,
+        IReadOnlyDictionary<string, string?>? environment)
     {
         if (config.Identity.Mode == "oidc" && !string.IsNullOrWhiteSpace(config.Identity.Oidc.Issuer))
         {
-            return EntraTokenValidator.Create(new OidcValidationOptions
+            var primary = EntraTokenValidator.Create(new OidcValidationOptions
             {
                 Issuer = config.Identity.Oidc.Issuer,
                 Audience = config.Identity.Oidc.Audience,
                 TenantId = config.Identity.Oidc.TenantId,
                 AllowedTenants = config.Identity.Oidc.AllowedTenants,
             });
+            var delegatedIssuer = Get(environment, "TESSERA_DELEGATED_OIDC_ISSUER");
+            var delegatedAudience = Get(environment, "TESSERA_DELEGATED_OIDC_AUDIENCE");
+            var delegatedTenant = Get(environment, "TESSERA_DELEGATED_OIDC_TENANT_ID");
+            var delegatedSubjectClaim = Get(environment, "TESSERA_DELEGATED_OIDC_SUBJECT_CLAIM");
+            var delegatedOwners = (Get(environment, "TESSERA_DELEGATED_OIDC_ALLOWED_EMAILS") ?? "")
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (string.IsNullOrWhiteSpace(delegatedIssuer)
+                && string.IsNullOrWhiteSpace(delegatedAudience)
+                && string.IsNullOrWhiteSpace(delegatedTenant)
+                && string.IsNullOrWhiteSpace(delegatedSubjectClaim)
+                && delegatedOwners.Length == 0)
+                return primary;
+            if (string.IsNullOrWhiteSpace(delegatedIssuer)
+                || string.IsNullOrWhiteSpace(delegatedAudience)
+                || string.IsNullOrWhiteSpace(delegatedTenant)
+                || string.IsNullOrWhiteSpace(delegatedSubjectClaim)
+                || delegatedOwners.Length == 0)
+                return new DenyAllTokenValidator("delegated OIDC trust lane is incomplete");
+            var delegated = EntraTokenValidator.Create(new OidcValidationOptions
+            {
+                Issuer = delegatedIssuer,
+                Audience = delegatedAudience,
+                TenantId = delegatedTenant,
+                AllowedPreferredUsernames = delegatedOwners,
+            });
+            return new CompositeTokenValidator(
+                [primary, new CanonicalIssuerTokenValidator(
+                    delegated,
+                    config.Identity.Oidc.Issuer,
+                    delegatedSubjectClaim)]);
         }
 
         return new DenyAllTokenValidator($"OIDC delegation not configured (identity.mode={config.Identity.Mode})");

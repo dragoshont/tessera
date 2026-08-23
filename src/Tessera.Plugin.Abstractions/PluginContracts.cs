@@ -297,6 +297,23 @@ public sealed class TesseraPluginRegistry
         string capabilityVersion,
         PluginCapabilityContext context,
         CancellationToken cancellationToken = default)
+        => await CreateCapabilityAsync(
+            pluginId,
+            pluginVersion,
+            capabilityId,
+            capabilityVersion,
+            context,
+            null,
+            cancellationToken).ConfigureAwait(false);
+
+    public async ValueTask<ICapability> CreateCapabilityAsync(
+        string pluginId,
+        string pluginVersion,
+        string capabilityId,
+        string capabilityVersion,
+        PluginCapabilityContext context,
+        Action<string>? setStage,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         if (!_plugins.TryGetValue((pluginId, pluginVersion), out var entry))
@@ -325,11 +342,14 @@ public sealed class TesseraPluginRegistry
         {
             if (capability.SideEffectClass == SideEffectClass.ReadOnly)
             {
+                setStage?.Invoke("mcp-discovery");
                 discoveredMcp = await mcpPlugin.DiscoverMcpAsync(context, cancellationToken).ConfigureAwait(false);
+                setStage?.Invoke("mcp-validation");
                 ValidateMcpCompatibility(mcpPlugin.RequiredMcpServer, mcpPlugin.RequiredMcpTools, discoveredMcp);
             }
         }
 
+        setStage?.Invoke("plugin-create");
         var implementation = await entry.Plugin.CreateCapabilityAsync(
             capabilityId,
             capabilityVersion,
@@ -418,6 +438,12 @@ public sealed class TesseraPluginRegistry
         JsonElement schema,
         IReadOnlyList<RequiredMcpProperty> requirements)
     {
+        foreach (var unionName in new[] { "oneOf", "anyOf" })
+        {
+            if (schema.TryGetProperty(unionName, out var branches)
+                && branches.ValueKind == JsonValueKind.Array)
+                return branches.EnumerateArray().Any(branch => CompatibleSchema(branch, requirements));
+        }
         if (schema.ValueKind != JsonValueKind.Object
             || !schema.TryGetProperty("type", out var rootType)
             || rootType.GetString() != "object"

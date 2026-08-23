@@ -63,6 +63,27 @@ public sealed class TesseraTokenResult
     public static TesseraTokenResult Success(IReadOnlyDictionary<string, string> claims) => new(true, null, claims);
 
     /// <summary>
+    /// Rebinds an already-validated token to the configured canonical issuer and
+    /// a resource-specific subject claim signed by the original trust lane.
+    /// </summary>
+    public TesseraTokenResult WithCanonicalIdentity(string issuer, string subjectClaim)
+    {
+        if (!Succeeded) return this;
+        ArgumentException.ThrowIfNullOrWhiteSpace(issuer);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectClaim);
+        var subject = Get(subjectClaim);
+        if (string.IsNullOrWhiteSpace(subject))
+            return Fail("validated token is missing its canonical subject claim");
+        var claims = new Dictionary<string, string>(_claims, StringComparer.Ordinal)
+        {
+            ["iss"] = issuer,
+            ["sub"] = subject,
+        };
+        claims.Remove("oid");
+        return Success(claims);
+    }
+
+    /// <summary>
     /// Converts a successful user token to the verified end-user assertion (FOR WHOM).
     /// Returns <c>null</c> for an app-only token or a failed validation.
     /// </summary>

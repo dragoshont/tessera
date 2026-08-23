@@ -69,6 +69,33 @@ internal sealed class TokenFactory
         return Create(claims, audience: null, issuer: null, expires: null);
     }
 
+    public string SubjectTokenWithAudiences(
+        string subject,
+        string preferredUsername,
+        string? canonicalSubject,
+        params string[] audiences)
+    {
+        var descriptor = new SecurityTokenDescriptor
+        {
+            Issuer = Issuer,
+            Expires = DateTime.UtcNow.AddMinutes(10),
+            IssuedAt = DateTime.UtcNow.AddMinutes(-1),
+            NotBefore = DateTime.UtcNow.AddMinutes(-1),
+            Claims = new Dictionary<string, object>
+            {
+                ["sub"] = subject,
+                ["preferred_username"] = preferredUsername,
+                ["tid"] = TenantId,
+                ["jti"] = Guid.NewGuid().ToString("N"),
+            },
+            SigningCredentials = _credentials,
+        };
+        if (!string.IsNullOrWhiteSpace(canonicalSubject))
+            descriptor.Claims["tessera_subject"] = canonicalSubject;
+        foreach (var audience in audiences) descriptor.Audiences.Add(audience);
+        return new JsonWebTokenHandler().CreateToken(descriptor);
+    }
+
     public string UsernameOnlyToken(string preferredUsername)
     {
         var claims = new Dictionary<string, object>

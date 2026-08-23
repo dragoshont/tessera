@@ -81,6 +81,52 @@ public sealed class BrokerHostTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+        [Fact]
+        public async Task Incomplete_delegated_oidc_identity_lane_fails_closed()
+        {
+                var port = FreePort();
+                var path = Path.Combine(_dir, "incomplete-delegated-oidc.json");
+                File.WriteAllText(path, $$"""
+                        {
+                            "server": { "host": "127.0.0.1", "port": {{port}} },
+                            "serverIdentity": { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "displayName": "Tessera Test" },
+                            "identity": {
+                                "mode": "oidc",
+                                "trustDomain": "tessera.local",
+                                "oidc": {
+                                    "issuer": "https://auth.example/application/o/tessera/",
+                                    "audience": "tessera-app",
+                                    "tenantId": "authentik:tessera"
+                                }
+                            },
+                            "policy": { "default": "deny" },
+                            "audit": { "enabled": false }
+                        }
+                        """);
+                await using var app = await BrokerHost.BuildAppAsync(new BrokerHostOptions
+                {
+                        ConfigPath = path,
+                        PolicyPath = Path.Combine(_dir, "grants.json"),
+                        StoreOverride = new InMemoryCredentialStore(),
+                        ProductDatabasePath = Path.Combine(_dir, "incomplete-delegated-oidc.db"),
+                        PluginRoot = Path.Combine(_dir, "no-plugins"),
+                        Environment = new Dictionary<string, string?>(StringComparer.Ordinal)
+                        {
+                                ["TESSERA_DELEGATED_OIDC_ISSUER"] = "https://auth.example/application/o/librechat/",
+                                ["TESSERA_DELEGATED_OIDC_AUDIENCE"] = "tessera-app",
+                                ["TESSERA_DELEGATED_OIDC_SUBJECT_CLAIM"] = "tessera_subject",
+                        },
+                });
+                await app.StartAsync();
+                using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+
+                using var response = await client.GetAsync(new Uri("/status", UriKind.Relative));
+                response.EnsureSuccessStatusCode();
+                using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                Assert.StartsWith("fail-closed", document.RootElement.GetProperty("delegation").GetString());
+                await app.StopAsync();
+        }
+
     [Fact]
     public async Task Unknown_api_routes_return_problem_details_instead_of_the_spa()
     {

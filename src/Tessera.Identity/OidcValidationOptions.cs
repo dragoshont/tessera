@@ -32,6 +32,12 @@ public sealed class OidcValidationOptions
     /// <summary>Allowed clock skew when checking <c>exp</c>/<c>nbf</c>.</summary>
     public TimeSpan ClockSkew { get; init; } = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// Optional allow-list over the token's signed <c>email</c> or
+    /// <c>preferred_username</c>. Empty accepts every otherwise-valid principal.
+    /// </summary>
+    public IReadOnlyList<string> AllowedPreferredUsernames { get; init; } = [];
+
     /// <summary>True once an audience is configured and delegation can be enforced.</summary>
     public bool DelegationEnabled => !string.IsNullOrWhiteSpace(Audience);
 

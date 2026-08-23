@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Tessera.Plugin.Abstractions/Tessera.Plugin.Abstractions.csproj" />
+    <InternalsVisibleTo Include="Tessera.ExternalPlugin.Tests" />
   </ItemGroup>
 
 </Project>

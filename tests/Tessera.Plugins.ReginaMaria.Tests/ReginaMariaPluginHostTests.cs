@@ -47,7 +47,122 @@ public sealed class ReginaMariaPluginHostTests
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal("appointment-1", body.GetProperty("result").GetProperty("appointments")[0].GetProperty("id").GetString());
         Assert.Equal(["rm_list_appointments"], runtime.Calls);
+        Assert.All(runtime.Endpoints, endpoint => Assert.Equal("/mcp/", endpoint.AbsolutePath));
     }
+
+    [Fact]
+    public async Task Direct_invoke_denies_RM_output_union_without_a_compatible_branch()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime(incompatibleCreateOutput: true);
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+
+        var response = await host.SendAsync(
+            "/api/v1/capabilities/reginamaria.appointments.list/invoke",
+            new
+            {
+                capabilityId = "reginamaria.appointments.list",
+                capabilityVersion = "1",
+                pluginId = "regina-maria",
+                pluginVersion = "1.0.0",
+                accountId = "rm-owner",
+                target = "appointments:list",
+                input = new { upcoming = true, maxResults = 20 },
+            });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains("mcp_schema_incompatible", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Empty(runtime.Calls);
+    }
+
+    [Fact]
+    public async Task Direct_invoke_invalid_request_reports_only_a_safe_stage()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime();
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+        object input = "leaf";
+        for (var depth = 0; depth < 14; depth++)
+            input = new Dictionary<string, object?> { ["nested"] = input };
+
+        var response = await host.SendAsync(
+            "/api/v1/capabilities/reginamaria.appointments.list/invoke",
+            new
+            {
+                capabilityId = "reginamaria.appointments.list",
+                capabilityVersion = "1",
+                pluginId = "regina-maria",
+                pluginVersion = "1.0.0",
+                accountId = "rm-owner",
+                target = "appointments:list",
+                input,
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("invalid_request", problem.GetProperty("code").GetString());
+        Assert.Equal("execution", problem.GetProperty("stage").GetString());
+        Assert.False(problem.TryGetProperty("detail", out _));
+        Assert.Empty(runtime.Calls);
+    }
+
+    [Fact]
+    public async Task Direct_invoke_unbound_request_reports_the_request_stage()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime();
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+
+        var response = await host.SendAsync(
+            "/api/v1/capabilities/reginamaria.appointments.list/invoke",
+            new { });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("invalid_request", problem.GetProperty("code").GetString());
+        Assert.Equal("request", problem.GetProperty("stage").GetString());
+        Assert.False(problem.TryGetProperty("detail", out _));
+        Assert.Empty(runtime.Calls);
+    }
+
+    [Fact]
+    public async Task Direct_invoke_discovery_rejection_reports_mcp_discovery_stage()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime(rejectDiscovery: true);
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+
+        var response = await host.SendAsync(
+            "/api/v1/capabilities/reginamaria.appointments.list/invoke",
+            new
+            {
+                capabilityId = "reginamaria.appointments.list",
+                capabilityVersion = "1",
+                pluginId = "regina-maria",
+                pluginVersion = "1.0.0",
+                accountId = "rm-owner",
+                target = "appointments:list",
+                input = new { upcoming = true },
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("invalid_request", problem.GetProperty("code").GetString());
+        Assert.Equal("mcp-discovery", problem.GetProperty("stage").GetString());
+        Assert.False(problem.TryGetProperty("detail", out _));
+        Assert.Empty(runtime.Calls);
+    }
+
+    [Theory]
+    [InlineData("https://rm.example/mcp")]
+    [InlineData("https://rm.example/mcp/")]
+    [InlineData("https://rm.example/mcp//")]
+    public void Canonical_endpoint_has_exact_streamable_http_path(string value)
+        => Assert.Equal("https://rm.example/mcp/", ReginaMariaPlugin.CanonicalMcpEndpoint(new Uri(value)).AbsoluteUri);
 
     [Fact]
     public async Task Host_discovers_hash_catalog_and_joins_declarative_package()
@@ -101,6 +216,26 @@ public sealed class ReginaMariaPluginHostTests
         Assert.Equal("CONNECTED", account.GetProperty("lifecycle").GetString());
         Assert.Contains("rm_session_status", runtime.Calls);
         Assert.Contains("rm_account_identity", runtime.Calls);
+        Assert.All(runtime.Endpoints, endpoint => Assert.Equal("/mcp/", endpoint.AbsolutePath));
+    }
+
+    [Fact]
+    public async Task Background_health_canonicalizes_existing_stored_endpoint()
+    {
+        using var module = ModuleRegistry.Create();
+        var runtime = new ListMcpRuntime();
+        await using var host = await TestHost.StartAsync(module.Registry, runtime);
+        await host.SeedAsync();
+
+        await host.RunReginaMariaHealthPassAsync(runtime);
+
+        Assert.Contains("rm_session_status", runtime.Calls);
+        Assert.Contains("rm_account_identity", runtime.Calls);
+        Assert.All(runtime.Endpoints, endpoint => Assert.Equal("/mcp/", endpoint.AbsolutePath));
+        var account = await host.Store.GetConnectedAccountAsync(TestHost.Owner(), "rm-owner");
+        Assert.NotNull(account);
+        Assert.Equal(AccountLifecycle.Connected, account.Lifecycle);
+        Assert.Equal(AccountHealth.Healthy, account.Health);
     }
 
     [Fact]
@@ -285,7 +420,7 @@ public sealed class ReginaMariaPluginHostTests
             call => call.AccountId == "rm-owner" && call.CapabilityId == "reginamaria.appointments.list");
         Assert.Equal("rm-owner", persistedCall.ExternalServerId);
         Assert.Equal("reginamaria-mcp", persistedCall.ExternalServerName);
-        Assert.Equal("0.5.38", persistedCall.ExternalServerVersion);
+        Assert.Equal("0.5.43", persistedCall.ExternalServerVersion);
         Assert.Equal("rm_list_appointments", persistedCall.ExternalToolName);
     }
 
@@ -312,6 +447,13 @@ public sealed class ReginaMariaPluginHostTests
         public HttpClient Client { get; } = new() { BaseAddress = new Uri(app.Urls.Single()) };
         public SqliteKernelStore Store => app.Services.GetRequiredService<SqliteKernelStore>();
         public CountingCredentialStore Custody => custody;
+
+        public Task RunReginaMariaHealthPassAsync(IMcpClientRuntime runtime)
+            => new ReginaMariaPluginHealthService(
+                app.Services.GetRequiredService<IPluginAccountRuntime>(),
+                runtime,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ReginaMariaPluginHealthService>.Instance)
+                .HealthPassAsync(CancellationToken.None);
 
         public static async Task<TestHost> StartAsync(TesseraPluginRegistry registry, IMcpClientRuntime runtime)
             => await StartCoreAsync(registry, null, null, runtime);
@@ -586,15 +728,21 @@ public sealed class ReginaMariaPluginHostTests
         public void Dispose() => Directory.Delete(directory, recursive: true);
     }
 
-    private sealed class ListMcpRuntime : IMcpClientRuntime
+    private sealed class ListMcpRuntime(
+        bool incompatibleCreateOutput = false,
+        bool rejectDiscovery = false) : IMcpClientRuntime
     {
         public List<string> Calls { get; } = [];
+        public List<Uri> Endpoints { get; } = [];
 
         public Task<McpServerContract> DiscoverAsync(McpServerEndpoint endpoint, McpCallPolicy policy, CancellationToken cancellationToken = default)
-            => Task.FromResult(new McpServerContract(
+        {
+            if (rejectDiscovery) throw new ArgumentException("synthetic");
+            Endpoints.Add(endpoint.Endpoint);
+            return Task.FromResult(new McpServerContract(
                 endpoint.ServerId,
                 "reginamaria-mcp",
-                "0.5.38",
+                "0.5.43",
                 [
                     Tool("rm_session_status"),
                     Tool("rm_account_identity"),
@@ -604,10 +752,12 @@ public sealed class ReginaMariaPluginHostTests
                     Tool("rm_create_appointment", "interval_id", "physician_id"),
                     Tool("rm_cancel_appointment", "appointment_id"),
                 ]));
+        }
 
         public Task<McpInvocationResult> CallAsync(McpServerEndpoint endpoint, string toolName, IReadOnlyDictionary<string, object?> arguments, McpCallPolicy policy, CancellationToken cancellationToken = default)
         {
             Calls.Add(toolName);
+            Endpoints.Add(endpoint.Endpoint);
             if (toolName == "rm_session_status")
                 return Task.FromResult(new McpInvocationResult(
                     McpInvocationOutcome.Succeeded,
@@ -656,7 +806,7 @@ public sealed class ReginaMariaPluginHostTests
                 null));
         }
 
-        private static McpToolContract Tool(string name, params string[] properties)
+        private McpToolContract Tool(string name, params string[] properties)
         {
             var input = JsonSerializer.SerializeToElement(new
             {
@@ -665,38 +815,88 @@ public sealed class ReginaMariaPluginHostTests
                 required = properties,
                 additionalProperties = false,
             });
-            var outputProperties = name switch
+            var output = name switch
             {
-                "rm_session_status" => new Dictionary<string, object?> { ["alive"] = new { type = "boolean" } },
-                "rm_account_identity" => new Dictionary<string, object?>
+                "rm_prepare_appointment" => JsonSerializer.SerializeToElement(new
+                {
+                    type = "object",
+                    oneOf = new[]
+                    {
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["bookable"] = new { type = "boolean", @const = true },
+                            ["slot_receipt"] = new { type = "string" },
+                        }),
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["bookable"] = new { type = "boolean", @const = false },
+                        }),
+                    },
+                }),
+                "rm_create_appointment" => JsonSerializer.SerializeToElement(new
+                {
+                    type = "object",
+                    oneOf = new[]
+                    {
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["approval_required"] = new { type = "boolean", @const = true },
+                            ["action_id"] = new { type = "string" },
+                        }),
+                        incompatibleCreateOutput
+                            ? ObjectSchema(new Dictionary<string, object?>
+                            {
+                                ["booked"] = new { type = "boolean", @const = false },
+                            })
+                            : ObjectSchema(new Dictionary<string, object?>
+                            {
+                                ["booked"] = new { type = "boolean", @const = true },
+                                ["id"] = new { type = "string" },
+                            }),
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["booked"] = new { type = "boolean", @const = false },
+                        }),
+                    },
+                }),
+                "rm_cancel_appointment" => JsonSerializer.SerializeToElement(new
+                {
+                    type = "object",
+                    oneOf = new[]
+                    {
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["approval_required"] = new { type = "boolean", @const = true },
+                            ["action_id"] = new { type = "string" },
+                        }),
+                        ObjectSchema(new Dictionary<string, object?>
+                        {
+                            ["cancelled"] = new { type = "boolean" },
+                        }),
+                    },
+                }),
+                "rm_session_status" => ObjectSchema(new Dictionary<string, object?> { ["alive"] = new { type = "boolean" } }),
+                "rm_account_identity" => ObjectSchema(new Dictionary<string, object?>
                 {
                     ["provider_account_id"] = new { type = "string" },
                     ["display_name"] = new { type = "string" },
-                },
-                "rm_list_appointments" => new Dictionary<string, object?> { ["appointments"] = new { type = "array" } },
-                "rm_search_slots" => new Dictionary<string, object?> { ["slots"] = new { type = "array" } },
-                "rm_prepare_appointment" => new Dictionary<string, object?>
-                {
-                    ["bookable"] = new { type = "boolean" },
-                    ["slot_receipt"] = new { type = "string" },
-                },
-                "rm_create_appointment" => new Dictionary<string, object?>
-                {
-                    ["booked"] = new { type = "boolean" },
-                    ["id"] = new { type = "string" },
-                },
-                "rm_cancel_appointment" => new Dictionary<string, object?> { ["cancelled"] = new { type = "boolean" } },
-                _ => [],
+                }),
+                "rm_list_appointments" => ObjectSchema(new Dictionary<string, object?> { ["appointments"] = new { type = "array" } }),
+                "rm_search_slots" => ObjectSchema(new Dictionary<string, object?> { ["slots"] = new { type = "array" } }),
+                _ => ObjectSchema([]),
             };
-            var output = JsonSerializer.SerializeToElement(new
-            {
-                type = "object",
-                properties = outputProperties,
-                required = outputProperties.Keys.ToArray(),
-                additionalProperties = false,
-            });
+
             return new(name, input, output);
         }
+
+        private static JsonElement ObjectSchema(Dictionary<string, object?> properties)
+            => JsonSerializer.SerializeToElement(new
+            {
+                type = "object",
+                properties,
+                required = properties.Keys.ToArray(),
+                additionalProperties = false,
+            });
     }
 
     private sealed class NullTransport : IHttpTransport

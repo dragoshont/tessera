@@ -97,6 +97,85 @@ public sealed class EntraTokenValidatorTests
     }
 
     [Fact]
+    public async Task Signed_email_allow_list_accepts_only_the_configured_owner()
+    {
+        var factory = new TokenFactory();
+        var validator = new EntraTokenValidator(factory.ConfigurationManager(), new OidcValidationOptions
+        {
+            Issuer = TokenFactory.Issuer,
+            Audience = TokenFactory.Audience,
+            TenantId = TokenFactory.TenantId,
+            AllowedPreferredUsernames = ["owner@example.com"],
+        });
+
+        var owner = await validator.ValidateAsync(
+            factory.SubjectToken("owner-id", "OWNER@example.com"));
+        var other = await validator.ValidateAsync(
+            factory.SubjectToken("other-id", "other@example.com"));
+
+        Assert.True(owner.Succeeded);
+        Assert.False(other.Succeeded);
+        Assert.Contains("allow-list", other.FailureReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Multi_audience_token_requires_the_configured_resource_audience()
+    {
+        var factory = new TokenFactory();
+        var validator = Validator(factory);
+
+        var accepted = await validator.ValidateAsync(
+            factory.SubjectTokenWithAudiences(
+                "owner",
+                "owner@example.com",
+                null,
+                "librechat-client",
+                TokenFactory.Audience));
+        var rejected = await validator.ValidateAsync(
+            factory.SubjectTokenWithAudiences(
+                "owner",
+                "owner@example.com",
+                null,
+                "librechat-client",
+                "another-resource"));
+
+        Assert.True(accepted.Succeeded);
+        Assert.False(rejected.Succeeded);
+    }
+
+    [Fact]
+    public async Task Delegated_multi_audience_token_maps_to_the_primary_owner_namespace_after_validation()
+    {
+        var factory = new TokenFactory();
+        var delegated = new EntraTokenValidator(
+            factory.ConfigurationManager(),
+            new OidcValidationOptions
+            {
+                Issuer = TokenFactory.Issuer,
+                Audience = TokenFactory.Audience,
+                TenantId = TokenFactory.TenantId,
+                AllowedPreferredUsernames = ["owner@example.com"],
+            });
+        var validator = new CanonicalIssuerTokenValidator(
+            delegated,
+            "https://auth.example/application/o/tessera/",
+            "tessera_subject");
+
+        var result = await validator.ValidateAsync(
+            factory.SubjectTokenWithAudiences(
+                "owner@example.com",
+                "owner@example.com",
+                "stable-authentik-subject",
+                "librechat-client",
+                TokenFactory.Audience));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("stable-authentik-subject", result.Subject);
+        Assert.Equal("owner@example.com", result.PreferredUsername);
+        Assert.Equal("https://auth.example/application/o/tessera/", result.Issuer);
+    }
+
+    [Fact]
     public async Task Wrong_issuer_is_rejected()
     {
         var factory = new TokenFactory();
