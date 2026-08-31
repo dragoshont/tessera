@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -65,6 +67,8 @@ public sealed class PrincipalRegistrationBoundaryTests : IAsyncLifetime
               "audit": { "enabled": false }
             }
             """);
+        // The changed boundaries do not call IAuditSink; audit is an independent JSONL
+        // side channel, while this fixture proves the product databases remain unchanged.
         var grantsPath = Path.Combine(_directory, "grants.json");
         await File.WriteAllTextAsync(grantsPath, "{ \"grants\": [], \"bindings\": [], \"recipes\": [] }");
         _productDatabase = Path.Combine(_directory, "product.db");
@@ -108,7 +112,10 @@ public sealed class PrincipalRegistrationBoundaryTests : IAsyncLifetime
         using (var detail = await SendAsync(Writer, HttpMethod.Get, $"/api/v1/conversations/{conversationId}"))
             Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
         using (var otherEvents = await SendAsync(Reader, HttpMethod.Get, $"/api/v1/conversations/{conversationId}/events"))
+        {
             Assert.Equal(HttpStatusCode.OK, otherEvents.StatusCode);
+            Assert.Equal(string.Empty, await otherEvents.Content.ReadAsStringAsync());
+        }
 
         // The plugin-host resolver (BrokerPluginRequestIdentity.ResolveOwnerAsync).
         Assert.Equal(PrincipalIdOf(Reader), await ResolvePluginOwnerAsync(HttpMethod.Get, Reader));
@@ -121,6 +128,12 @@ public sealed class PrincipalRegistrationBoundaryTests : IAsyncLifetime
     public async Task Authorized_write_registers_exactly_one_principal_and_stays_idempotent()
     {
         var before = await SnapshotAsync();
+        var beforePrincipalCount = await CountAsync(_productDatabase, "principals");
+        Assert.Null(await ProductStore.GetAsync(PrincipalIdOf(Writer)));
+
+        using (var read = await SendAsync(Writer, HttpMethod.Get, "/api/v1/conversations"))
+            Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.Equal(before, await SnapshotAsync());
         Assert.Null(await ProductStore.GetAsync(PrincipalIdOf(Writer)));
 
         var conversationId = await CreateConversationAsync(Writer, "write-registration-key");
@@ -132,7 +145,7 @@ public sealed class PrincipalRegistrationBoundaryTests : IAsyncLifetime
             principal.Issuer);
         Assert.Equal(DevTenant, principal.Tenant);
         Assert.Equal(Writer, principal.Subject);
-        Assert.Equal(1, await CountAsync(_productDatabase, "principals") - before[$"product:principals"]);
+        Assert.Equal(beforePrincipalCount + 1, await CountAsync(_productDatabase, "principals"));
 
         // The conversation row exists and is owned by the registered principal (FK satisfied).
         var conversation = await ProductStore.GetConversationAsync(PrincipalIdOf(Writer), conversationId);
@@ -141,7 +154,7 @@ public sealed class PrincipalRegistrationBoundaryTests : IAsyncLifetime
 
         // Replaying the same idempotency key must not add a second principal row.
         Assert.Equal(conversationId, await CreateConversationAsync(Writer, "write-registration-key"));
-        Assert.Equal(1, await CountAsync(_productDatabase, "principals") - before[$"product:principals"]);
+        Assert.Equal(beforePrincipalCount + 1, await CountAsync(_productDatabase, "principals"));
 
         // The plugin-host resolver registers on an unsafe method too.
         Assert.Equal(PrincipalIdOf(Reader), await ResolvePluginOwnerAsync(HttpMethod.Post, Reader));
@@ -227,18 +240,52 @@ public sealed class PrincipalRegistrationBoundaryTests : IAsyncLifetime
         return _client.SendAsync(request);
     }
 
-    /// <summary>Row count of every table in both product databases, keyed by database and table.</summary>
-    private async Task<IReadOnlyDictionary<string, long>> SnapshotAsync()
+    /// <summary>Content digest of every table in both product databases.</summary>
+    private async Task<IReadOnlyDictionary<string, string>> SnapshotAsync()
     {
-        var counts = new SortedDictionary<string, long>(StringComparer.Ordinal);
+        var digests = new SortedDictionary<string, string>(StringComparer.Ordinal);
         foreach (var (label, path) in new[] { ("product", _productDatabase), ("continuity", _continuityDatabase) })
         {
             await using var connection = await OpenReadOnlyAsync(path);
             foreach (var table in await ListTablesAsync(connection))
-                counts[$"{label}:{table}"] = await CountAsync(connection, table);
+                digests[$"{label}:{table}"] = await SnapshotTableAsync(connection, table);
         }
 
-        return counts;
+        return digests;
+    }
+
+    private static async Task<string> SnapshotTableAsync(SqliteConnection connection, string table)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT * FROM \"{table.Replace("\"", "\"\"")}\" ORDER BY rowid;";
+        await using var reader = await command.ExecuteReaderAsync();
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        long rows = 0;
+        while (await reader.ReadAsync())
+        {
+            rows++;
+            for (var column = 0; column < reader.FieldCount; column++)
+            {
+                var value = reader.GetValue(column);
+                AppendFramed(hash, Encoding.UTF8.GetBytes(value.GetType().FullName ?? string.Empty));
+                AppendFramed(
+                    hash,
+                    value switch
+                    {
+                        DBNull => [],
+                        byte[] bytes => bytes,
+                        _ => Encoding.UTF8.GetBytes(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty),
+                    });
+            }
+        }
+
+        return $"{rows}:{Convert.ToHexString(hash.GetHashAndReset())}";
+    }
+
+    private static void AppendFramed(IncrementalHash hash, byte[] value)
+    {
+        hash.AppendData(BitConverter.GetBytes(value.Length));
+        hash.AppendData(value);
     }
 
     private static async Task<long> CountAsync(string databasePath, string table)
