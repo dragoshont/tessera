@@ -334,7 +334,12 @@ internal static class ContinuityEndpoints
             user.Subject,
             user.PreferredUsername,
             DateTimeOffset.UtcNow);
-        await principals.AddAsync(principal, cancellationToken).ConfigureAwait(false);
+        await PrincipalRegistration.RegisterForMutationAsync(
+                context,
+                principals,
+                principal,
+                cancellationToken)
+            .ConfigureAwait(false);
         return new ContinuityBoundary(service, principal.PrincipalId);
     }
 

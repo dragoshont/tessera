@@ -27,6 +27,14 @@ Chat / Scheduler -> ExecutionCoordinator -> ContextBuilder -> ModelAdapter
 - Core owns provider-neutral records, validation, coordinator policy, and ports.
 - SQLite owns additive schema/repositories/leases, not credentials.
 - Broker owns authenticated `/api/v1`, SSE, composition, and hosted scheduler lifecycle.
+- Product-surface authentication boundaries resolve the caller on every request but register
+    the principal row only for unsafe (state-changing) methods. `GET`, `HEAD`, `OPTIONS`, and
+    `TRACE` are safe per RFC 9110 §9.2.1 and change no product state, so an authenticated
+    product read persists nothing; the owner foreign key is established by the mutation that
+    needs it. OAuth redirect callbacks are the explicit exception: they complete an
+    authorization action initiated earlier by the user. Registration is idempotent and lives
+    in exactly one helper, so authentication, authorization, error ordering, fail-closed
+    behavior, and audit semantics are unaffected.
 - Providers own constrained HTTP transport. A route is fixed by trusted manifest; model/user output cannot select a URL.
 - Credential stores own secret values. Product tables contain opaque references only.
 - Plugins declare schemas and known executor kinds; they never receive global database or raw custody access.
@@ -35,6 +43,15 @@ Chat / Scheduler -> ExecutionCoordinator -> ContextBuilder -> ModelAdapter
     command/workspace contract, Broker owns orchestration, and an executor adapter
     owns Kubernetes API mechanics. The executor never receives client-selected
     paths, images, executables, namespaces, mounts, or egress policy.
+
+### Read-boundary verification and rollback
+
+Verify the product read contract with
+`dotnet test tests/Tessera.Broker.Tests/Tessera.Broker.Tests.csproj -c Release`
+and its structural fence with
+`dotnet test tests/Tessera.Architecture.Tests/Tessera.Architecture.Tests.csproj -c Release`.
+Rollback is a git revert of the read-boundary change. It has no schema migration,
+backfill, or destructive data step; existing principal rows remain valid.
 
 ## Data And Concurrency
 

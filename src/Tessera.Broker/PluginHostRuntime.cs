@@ -21,7 +21,9 @@ internal sealed class BrokerPluginRequestIdentity(
     {
         var user = await PortalEndpoints.ResolveEndUserAsync(context, validator, config).ConfigureAwait(false);
         if (user?.CanonicalPrincipalId is null || string.IsNullOrWhiteSpace(user.TenantId)) return null;
-        await store.AddAsync(
+        await PrincipalRegistration.RegisterForMutationAsync(
+            context,
+            store,
             PrincipalRef.Create(
                 user.Issuer,
                 user.TenantId,

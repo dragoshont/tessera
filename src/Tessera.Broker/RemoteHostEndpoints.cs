@@ -565,7 +565,8 @@ public static class RemoteHostEndpoints
         if (store is null) return new(null, null, Problem(503, "product_storage_unavailable"));
         var principal = PrincipalRef.Create(user.Issuer, user.TenantId, user.Subject,
             user.PreferredUsername, DateTimeOffset.UtcNow);
-        await store.AddAsync(principal, token).ConfigureAwait(false);
+        await PrincipalRegistration.RegisterForMutationAsync(context, store, principal, token)
+            .ConfigureAwait(false);
         return new(store, principal.PrincipalId, null);
     }
 
