@@ -28,6 +28,16 @@ public sealed class PrincipalRegistrationBoundaryFenceTests
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(5));
 
+    /// <summary>
+    /// The only other broker <c>AddAsync</c> overload is an evidence write. Require the
+    /// invocation receiver itself to be an explicit <see cref="Tessera.Core.Product.IEvidenceRepository"/>
+    /// cast; mentioning that type elsewhere in a statement cannot mask another receiver.
+    /// </summary>
+    private static readonly Regex EvidenceAddCall = new(
+        @"\(\(IEvidenceRepository\)\s*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*(?<add>\.AddAsync\s*\()",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(5));
+
     [Fact]
     public void Principal_registration_exists_only_in_the_mutation_registration_helper()
     {
@@ -71,14 +81,25 @@ public sealed class PrincipalRegistrationBoundaryFenceTests
         Assert.Contains("PrincipalRegistration.RegisterForMutationAsync", source, StringComparison.Ordinal);
     }
 
-    private static IEnumerable<int> UnexpectedAddCalls(string file)
+    [Fact]
+    public void An_evidence_type_elsewhere_cannot_mask_a_principal_repository_receiver()
     {
-        var source = File.ReadAllText(file);
+        const string source =
+            "var evidence = (IEvidenceRepository)store; await principals.AddAsync(caller, token);";
+        Assert.Single(UnexpectedAddCallsInSource(source));
+    }
+
+    private static IEnumerable<int> UnexpectedAddCalls(string file)
+        => UnexpectedAddCallsInSource(File.ReadAllText(file));
+
+    private static IEnumerable<int> UnexpectedAddCallsInSource(string source)
+    {
+        var allowed = EvidenceAddCall.Matches(source)
+            .Select(match => match.Groups["add"].Index)
+            .ToHashSet();
         foreach (Match match in AnyAddCall.Matches(source))
         {
-            var statementStart = source.LastIndexOfAny([';', '{', '}'], Math.Max(0, match.Index - 1));
-            var prefix = source[(statementStart + 1)..match.Index];
-            if (!prefix.Contains("IEvidenceRepository", StringComparison.Ordinal))
+            if (!allowed.Contains(match.Index))
                 yield return source.AsSpan(0, match.Index).Count('\n') + 1;
         }
     }
