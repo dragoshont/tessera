@@ -22,13 +22,9 @@ public sealed class PrincipalRegistrationBoundaryFenceTests
     /// <summary>The single helper allowed to materialize a principal row.</summary>
     private const string RegistrationHelper = "src/Tessera.Broker/PrincipalRegistration.cs";
 
-    /// <summary>
-    /// Matches a principal registration call: <c>AddAsync(principal, ...)</c> or
-    /// <c>AddAsync(PrincipalRef.Create(...), ...)</c>. Repository/interface declarations
-    /// (<c>AddAsync(PrincipalRef principal, ...)</c>) are deliberately not matched.
-    /// </summary>
-    private static readonly Regex PrincipalAdd = new(
-        @"AddAsync\s*\(\s*(?:principal\b|PrincipalRef\s*\.\s*Create)",
+    /// <summary>Matches store <c>AddAsync</c> calls, independent of receiver/variable names.</summary>
+    private static readonly Regex AnyAddCall = new(
+        @"\.AddAsync\s*\(",
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(5));
 
@@ -36,16 +32,16 @@ public sealed class PrincipalRegistrationBoundaryFenceTests
     public void Principal_registration_exists_only_in_the_mutation_registration_helper()
     {
         var offenders = EnumerateBrokerSources()
-            .Where(file => PrincipalAdd.IsMatch(File.ReadAllText(file)))
-            .Select(Relative)
-            .Where(path => path != RegistrationHelper)
+            .Where(file => Relative(file) != RegistrationHelper)
+            .SelectMany(file => UnexpectedAddCalls(file)
+                .Select(line => $"{Relative(file)}:{line}"))
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
 
         Assert.True(
             offenders.Length == 0,
-            "Principal registration must go through PrincipalRegistration.RegisterForMutationAsync "
-                + "so a safe (GET/HEAD/OPTIONS/TRACE) request never writes. Offending files: "
+            "Broker AddAsync calls must be either the one principal registration helper or "
+                + "an explicit IEvidenceRepository write. Offending calls: "
                 + string.Join(", ", offenders));
     }
 
@@ -53,7 +49,7 @@ public sealed class PrincipalRegistrationBoundaryFenceTests
     public void The_registration_helper_gates_on_safe_methods_and_owns_the_only_add()
     {
         var source = File.ReadAllText(Path.Combine(Root, RegistrationHelper.Replace('/', Path.DirectorySeparatorChar)));
-        Assert.Equal(1, PrincipalAdd.Count(source));
+        Assert.Equal(1, AnyAddCall.Count(source));
         foreach (var safeMethod in new[] { "IsGet", "IsHead", "IsOptions", "IsTrace" })
             Assert.Contains(safeMethod, source, StringComparison.Ordinal);
         Assert.Contains("IsSafeRequest(context)", source, StringComparison.Ordinal);
@@ -73,7 +69,18 @@ public sealed class PrincipalRegistrationBoundaryFenceTests
     {
         var source = File.ReadAllText(Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
         Assert.Contains("PrincipalRegistration.RegisterForMutationAsync", source, StringComparison.Ordinal);
-        Assert.False(PrincipalAdd.IsMatch(source), $"{relativePath} registers a principal directly.");
+    }
+
+    private static IEnumerable<int> UnexpectedAddCalls(string file)
+    {
+        var source = File.ReadAllText(file);
+        foreach (Match match in AnyAddCall.Matches(source))
+        {
+            var statementStart = source.LastIndexOfAny([';', '{', '}'], Math.Max(0, match.Index - 1));
+            var prefix = source[(statementStart + 1)..match.Index];
+            if (!prefix.Contains("IEvidenceRepository", StringComparison.Ordinal))
+                yield return source.AsSpan(0, match.Index).Count('\n') + 1;
+        }
     }
 
     private static IEnumerable<string> EnumerateBrokerSources()
