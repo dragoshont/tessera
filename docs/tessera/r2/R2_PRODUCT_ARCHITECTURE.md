@@ -44,6 +44,15 @@ Chat / Scheduler -> ExecutionCoordinator -> ContextBuilder -> ModelAdapter
     owns Kubernetes API mechanics. The executor never receives client-selected
     paths, images, executables, namespaces, mounts, or egress policy.
 
+### Read-boundary verification and rollback
+
+Verify the product read contract with
+`dotnet test tests/Tessera.Broker.Tests/Tessera.Broker.Tests.csproj -c Release`
+and its structural fence with
+`dotnet test tests/Tessera.Architecture.Tests/Tessera.Architecture.Tests.csproj -c Release`.
+Rollback is a git revert of the read-boundary change. It has no schema migration,
+backfill, or destructive data step; existing principal rows remain valid.
+
 ## Data And Concurrency
 
 Ordered migrations v5-v7 expand v1-v4 with registry, conversation/execution, and Job tables as specified by `R2_DATA_MODEL.md`. Every aggregate is owner-scoped and optimistic-versioned. Creation receipts bind owner plus idempotency key and request hash. Job runs are unique by `(owner, job, scheduledFor)`; leases carry expiry and fencing generation. Rollback drains dispatch and pauses scheduling before using an old binary; no destructive down migration runs.
