@@ -339,7 +339,8 @@ public static class RealtimeVoiceEndpoints
         var user = await PortalEndpoints.ResolveEndUserAsync(context, validator, config).ConfigureAwait(false);
         if (user?.CanonicalPrincipalId is null || string.IsNullOrWhiteSpace(user.TenantId)) return new(null, Problem(401, "unauthenticated"));
         var principal = PrincipalRef.Create(user.Issuer, user.TenantId, user.Subject, user.PreferredUsername, DateTimeOffset.UtcNow);
-        await store.AddAsync(principal, token).ConfigureAwait(false);
+        await PrincipalRegistration.RegisterForMutationAsync(context, store, principal, token)
+            .ConfigureAwait(false);
         return new(principal.PrincipalId, null);
     }
 

@@ -148,7 +148,9 @@ internal static class IntegrationCatalogEndpoints
                 Problem(
                     StatusCodes.Status503ServiceUnavailable,
                     "product_storage_unavailable"));
-        await store.AddAsync(
+        await PrincipalRegistration.RegisterForMutationAsync(
+                context,
+                store,
                 PrincipalRef.Create(
                     user.Issuer,
                     user.TenantId,

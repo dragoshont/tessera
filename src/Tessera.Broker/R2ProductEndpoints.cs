@@ -4896,7 +4896,7 @@ internal static class R2ProductEndpoints
         if (!TryCursor(context, principal.PrincipalId, out var offset))
             return new(Error: Problem(400, "invalid_cursor"));
         context.Items["r2.cursor.offset"] = offset;
-        await store.AddAsync(principal, token);
+        await PrincipalRegistration.RegisterForMutationAsync(context, store, principal, token);
         return new(store, principal.PrincipalId);
     }
 
