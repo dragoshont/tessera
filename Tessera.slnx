@@ -1,4 +1,18 @@
 <Solution>
+  <Folder Name="/.architrave/" />
+  <Folder Name="/.architrave/worktrees/" />
+  <Folder Name="/.architrave/worktrees/hermes-tessera3-20260823/" />
+  <Folder Name="/.architrave/worktrees/hermes-tessera3-20260823/tessera-worktree/" />
+  <Folder Name="/.architrave/worktrees/hermes-tessera3-20260823/tessera-worktree/src/">
+    <Project Path=".architrave/worktrees/hermes-tessera3-20260823/tessera-worktree/src/Tessera.Core/Tessera.Core.csproj" />
+    <Project Path=".architrave/worktrees/hermes-tessera3-20260823/tessera-worktree/src/Tessera.Mcp.Client/Tessera.Mcp.Client.csproj" />
+    <Project Path=".architrave/worktrees/hermes-tessera3-20260823/tessera-worktree/src/Tessera.Plugin.Abstractions/Tessera.Plugin.Abstractions.csproj" />
+    <Project Path=".architrave/worktrees/hermes-tessera3-20260823/tessera-worktree/src/Tessera.Plugins.OneDrive/Tessera.Plugins.OneDrive.csproj" />
+    <Project Path=".architrave/worktrees/hermes-tessera3-20260823/tessera-worktree/src/Tessera.Providers/Tessera.Providers.csproj" />
+  </Folder>
+  <Folder Name="/.architrave/worktrees/hermes-tessera3-20260823/tessera-worktree/tests/">
+    <Project Path=".architrave/worktrees/hermes-tessera3-20260823/tessera-worktree/tests/Tessera.Plugins.OneDrive.Tests/Tessera.Plugins.OneDrive.Tests.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Tessera.Broker/Tessera.Broker.csproj" />
     <Project Path="src/Tessera.Cli/Tessera.Cli.csproj" />

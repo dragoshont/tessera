@@ -5,16 +5,17 @@ import { mediaDevices, RTCPeerConnection, RTCSessionDescription, type MediaStrea
 
 import type { TesseraApi } from '@/lib/api'
 import { closeMicrophoneCapture, type MicrophoneLease } from '@/hooks/microphone-lease'
-import { boundedRealtimeCaption, classifyRealtimeStartFailure, handoffVoiceToAction } from '@/hooks/realtime-voice-state'
+import { boundedRealtimeCaption, classifyRealtimeStartFailure, handoffVoiceToAction, shouldEndRealtimeForAppState } from '@/hooks/realtime-voice-state'
 
 export type NativeVoiceState = 'UNAVAILABLE' | 'IDLE' | 'REQUESTING_PERMISSION' | 'PERMISSION_DENIED' | 'NEGOTIATING' | 'LISTENING' | 'USER_SPEAKING' | 'ASSISTANT_SPEAKING' | 'TOOL_RUNNING' | 'APPROVAL_REQUIRED' | 'INTERRUPTED' | 'SESSION_EXPIRED' | 'ERROR' | 'ENDING'
 export type NativeVoiceView = { state: NativeVoiceState; muted?: boolean; blockedCode?: string | null; userCaption?: string; assistantCaption?: string; toolName?: string }
 
-export function useNativeRealtimeVoice({ api, conversationId, status, microphoneLease, onTurnSaved, onApprovalRequired }: {
+export function useNativeRealtimeVoice({ api, conversationId, status, microphoneLease, beginForegroundSystemInteraction, onTurnSaved, onApprovalRequired }: {
   api: TesseraApi
   conversationId?: string
   status?: RealtimeVoiceStatus
   microphoneLease: MicrophoneLease
+  beginForegroundSystemInteraction: () => () => void
   onTurnSaved?: () => void
   onApprovalRequired?: (actionId: string) => void
 }) {
@@ -29,6 +30,7 @@ export function useNativeRealtimeVoice({ api, conversationId, status, microphone
   const pendingUser = useRef<{ itemId: string; transcript: string } | null>(null)
   const assistantText = useRef('')
   const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const foregroundSystemInteraction = useRef(false)
   const statusRef = useRef(status)
   const onTurnSavedRef = useRef(onTurnSaved)
   const onApprovalRequiredRef = useRef(onApprovalRequired)
@@ -167,8 +169,12 @@ export function useNativeRealtimeVoice({ api, conversationId, status, microphone
     ended.current = false
     activeConversation.current = conversationId
     setVoice({ state: 'REQUESTING_PERMISSION' })
+    const endForegroundSystemInteraction = beginForegroundSystemInteraction()
+    foregroundSystemInteraction.current = true
     try {
       const localStream = await mediaDevices.getUserMedia({ audio: true, video: false })
+      endForegroundSystemInteraction()
+      foregroundSystemInteraction.current = false
       if (generation.current !== currentGeneration) { localStream.getTracks().forEach((track) => track.stop()); return }
       stream.current = localStream
       const connection = new RTCPeerConnection()
@@ -211,6 +217,9 @@ export function useNativeRealtimeVoice({ api, conversationId, status, microphone
         ended.current = true
         setVoice({ state: 'PERMISSION_DENIED', blockedCode: failure.code })
       } else await fail(failure.code)
+    } finally {
+      foregroundSystemInteraction.current = false
+      endForegroundSystemInteraction()
     }
   }
 
@@ -240,7 +249,7 @@ export function useNativeRealtimeVoice({ api, conversationId, status, microphone
   useEffect(() => {
     const endCurrent = (reason: string) => { void end(reason) }
     const subscription = AppState.addEventListener('change', (next) => {
-      if (next !== 'active' && !ended.current) endCurrent('APP_BACKGROUNDED')
+      if (shouldEndRealtimeForAppState(next, foregroundSystemInteraction.current) && !ended.current) endCurrent('APP_BACKGROUNDED')
     })
     return () => { subscription.remove(); endCurrent('APP_BACKGROUNDED') }
   }, [])

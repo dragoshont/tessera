@@ -9,7 +9,7 @@ import { createHttpClient, GenerationFence, readBoundedJsonResponse, requestOidc
 
 import { TesseraApi } from '@/lib/api'
 import { runtimeConfig } from '@/lib/config'
-import { unlockTransition, type UnlockAttempt } from '@/providers/unlock-state'
+import { hasActiveForegroundSystemInteraction, unlockTransition, type UnlockAttempt } from '@/providers/unlock-state'
 
 type OidcConfig = { authority: string; clientId: string; scope: string }
 type PortalConfig = { authMode: 'dev' | 'oidc' | 'none'; devLoopback: boolean; oidc?: OidcConfig }
@@ -29,6 +29,7 @@ type SessionContextValue = {
   unlock: () => Promise<void>
   reconnect: () => Promise<void>
   setLockEnabled: (enabled: boolean) => Promise<void>
+  beginForegroundSystemInteraction: () => () => void
 }
 
 const SESSION_KEY = 'tessera.session.v1'
@@ -68,7 +69,15 @@ export function SessionProvider({ children }: PropsWithChildren) {
   const sessionFenceRef = useRef(new GenerationFence())
   const lockFenceRef = useRef(new GenerationFence())
   const unlockAttemptRef = useRef<UnlockAttempt | null>(null)
+  const foregroundInteractionsRef = useRef(new Map<number, number>())
+  const nextForegroundInteractionRef = useRef(0)
   const appStateRef = useRef(AppState.currentState)
+
+  const beginForegroundSystemInteraction = useCallback(() => {
+    const id = ++nextForegroundInteractionRef.current
+    foregroundInteractionsRef.current.set(id, Date.now() + 30_000)
+    return () => { foregroundInteractionsRef.current.delete(id) }
+  }, [])
 
   const ensureFreshSession = useCallback(async () => {
     const current = sessionRef.current
@@ -191,6 +200,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
         attempt,
         attempt ? lockFenceRef.current.isCurrent(attempt.generation) : true,
         Date.now(),
+        hasActiveForegroundSystemInteraction(foregroundInteractionsRef.current.values(), Date.now()),
       )
       if (transition === 'COMPLETE') {
         unlockAttemptRef.current = null
@@ -287,7 +297,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
     if (!enabled) setLocked(false)
   }, [])
 
-  return <SessionContext.Provider value={{ status, locked, lockEnabled, principal, descriptor, diagnostics, api: apiRef.current, signIn, signOut, unlock, reconnect, setLockEnabled }}>{children}</SessionContext.Provider>
+  return <SessionContext.Provider value={{ status, locked, lockEnabled, principal, descriptor, diagnostics, api: apiRef.current, signIn, signOut, unlock, reconnect, setLockEnabled, beginForegroundSystemInteraction }}>{children}</SessionContext.Provider>
 }
 
 export function useSession() {

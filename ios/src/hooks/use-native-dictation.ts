@@ -14,10 +14,11 @@ import type { MicrophoneLease } from '@/hooks/microphone-lease'
 
 export type NativeDictationState = DictationState
 
-export function useNativeDictation({ draft, onDraftChange, microphoneLease, disabled = false }: {
+export function useNativeDictation({ draft, onDraftChange, microphoneLease, beginForegroundSystemInteraction, disabled = false }: {
   draft: string
   onDraftChange: (value: string) => void
   microphoneLease: MicrophoneLease
+  beginForegroundSystemInteraction: () => () => void
   disabled?: boolean
 }) {
   const [state, setState] = useState<NativeDictationState>('IDLE')
@@ -42,6 +43,7 @@ export function useNativeDictation({ draft, onDraftChange, microphoneLease, disa
   const start = async () => {
     if (disabled || active.current || !microphoneLease.acquire('dictation')) return
     setState('REQUESTING_PERMISSION')
+    const endForegroundSystemInteraction = beginForegroundSystemInteraction()
     try {
       let permission = await ExpoSpeechRecognitionModule.getPermissionsAsync()
       if (decideDictationPermission(permission) === 'REQUEST') {
@@ -69,6 +71,8 @@ export function useNativeDictation({ draft, onDraftChange, microphoneLease, disa
       active.current = false
       microphoneLease.release('dictation')
       setState('UNAVAILABLE')
+    } finally {
+      endForegroundSystemInteraction()
     }
   }
 

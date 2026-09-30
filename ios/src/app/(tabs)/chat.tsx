@@ -13,7 +13,7 @@ import { useNativeRealtimeVoice, type NativeVoiceView } from '@/hooks/use-native
 
 export default function ChatScreen() {
   const palette = usePalette()
-  const { api } = useSession()
+  const { api, beginForegroundSystemInteraction } = useSession()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [profile, setProfile] = useState<ModelProfile | null>(null)
@@ -38,11 +38,12 @@ export default function ChatScreen() {
     conversationId: conversation?.id,
     status: voiceStatus,
     microphoneLease,
+    beginForegroundSystemInteraction,
     onTurnSaved: () => conversation && void loadMessages(conversation.id),
     onApprovalRequired: (actionId) => router.push(`/action/${actionId}`),
   })
   const voiceCapturing = isRealtimeVoiceCapturing(realtimeVoice.voice.state)
-  const dictation = useNativeDictation({ draft: input, onDraftChange: setInput, microphoneLease, disabled: sending || voiceCapturing })
+  const dictation = useNativeDictation({ draft: input, onDraftChange: setInput, microphoneLease, beginForegroundSystemInteraction, disabled: sending || voiceCapturing })
 
   const loadMessages = async (id: string) => {
     const result = await messageFence.current.runLatest(() => api.messages(id))

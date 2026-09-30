@@ -6,6 +6,7 @@ export function unlockTransition(
   attempt: UnlockAttempt | null,
   generationCurrent: boolean,
   now: number,
+  foregroundSystemInteraction = false,
 ): UnlockTransition {
   if (appState === 'active') {
     return attempt?.authenticatedAt && generationCurrent && now - attempt.authenticatedAt <= 10_000
@@ -13,5 +14,11 @@ export function unlockTransition(
       : 'IGNORE'
   }
   if (appState === 'inactive' && attempt && generationCurrent) return 'IGNORE'
+  if (appState === 'inactive' && foregroundSystemInteraction) return 'IGNORE'
   return 'LOCK'
+}
+
+export function hasActiveForegroundSystemInteraction(expirations: Iterable<number>, now: number): boolean {
+  for (const expiration of expirations) if (expiration >= now) return true
+  return false
 }

@@ -17,6 +17,10 @@ export function classifyRealtimeStartFailure(cause: unknown): RealtimeStartFailu
   return { state: 'ERROR', code: 'realtime_start_failed' }
 }
 
+export function shouldEndRealtimeForAppState(next: string, foregroundSystemInteraction: boolean): boolean {
+  return next !== 'active' && !(next === 'inactive' && foregroundSystemInteraction)
+}
+
 export async function handoffVoiceToAction(endVoice: () => Promise<void>, navigate: () => void): Promise<void> {
   await endVoice()
   navigate()

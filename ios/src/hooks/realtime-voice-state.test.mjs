@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { boundedRealtimeCaption, classifyRealtimeStartFailure, handoffVoiceToAction, MaximumRealtimeCaptionCharacters } from './realtime-voice-state.ts'
+import { boundedRealtimeCaption, classifyRealtimeStartFailure, handoffVoiceToAction, MaximumRealtimeCaptionCharacters, shouldEndRealtimeForAppState } from './realtime-voice-state.ts'
 
 test('maps microphone denial to a bounded permission code', () => {
   assert.deepEqual(classifyRealtimeStartFailure(new Error('Permission denied by AVAudioSession')), {
@@ -22,6 +22,12 @@ test('maps non-error throws to a bounded failure code', () => {
     state: 'ERROR',
     code: 'realtime_start_failed',
   })
+})
+
+test('keeps realtime startup alive during a foreground permission sheet', () => {
+  assert.equal(shouldEndRealtimeForAppState('inactive', true), false)
+  assert.equal(shouldEndRealtimeForAppState('inactive', false), true)
+  assert.equal(shouldEndRealtimeForAppState('background', true), true)
 })
 
 test('ends voice before navigating to Action review', async () => {

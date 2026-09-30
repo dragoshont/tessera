@@ -521,7 +521,8 @@
         "resumeTask": { "$ref": "#/definitions/id" },
         "challengeHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "resolvedBy": { "type": "string", "minLength": 1 },
-        "resolutionRef": { "type": ["string", "null"] }
+        "resolutionRef": { "type": ["string", "null"] },
+        "resumeConsumedAt": { "$ref": "#/definitions/timestamp" }
       }
     },
     "artifact": {

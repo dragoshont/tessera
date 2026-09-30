@@ -995,6 +995,7 @@ class RunStore:
             "web": {"runtime.health", "web.e2e"},
             "electron": {"electron.launch", "electron.health", "electron.screenshot"},
             "ios": {"ios.build", "ios.install", "ios.launch", "ios.screenshot", "ios.blank-screen"},
+            "runtime": {"runtime.health", "runtime.e2e"},
         }.get(surface)
         results = receipt.get("results") or []
         result_names = {item.get("name") for item in results if isinstance(item, dict) and item.get("status") == "pass"}
@@ -1114,7 +1115,8 @@ class RunStore:
             task = find_task(state, task_id)
             if task["status"] != "READY":
                 raise RuntimeFailure("TASK_NOT_READY", f"task {task_id} is {task['status']}")
-            if task["attempts"] >= task["retryPolicy"]["maxAttempts"]:
+            continuation = resumable_checkpoint(state, task_id)
+            if continuation is None and task["attempts"] >= task["retryPolicy"]["maxAttempts"]:
                 raise RuntimeFailure("RETRY_EXHAUSTED", f"task {task_id} exhausted its retry policy")
             if task["mutablePaths"]:
                 active_mutating = [
@@ -1170,7 +1172,10 @@ class RunStore:
                 "acquiredAt": acquired.isoformat(timespec="seconds").replace("+00:00", "Z"),
                 "expiresAt": expires.isoformat(timespec="seconds").replace("+00:00", "Z"),
             }
-            task["attempts"] += 1
+            if continuation is None:
+                task["attempts"] += 1
+            else:
+                continuation["resumeConsumedAt"] = acquired.isoformat(timespec="seconds").replace("+00:00", "Z")
             task["status"] = "RUNNING"
             worker = next((item for item in state["workers"] if item["id"] == worker_id), None)
             if worker is None:
@@ -1195,6 +1200,46 @@ class RunStore:
 
         with FileLock(self.repository / ".architrave" / "resources.lock"):
             return self._transaction(run_id, mutate, event_type="task.started", actor=actor, task_id=task_id)
+
+    def authorize_retry(
+        self,
+        run_id: str,
+        task_id: str,
+        *,
+        reason: str,
+        actor: str = "coordinator",
+    ) -> dict[str, Any]:
+        if not reason.strip():
+            raise RuntimeFailure("INVALID_RETRY_AUTHORIZATION", "retry authorization requires a reason")
+        artifact = retry_reconciliation_artifact(self.load(run_id), task_id)
+        if artifact is None:
+            raise RuntimeFailure(
+                "RETRY_NOT_AUTHORIZABLE",
+                "task retry requires an exhausted READY task with a consumed not-applied reconciliation receipt",
+            )
+        evidence_ref = f"artifact:{artifact['id']}"
+
+        def mutate(state: dict[str, Any]) -> dict[str, Any]:
+            self._assert_repository_baseline(state)
+            task = find_task(state, task_id)
+            current_artifact = retry_reconciliation_artifact(state, task_id)
+            if current_artifact is None or current_artifact["id"] != artifact["id"]:
+                raise RuntimeFailure("RETRY_NOT_AUTHORIZABLE", "retry authorization evidence changed")
+            task["retryPolicy"]["maxAttempts"] += 1
+            return {
+                "taskId": task_id,
+                "reason": reason,
+                "maxAttempts": task["retryPolicy"]["maxAttempts"],
+            }
+
+        return self._transaction(
+            run_id,
+            mutate,
+            event_type="task.retry_authorized",
+            actor=actor,
+            task_id=task_id,
+            evidence_refs=[evidence_ref],
+        )
 
     def _cross_run_mutation_conflicts(self, current_run_id: str, mutable_paths: Sequence[str]) -> list[str]:
         conflicts: list[str] = []
@@ -1659,6 +1704,46 @@ class RunStore:
             run_id,
             mutate,
             event_type="mutation.reconciled",
+            actor=actor,
+            task_id=task_id,
+            evidence_refs=[evidence_ref],
+        )
+
+    def attach_confirmed_mutation_receipt(
+        self,
+        run_id: str,
+        task_id: str,
+        *,
+        evidence_ref: str,
+        actor: str = "coordinator",
+    ) -> dict[str, Any]:
+        def mutate(state: dict[str, Any]) -> dict[str, Any]:
+            task = find_task(state, task_id)
+            side_effect = task.get("sideEffect")
+            if side_effect is None or side_effect.get("state") != "CONFIRMED" or side_effect.get("reconciliation") != evidence_ref:
+                raise RuntimeFailure("RECEIPT_ATTACHMENT_DENIED", "confirmed side effect does not reference this receipt")
+            require_evidence_refs(state, [evidence_ref], allowed={"artifact"})
+            artifact_id = evidence_ref.split(":", 1)[1]
+            artifact = next(item for item in state["artifacts"] if item["id"] == artifact_id)
+            if artifact["producer"] != "mutation" or artifact.get("consumedByTask") not in {None, task_id}:
+                raise RuntimeFailure("EVIDENCE_REPLAY", "mutation receipt cannot be attached to this task")
+            receipt = self._read_json_receipt(artifact["path"], "mutation")
+            if (
+                receipt.get("taskId") != task_id
+                or receipt.get("operation") != side_effect["operation"]
+                or receipt.get("target") != side_effect["target"]
+                or receipt.get("result", {}).get("status") != "pass"
+                or receipt.get("result", {}).get("mismatches") != []
+            ):
+                raise RuntimeFailure("MUTATION_RECEIPT", "receipt does not match the confirmed task side effect")
+            artifact["consumedByTask"] = task_id
+            artifact["attestation"] = self._artifact_attestation(artifact)
+            return {"taskId": task_id, "receipt": evidence_ref}
+
+        return self._transaction(
+            run_id,
+            mutate,
+            event_type="mutation.receipt_attached",
             actor=actor,
             task_id=task_id,
             evidence_refs=[evidence_ref],
@@ -2142,6 +2227,43 @@ def dependencies_completed(state: dict[str, Any], task: dict[str, Any]) -> bool:
     return all(statuses.get(dependency) in {"COMPLETED", "SKIPPED"} for dependency in task["dependencies"])
 
 
+def resumable_checkpoint(state: dict[str, Any], task_id: str) -> dict[str, Any] | None:
+    return next(
+        (
+            checkpoint
+            for checkpoint in reversed(state["externalCheckpoints"])
+            if checkpoint["resumeTask"] == task_id
+            and checkpoint["status"] == "RESOLVED"
+            and checkpoint.get("resumeConsumedAt") is None
+        ),
+        None,
+    )
+
+
+def retry_reconciliation_artifact(state: dict[str, Any], task_id: str) -> dict[str, Any] | None:
+    task = find_task(state, task_id)
+    side_effect = task.get("sideEffect")
+    if (
+        task["status"] != "READY"
+        or task["attempts"] < task["retryPolicy"]["maxAttempts"]
+        or side_effect is None
+        or side_effect["state"] != "NONE"
+        or not side_effect.get("reconciliation")
+    ):
+        return None
+    evidence_type, evidence_id = side_effect["reconciliation"].split(":", 1)
+    if evidence_type != "artifact":
+        return None
+    artifact = next((item for item in state["artifacts"] if item["id"] == evidence_id), None)
+    if (
+        artifact is None
+        or artifact["producer"] != "reconciliation"
+        or artifact.get("consumedByTask") != task_id
+    ):
+        return None
+    return artifact
+
+
 def mutable_scopes_overlap(left: Sequence[str], right: Sequence[str]) -> bool:
     def prefix(pattern: str) -> str:
         wildcard = min(
@@ -2449,6 +2571,11 @@ def build_parser() -> argparse.ArgumentParser:
     task_start.add_argument("--lease-seconds", type=int, default=3600)
     task_start.add_argument("--confirmed", action="store_true")
 
+    task_retry = subparsers.add_parser("task-retry-authorize")
+    task_retry.add_argument("run_id")
+    task_retry.add_argument("task_id")
+    task_retry.add_argument("--reason", required=True)
+
     worker_finish = subparsers.add_parser("worker-finish")
     worker_finish.add_argument("run_id")
     worker_finish.add_argument("task_id")
@@ -2593,6 +2720,14 @@ def cli(argv: Sequence[str] | None = None) -> int:
                     worker_id=args.worker_id,
                     lease_seconds=args.lease_seconds,
                     confirmed=args.confirmed,
+                )
+            )
+        elif command == "task-retry-authorize":
+            output = state_summary(
+                store.authorize_retry(
+                    args.run_id,
+                    args.task_id,
+                    reason=args.reason,
                 )
             )
         elif command == "worker-finish":
